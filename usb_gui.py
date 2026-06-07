@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Simple cross-platform GUI to flash Alpine USB images.
+
+Supports macOS and Linux. Windows support is intentionally conservative: it can
+select an image, but raw flashing is not implemented to avoid unsafe drive use.
+"""
+from __future__ import annotations
+
+import os
+import platform
+import re
+import shutil
+import subprocess
+import threading
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+
+APP_TITLE = "Alpine USB XFCE Installer"
+
+
+def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, text=True, capture_output=True, **kwargs)
+
+
+def list_devices() -> list[tuple[str, str]]:
+    sys = platform.system()
+    devices: list[tuple[str, str]] = []
+    if sys == "Darwin":
+        cp = run(["diskutil", "list", "external", "physical"])
+        current = None
+        for line in cp.stdout.splitlines():
+            m = re.match(r"(/dev/disk\d+) \(external, physical\):", line)
+            if m:
+                current = m.group(1)
+                continue
+            if current and "GUID_partition_scheme" in line or (current and "FDisk_partition_scheme" in line) or (current and "*" in line and "disk" not in line):
+                pass
+        # Better parse all external disks with size from first block line.
+        blocks = cp.stdout.split("/dev/")
+        for block in blocks:
+            if not block.startswith("disk"):
+                continue
+            first = "/dev/" + block.splitlines()[0].split()[0]
+            size = "unknown size"
+            for line in block.splitlines():
+                if "*" in line:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        size = " ".join(parts[-3:-1]) if parts[-1].startswith("disk") else " ".join(parts[-2:])
+                    break
+            devices.append((first, f"{first} ({size})"))
+    elif sys == "Linux":
+        cp = run(["lsblk", "-dpno", "NAME,SIZE,TRAN,TYPE,MODEL"])
+        for line in cp.stdout.splitlines():
+            parts = line.split(None, 4)
+            if len(parts) >= 4 and parts[3] == "disk":
+                name, size, tran = parts[0], parts[1], parts[2]
+                model = parts[4] if len(parts) > 4 else ""
+                if tran in {"usb", "mmc"} or name.startswith("/dev/sd"):
+                    devices.append((name, f"{name} ({size}) {model}".strip()))
+    return devices
+
+
+class App(tk.Tk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title(APP_TITLE)
+        self.geometry("720x430")
+        self.resizable(True, True)
+
+        self.image_var = tk.StringVar(value=str(Path.cwd() / "alpine-usb-xfce.img"))
+        self.device_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Select image and USB device.")
+        self.devices: list[tuple[str, str]] = []
+
+        self._build_ui()
+        self.refresh_devices()
+
+    def _build_ui(self) -> None:
+        pad = {"padx": 10, "pady": 6}
+        ttk.Label(self, text="Alpine USB XFCE Installer", font=("TkDefaultFont", 16, "bold")).pack(anchor="w", padx=10, pady=(10, 2))
+        ttk.Label(self, text="Flash a preconfigured Alpine Linux XFCE image to a USB drive. This erases the target drive.").pack(anchor="w", padx=10)
+
+        frm = ttk.Frame(self)
+        frm.pack(fill="x", **pad)
+
+        ttk.Label(frm, text="Image:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(frm, textvariable=self.image_var).grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(frm, text="Browse", command=self.browse_image).grid(row=0, column=2)
+
+        ttk.Label(frm, text="USB device:").grid(row=1, column=0, sticky="w")
+        self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="readonly")
+        self.combo.grid(row=1, column=1, sticky="ew", padx=6)
+        ttk.Button(frm, text="Refresh", command=self.refresh_devices).grid(row=1, column=2)
+        frm.columnconfigure(1, weight=1)
+
+        warn = ttk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", foreground="red")
+        warn.pack(anchor="w", **pad)
+
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", **pad)
+        self.flash_btn = ttk.Button(btns, text="Flash USB", command=self.confirm_flash)
+        self.flash_btn.pack(side="left")
+        ttk.Button(btns, text="Quit", command=self.destroy).pack(side="right")
+
+        self.progress = ttk.Progressbar(self, mode="indeterminate")
+        self.progress.pack(fill="x", **pad)
+
+        ttk.Label(self, textvariable=self.status_var).pack(anchor="w", **pad)
+        self.log = tk.Text(self, height=10)
+        self.log.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+    def log_line(self, text: str) -> None:
+        self.log.insert("end", text + "\n")
+        self.log.see("end")
+
+    def browse_image(self) -> None:
+        path = filedialog.askopenfilename(title="Select image", filetypes=[("Disk images", "*.img *.raw *.iso"), ("All files", "*")])
+        if path:
+            self.image_var.set(path)
+
+    def refresh_devices(self) -> None:
+        self.devices = list_devices()
+        labels = [label for _, label in self.devices]
+        self.combo["values"] = labels
+        if labels:
+            self.combo.current(0)
+            self.device_var.set(labels[0])
+            self.status_var.set(f"Found {len(labels)} removable device(s).")
+        else:
+            self.device_var.set("")
+            self.status_var.set("No removable USB devices found.")
+
+    def selected_device(self) -> str | None:
+        label = self.device_var.get()
+        for dev, lab in self.devices:
+            if lab == label:
+                return dev
+        return None
+
+    def confirm_flash(self) -> None:
+        image = Path(self.image_var.get())
+        dev = self.selected_device()
+        if not image.exists():
+            messagebox.showerror(APP_TITLE, "Image file not found.")
+            return
+        if not dev:
+            messagebox.showerror(APP_TITLE, "Select USB device.")
+            return
+        if not messagebox.askyesno(APP_TITLE, f"Erase and flash {dev}?\n\nImage: {image}\n\nThis cannot be undone."):
+            return
+        threading.Thread(target=self.flash, args=(str(image), dev), daemon=True).start()
+
+    def flash(self, image: str, dev: str) -> None:
+        self.flash_btn.config(state="disabled")
+        self.progress.start(10)
+        self.log_line(f"Flashing {image} -> {dev}")
+        try:
+            sys = platform.system()
+            if sys == "Darwin":
+                raw = dev.replace("/dev/disk", "/dev/rdisk")
+                self.log_line("Unmounting disk...")
+                subprocess.run(["diskutil", "unmountDisk", dev], check=True)
+                cmd = f"dd if={sh_quote(image)} of={sh_quote(raw)} bs=4M && sync && diskutil eject {sh_quote(dev)}"
+                self.log_line("Requesting administrator permissions...")
+                subprocess.run(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'], check=True)
+            elif sys == "Linux":
+                if os.geteuid() != 0:
+                    sudo = shutil.which("pkexec") or shutil.which("sudo")
+                    if not sudo:
+                        raise RuntimeError("Need root privileges. Install pkexec or run with sudo.")
+                    cmd = [sudo, "dd", f"if={image}", f"of={dev}", "bs=4M", "status=progress", "conv=fsync"]
+                else:
+                    cmd = ["dd", f"if={image}", f"of={dev}", "bs=4M", "status=progress", "conv=fsync"]
+                subprocess.run(["umount", dev + "*"], shell=False, check=False)
+                subprocess.run(cmd, check=True)
+                subprocess.run(["sync"], check=True)
+            else:
+                raise RuntimeError("Windows raw flashing not implemented. Use Rufus/balenaEtcher with generated image.")
+            self.log_line("Done. USB flashed and safe to remove.")
+            self.status_var.set("Done.")
+        except Exception as exc:
+            self.log_line(f"ERROR: {exc}")
+            self.status_var.set("Failed.")
+        finally:
+            self.progress.stop()
+            self.flash_btn.config(state="normal")
+
+
+def sh_quote(s: str) -> str:
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+if __name__ == "__main__":
+    App().mainloop()

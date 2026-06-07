@@ -12,3 +12,7 @@ aports/
 
 # Temporary EFI build outputs
 efi-fallback/BOOTX64.EFI
+
+# Python
+__pycache__/
+*.pyc
