@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -166,9 +167,14 @@ class App(tk.Tk):
             sys = platform.system()
             if sys == "Darwin":
                 raw = dev.replace("/dev/disk", "/dev/rdisk")
+                # macOS TCC can block root/osascript from reading files under
+                # Documents/Desktop. Copy image to /tmp first; admin dd can read it.
+                tmp_image = os.path.join(tempfile.gettempdir(), "alpine-usb-xfce.img")
+                self.log_line(f"Copying image to temporary path: {tmp_image}")
+                shutil.copyfile(image, tmp_image)
                 self.log_line("Unmounting disk...")
                 subprocess.run(["diskutil", "unmountDisk", dev], check=True)
-                cmd = f"dd if={sh_quote(image)} of={sh_quote(raw)} bs=4M && sync && diskutil eject {sh_quote(dev)}"
+                cmd = f"dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4M && sync && diskutil eject {sh_quote(dev)}"
                 self.log_line("Requesting administrator permissions...")
                 subprocess.run(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'], check=True)
             elif sys == "Linux":
