@@ -5,6 +5,7 @@ import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
@@ -356,8 +357,8 @@ class Main(QWidget):
         self.log.append(line)
         if self.log.document().blockCount() > 300:
             cursor = self.log.textCursor()
-            cursor.movePosition(cursor.Start)
-            cursor.select(cursor.BlockUnderCursor)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
             cursor.removeSelectedText()
             cursor.deleteChar()
 
