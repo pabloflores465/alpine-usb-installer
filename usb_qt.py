@@ -266,12 +266,12 @@ class Main(QWidget):
         self.resize(760, 460)
         self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
         self.image.setReadOnly(True)
-        self.image.setStyleSheet("background:#f3f4f6;color:#374151;")
+        self.image.setStyleSheet("background:#111827;color:#ffffff;border:1px solid #374151;padding:4px;")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
         self.selected = QLabel("Selected USB: none")
         self.selected.setWordWrap(True)
-        self.selected.setStyleSheet("background:#ecfdf5;color:#065f46;font-weight:bold;padding:10px;border:1px solid #10b981;")
+        self.selected.setStyleSheet("background:#064e3b;color:#ffffff;font-weight:bold;padding:10px;border:1px solid #10b981;")
         self.status = QLabel("Select image and USB device.")
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMaximumHeight(130)
@@ -281,7 +281,17 @@ class Main(QWidget):
     def build(self):
         layout = QVBoxLayout(self)
         title = QLabel("Alpine USB XFCE Installer")
-        title.setStyleSheet("font-size:22px;font-weight:bold;")
+        self.setStyleSheet("""
+            QWidget { background:#111827; color:#ffffff; }
+            QLabel { color:#ffffff; }
+            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; padding:4px; }
+            QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; }
+            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:7px 12px; }
+            QPushButton:hover { background:#1d4ed8; }
+            QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
+            QProgressBar { color:#ffffff; }
+        """)
+        title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;")
         layout.addWidget(title)
         layout.addWidget(QLabel("Flash a preconfigured Alpine Linux XFCE image to a USB drive."))
         row = QHBoxLayout(); row.addWidget(QLabel("Image size:")); row.addWidget(self.image_size)
@@ -293,7 +303,7 @@ class Main(QWidget):
         self.device.textChanged.connect(self.update_selected)
         layout.addWidget(self.selected)
         hint = QLabel("Tip: the USB name/volume appears after the size, e.g. /dev/disk7 (62.0 GB) DataTraveler — MYUSB")
-        hint.setStyleSheet("color:#6b7280;")
+        hint.setStyleSheet("color:#d1d5db;")
         layout.addWidget(hint)
         warn = QLabel("WARNING: Flashing will permanently erase selected USB device.")
         warn.setStyleSheet("color:#b91c1c;font-weight:bold;")
