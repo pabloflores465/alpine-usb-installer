@@ -265,6 +265,8 @@ class Main(QWidget):
         self.setWindowTitle(APP_TITLE)
         self.resize(760, 460)
         self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
+        self.image.setReadOnly(True)
+        self.image.setStyleSheet("background:#f3f4f6;color:#374151;")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
         self.selected = QLabel("Selected USB: none")
