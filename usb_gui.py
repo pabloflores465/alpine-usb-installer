@@ -114,11 +114,28 @@ class App(tk.Tk):
         tk.Button(disk_btns, text="Refresh", command=self.refresh_devices).pack(side="left")
         frm.columnconfigure(1, weight=1)
 
-        selected_panel = tk.Frame(self, bg="#ecfdf5", highlightthickness=1, highlightbackground="#10b981")
+        selected_panel = tk.Frame(self, bg="#ffffff", highlightthickness=2, highlightbackground="#10b981")
         selected_panel.pack(fill="x", padx=14, pady=(0, 8))
-        tk.Label(selected_panel, text="Selected USB device", bg="#ecfdf5", fg="#064e3b", font=("Helvetica", 11, "bold")).pack(anchor="w", padx=10, pady=(8, 0))
-        tk.Label(selected_panel, textvariable=self.selected_usb_var, bg="#ecfdf5", fg="#065f46", font=("Helvetica", 13, "bold"), wraplength=760, justify="left").pack(anchor="w", padx=10, pady=(2, 8))
-        tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
+        # Use Entry, not Label: old macOS Tk dark-mode can hide Label text.
+        tk.Entry(
+            selected_panel,
+            textvariable=self.selected_usb_var,
+            readonlybackground="#ffffff",
+            bg="#ffffff",
+            fg="#065f46",
+            insertbackground="#065f46",
+            font=("Helvetica", 14, "bold"),
+            state="readonly",
+        ).pack(fill="x", padx=10, pady=10)
+        tk.Entry(
+            self,
+            readonlybackground="#ffffff",
+            bg="#ffffff",
+            fg="#b91c1c",
+            font=("Helvetica", 12, "bold"),
+            state="readonly",
+            textvariable=tk.StringVar(value="WARNING: Flashing will permanently erase the selected USB device."),
+        ).pack(fill="x", padx=14, pady=(0, 8))
 
         btns = tk.Frame(self, bg=bg)
         btns.pack(fill="x", padx=14, pady=8)
