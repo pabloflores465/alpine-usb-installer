@@ -36,6 +36,20 @@ Construcción recomendada en Linux o Docker Desktop con soporte NBD.
 
 En macOS, Docker Desktop puede funcionar mejor que Colima para este flujo porque la herramienta usa `qemu-nbd`.
 
+## GUI rápida para grabar USB
+
+El repo incluye una utilidad gráfica simple, cross-platform, para seleccionar la imagen y grabarla a la USB.
+
+```sh
+python3 usb_gui.py
+```
+
+Soporte:
+
+- macOS: usa `diskutil`, `dd` y pide permisos de administrador.
+- Linux: usa `lsblk`, `dd` y `sudo`/`pkexec` si hace falta.
+- Windows: por seguridad no hace raw flashing todavía; usa Rufus/balenaEtcher con la imagen generada.
+
 ## Construir imagen
 
 ```sh
