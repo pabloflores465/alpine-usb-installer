@@ -309,7 +309,7 @@ class Main(QWidget):
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
         self.image_size.hide()
-        img_grid.addWidget(QLabel("Path:"), 0, 0)
+        img_grid.addWidget(QLabel("Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
         img_grid.addWidget(build, 0, 2)
         layout.addLayout(img_grid)
