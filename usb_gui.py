@@ -290,9 +290,11 @@ class App(tk.Tk):
                         "or grant Terminal/Python Full Disk Access, then retry. "
                         f"Details: {exc}"
                     )
-                self.log_line("Opening Terminal flasher...")
-                # Do the heavy write in Terminal, not inside this Python process.
-                # This avoids Python/Tk memory growth and lets macOS show dd output.
+                self.log_line("Starting backend flasher in this same terminal...")
+                # Do heavy write outside Tk. Inherit this process terminal
+                # (no stdout/stderr capture), so Python does not buffer output
+                # and memory stays flat. You will see sudo/dd progress in the
+                # terminal that launched ./run_gui.sh.
                 flash_script = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.sh")
                 with open(flash_script, "w") as fh:
                     fh.write("#!/bin/sh\nset -e\n")
@@ -304,17 +306,11 @@ class App(tk.Tk):
                     fh.write("wait $pid\n")
                     fh.write("sync\n")
                     fh.write(f"diskutil eject {sh_quote(dev)}\n")
-                    fh.write("echo 'DONE. You can close this Terminal.'\n")
+                    fh.write("echo 'DONE. USB ejected.'\n")
                 os.chmod(flash_script, 0o755)
-                subprocess.run([
-                    "osascript",
-                    "-e",
-                    f'tell application "Terminal" to do script {sh_quote(flash_script)!r}',
-                    "-e",
-                    'tell application "Terminal" to activate',
-                ], check=True)
-                self.log_line("Flashing is running in Terminal. This GUI can be closed.")
-                self.status_var.set("Flashing in Terminal...")
+                subprocess.Popen(["/bin/sh", flash_script])
+                self.log_line("Backend flasher running in the terminal that launched this GUI.")
+                self.status_var.set("Flashing in terminal backend...")
             elif sys == "Linux":
                 if os.geteuid() != 0:
                     sudo = shutil.which("pkexec") or shutil.which("sudo")
