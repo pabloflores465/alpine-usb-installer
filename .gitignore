@@ -16,3 +16,6 @@ efi-fallback/BOOTX64.EFI
 # Python
 __pycache__/
 *.pyc
+
+# Virtualenv
+.venv/
