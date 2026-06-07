@@ -274,7 +274,8 @@ class Main(QWidget):
         self.selected.setStyleSheet("background:#064e3b;color:#ffffff;font-weight:bold;padding:10px;border:1px solid #10b981;")
         self.status = QLabel("Select image and USB device.")
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        self.log.setMaximumHeight(130)
+        self.log.setMinimumHeight(220)
+        self.log.setMaximumHeight(320)
         self.build()
         self.refresh()
 
