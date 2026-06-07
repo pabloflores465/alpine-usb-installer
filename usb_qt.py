@@ -44,12 +44,24 @@ def list_devices():
                     volumes = []
                     for part in disk.get("Partitions", []) or []:
                         vol = part.get("VolumeName")
+                        part_id = part.get("DeviceIdentifier")
+                        if not vol and part_id:
+                            part_info = run(["diskutil", "info", "-plist", f"/dev/{part_id}"])
+                            try:
+                                part_meta = plistlib.loads(part_info.stdout.encode())
+                                vol = (
+                                    part_meta.get("VolumeName")
+                                    or part_meta.get("MediaName")
+                                    or part_meta.get("MountPoint", "").rstrip("/").split("/")[-1]
+                                )
+                            except Exception:
+                                pass
                         content = part.get("Content")
-                        if vol:
+                        if vol and vol not in volumes:
                             volumes.append(vol)
-                        elif content and content not in {"EFI", "Apple_partition_scheme"}:
+                        elif content and content not in {"EFI", "Apple_partition_scheme"} and content not in volumes:
                             volumes.append(content)
-                    vol_text = f" — {', '.join(volumes)}" if volumes else ""
+                    vol_text = f" — Volume: {', '.join(volumes)}" if volumes else ""
                     label = f"{dev} ({size}) {media}{vol_text}"
                 except Exception:
                     pass
