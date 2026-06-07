@@ -134,9 +134,10 @@ class BuildWorker(QThread):
     log = Signal(str)
     done = Signal(bool, str)
 
-    def __init__(self, image_size: str):
+    def __init__(self, image_size: str, output_path: str):
         super().__init__()
         self.image_size = image_size
+        self.output_path = output_path
 
     def run(self):
         try:
@@ -163,7 +164,14 @@ class BuildWorker(QThread):
             code = proc.wait()
             if code != 0:
                 raise RuntimeError(f"Build failed with exit code {code}")
-            self.done.emit(True, "Image build complete: alpine-usb-xfce.img")
+            built = str(Path.cwd() / "alpine-usb-xfce.img")
+            final = str(Path(self.output_path).expanduser())
+            if final != built:
+                Path(final).parent.mkdir(parents=True, exist_ok=True)
+                if os.path.exists(final):
+                    os.remove(final)
+                shutil.move(built, final)
+            self.done.emit(True, f"Image build complete: {final}")
         except Exception as e:
             self.done.emit(False, str(e))
 
@@ -305,13 +313,17 @@ class Main(QWidget):
         img_grid.setColumnStretch(1, 1)
         img_grid.setHorizontalSpacing(12)
         img_grid.setVerticalSpacing(10)
+        choose_output = QPushButton("Select path")
+        choose_output.clicked.connect(self.choose_output_path)
+        choose_output.setFixedWidth(120)
         build = QPushButton("Build image")
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
         self.image_size.hide()
         img_grid.addWidget(QLabel("Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
-        img_grid.addWidget(build, 0, 2)
+        img_grid.addWidget(choose_output, 0, 2)
+        img_grid.addWidget(build, 0, 3)
         layout.addLayout(img_grid)
 
         usb_title = QLabel("USB target")
@@ -347,6 +359,18 @@ class Main(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.img *.raw *.iso);;All files (*)")
         if path: self.image.setText(path)
 
+    def choose_output_path(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select output image path",
+            self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img"),
+            "Disk images (*.img);;All files (*)",
+        )
+        if path:
+            if not path.endswith(".img"):
+                path += ".img"
+            self.image.setText(path)
+
     def refresh(self):
         devs = list_devices()
         if devs and not self.device.text().strip():
@@ -365,14 +389,15 @@ class Main(QWidget):
 
     def build_image(self):
         size = self.image_size.text().strip() or "16G"
+        output_path = self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img")
         if platform.system() == "Darwin" and not shutil.which("docker"):
             QMessageBox.critical(self, APP_TITLE, "Docker not found. Install/start Docker Desktop.")
             return
-        if not QMessageBox.question(self, APP_TITLE, f"Build Alpine image with size {size}?") == QMessageBox.Yes:
+        if not QMessageBox.question(self, APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}") == QMessageBox.Yes:
             return
         self.progress.show()
         self.status.setText("Building image...")
-        self.builder = BuildWorker(size)
+        self.builder = BuildWorker(size, output_path)
         self.builder.log.connect(self.append_log)
         self.builder.done.connect(self.build_done)
         self.builder.start()
@@ -382,7 +407,9 @@ class Main(QWidget):
         self.status.setText(msg)
         self.log.append(msg)
         if ok:
-            self.image.setText(str(Path.cwd() / "alpine-usb-xfce.img"))
+            m = re.search(r"Image build complete: (.+)$", msg)
+            if m:
+                self.image.setText(m.group(1))
         (QMessageBox.information if ok else QMessageBox.critical)(self, APP_TITLE, msg)
 
     def flash(self):
