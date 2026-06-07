@@ -96,12 +96,13 @@ class App(tk.Tk):
 
         tk.Label(frm, text="Image:", bg=panel, fg=fg).grid(row=0, column=0, sticky="w", **pad)
         tk.Entry(frm, textvariable=self.image_var, bg="white", fg="black", insertbackground="black").grid(row=0, column=1, sticky="ew", padx=6, pady=7)
-        tk.Button(frm, text="Browse", command=self.browse_image).grid(row=0, column=2, **pad)
+        tk.Button(frm, text="Browse image", command=self.browse_image).grid(row=0, column=2, **pad)
 
         tk.Label(frm, text="USB device:", bg=panel, fg=fg).grid(row=1, column=0, sticky="w", **pad)
-        self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="readonly")
+        # Editable on purpose: auto-detect can fail on some systems, user can type /dev/disk7 or /dev/sdb.
+        self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="normal")
         self.combo.grid(row=1, column=1, sticky="ew", padx=6, pady=7)
-        tk.Button(frm, text="Refresh", command=self.refresh_devices).grid(row=1, column=2, **pad)
+        tk.Button(frm, text="Refresh disks", command=self.refresh_devices).grid(row=1, column=2, **pad)
         frm.columnconfigure(1, weight=1)
 
         tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
@@ -165,10 +166,13 @@ class App(tk.Tk):
             self.status_var.set("No removable USB devices found.")
 
     def selected_device(self) -> str | None:
-        label = self.device_var.get()
+        label = self.device_var.get().strip()
         for dev, lab in self.devices:
             if lab == label:
                 return dev
+        # Manual entry fallback.
+        if label.startswith("/dev/"):
+            return label.split()[0]
         return None
 
     def confirm_flash(self) -> None:
