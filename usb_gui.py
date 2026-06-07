@@ -127,6 +127,23 @@ class App(tk.Tk):
         if path:
             self.image_var.set(path)
 
+    def _tail_progress(self, log_path: str, last_pos: int, total_size: int, last_percent: int) -> tuple[int, int]:
+        if not os.path.exists(log_path):
+            return last_pos, last_percent
+        with open(log_path, "r", errors="ignore") as fh:
+            fh.seek(last_pos)
+            data = fh.read()
+            last_pos = fh.tell()
+        for line in data.splitlines():
+            self.log_line(line)
+            m = re.search(r"(\d+) bytes", line)
+            if m and total_size:
+                percent = min(100, int(int(m.group(1)) * 100 / total_size))
+                if percent != last_percent:
+                    self.status_var.set(f"Flashing... {percent}%")
+                    last_percent = percent
+        return last_pos, last_percent
+
     def refresh_devices(self) -> None:
         self.devices = list_devices()
         labels = [label for _, label in self.devices]
@@ -174,9 +191,29 @@ class App(tk.Tk):
                 shutil.copyfile(image, tmp_image)
                 self.log_line("Unmounting disk...")
                 subprocess.run(["diskutil", "unmountDisk", dev], check=True)
-                cmd = f"dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4M && sync && diskutil eject {sh_quote(dev)}"
+                log_path = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.log")
+                try:
+                    os.remove(log_path)
+                except FileNotFoundError:
+                    pass
+                size = os.path.getsize(tmp_image)
+                # macOS dd has no status=progress. Send SIGINFO every 2s and
+                # stream dd stderr from a temp log into the GUI.
+                cmd = (
+                    f"/bin/sh -c "
+                    f"{sh_quote('( /bin/dd if=' + sh_quote(tmp_image) + ' of=' + sh_quote(raw) + ' bs=4m 2> ' + sh_quote(log_path) + '; echo __DD_DONE__$? >> ' + sh_quote(log_path) + '; /bin/sync; /usr/sbin/diskutil eject ' + sh_quote(dev) + ' >> ' + sh_quote(log_path) + ' 2>&1 ) & pid=$!; while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null; sleep 2; done; wait $pid')}"
+                )
                 self.log_line("Requesting administrator permissions...")
-                subprocess.run(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'], check=True)
+                proc = subprocess.Popen(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'])
+                last_pos = 0
+                last_percent = -1
+                while proc.poll() is None:
+                    last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
+                    self.after(0, self.update_idletasks)
+                    threading.Event().wait(0.5)
+                last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
+                if proc.returncode:
+                    raise subprocess.CalledProcessError(proc.returncode, proc.args)
             elif sys == "Linux":
                 if os.geteuid() != 0:
                     sudo = shutil.which("pkexec") or shutil.which("sudo")
