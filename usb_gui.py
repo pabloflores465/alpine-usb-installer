@@ -300,10 +300,15 @@ class App(tk.Tk):
                     fh.write("#!/bin/sh\nset -e\n")
                     fh.write(f"diskutil unmountDisk {sh_quote(dev)}\n")
                     fh.write(f"echo 'Flashing {tmp_image} -> {raw}'\n")
-                    fh.write(f"sudo /bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m &\n")
-                    fh.write("pid=$!\n")
-                    fh.write("while kill -0 $pid 2>/dev/null; do sudo kill -INFO $pid 2>/dev/null || true; sleep 2; done\n")
-                    fh.write("wait $pid\n")
+                    # Run dd and progress loop inside one sudo shell. On macOS,
+                    # SIGINFO makes dd print current byte counts.
+                    inner = (
+                        f"/bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m & "
+                        "pid=$!; "
+                        "while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null || true; sleep 2; done; "
+                        "wait $pid"
+                    )
+                    fh.write(f"sudo /bin/sh -c {sh_quote(inner)}\n")
                     fh.write("sync\n")
                     fh.write(f"diskutil eject {sh_quote(dev)}\n")
                     fh.write("echo 'DONE. USB ejected.'\n")
