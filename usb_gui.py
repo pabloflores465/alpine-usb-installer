@@ -77,6 +77,7 @@ class App(tk.Tk):
         self.image_var = tk.StringVar(value=str(Path.cwd() / "alpine-usb-xfce.img"))
         self.device_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Select image and USB device.")
+        self.selected_usb_var = tk.StringVar(value="Selected USB: none")
         self.devices: list[tuple[str, str]] = []
         self.main_thread_id = threading.get_ident()
 
@@ -105,12 +106,14 @@ class App(tk.Tk):
         # Editable on purpose: auto-detect can fail on some systems, user can type /dev/disk7 or /dev/sdb.
         self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="normal")
         self.combo.grid(row=1, column=1, sticky="ew", padx=6, pady=7)
+        self.device_var.trace_add("write", lambda *_: self.update_selected_usb_label())
         disk_btns = tk.Frame(frm, bg=panel)
         disk_btns.grid(row=1, column=2, sticky="ew", **pad)
         tk.Button(disk_btns, text="Select USB", command=self.open_device_picker).pack(side="left", padx=(0, 6))
         tk.Button(disk_btns, text="Refresh", command=self.refresh_devices).pack(side="left")
         frm.columnconfigure(1, weight=1)
 
+        tk.Label(self, textvariable=self.selected_usb_var, bg=bg, fg="#065f46", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 4))
         tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
 
         btns = tk.Frame(self, bg=bg)
@@ -141,6 +144,13 @@ class App(tk.Tk):
         path = filedialog.askopenfilename(title="Select image", filetypes=[("Disk images", "*.img *.raw *.iso"), ("All files", "*")])
         if path:
             self.image_var.set(path)
+
+    def update_selected_usb_label(self) -> None:
+        value = self.device_var.get().strip()
+        if value:
+            self.selected_usb_var.set(f"Selected USB: {value}")
+        else:
+            self.selected_usb_var.set("Selected USB: none")
 
     def _tail_progress(self, log_path: str, last_pos: int, total_size: int, last_percent: int) -> tuple[int, int]:
         if not os.path.exists(log_path):
