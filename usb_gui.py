@@ -102,7 +102,10 @@ class App(tk.Tk):
         # Editable on purpose: auto-detect can fail on some systems, user can type /dev/disk7 or /dev/sdb.
         self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="normal")
         self.combo.grid(row=1, column=1, sticky="ew", padx=6, pady=7)
-        tk.Button(frm, text="Refresh disks", command=self.refresh_devices).grid(row=1, column=2, **pad)
+        disk_btns = tk.Frame(frm, bg=panel)
+        disk_btns.grid(row=1, column=2, sticky="ew", **pad)
+        tk.Button(disk_btns, text="Select USB", command=self.open_device_picker).pack(side="left", padx=(0, 6))
+        tk.Button(disk_btns, text="Refresh", command=self.refresh_devices).pack(side="left")
         frm.columnconfigure(1, weight=1)
 
         tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
@@ -158,12 +161,60 @@ class App(tk.Tk):
         labels = [label for _, label in self.devices]
         self.combo["values"] = labels
         if labels:
-            self.combo.current(0)
-            self.device_var.set(labels[0])
+            if not self.device_var.get().strip():
+                self.combo.current(0)
+                self.device_var.set(labels[0])
             self.status_var.set(f"Found {len(labels)} removable device(s).")
         else:
-            self.device_var.set("")
-            self.status_var.set("No removable USB devices found.")
+            self.status_var.set("No removable USB devices found. You can type device manually, e.g. /dev/disk7.")
+
+    def open_device_picker(self) -> None:
+        self.refresh_devices()
+        win = tk.Toplevel(self)
+        win.title("Select USB device")
+        win.geometry("620x360")
+        win.configure(bg="#f3f4f6")
+        win.transient(self)
+        win.grab_set()
+
+        tk.Label(win, text="Select target USB device", font=("Helvetica", 16, "bold"), bg="#f3f4f6", fg="#111827").pack(anchor="w", padx=12, pady=(12, 4))
+        tk.Label(win, text="WARNING: selected device will be erased.", bg="#f3f4f6", fg="#b91c1c").pack(anchor="w", padx=12)
+
+        listbox = tk.Listbox(win, height=10, bg="white", fg="black")
+        listbox.pack(fill="both", expand=True, padx=12, pady=10)
+        for _, label in self.devices:
+            listbox.insert("end", label)
+        if self.devices:
+            listbox.selection_set(0)
+
+        manual = tk.StringVar()
+        row = tk.Frame(win, bg="#f3f4f6")
+        row.pack(fill="x", padx=12, pady=(0, 10))
+        tk.Label(row, text="Manual:", bg="#f3f4f6", fg="#111827").pack(side="left")
+        tk.Entry(row, textvariable=manual, bg="white", fg="black").pack(side="left", fill="x", expand=True, padx=8)
+        manual.set("/dev/disk7" if platform.system() == "Darwin" else "/dev/sdX")
+
+        def choose() -> None:
+            sel = listbox.curselection()
+            if sel:
+                self.device_var.set(listbox.get(sel[0]))
+            elif manual.get().strip():
+                self.device_var.set(manual.get().strip())
+            win.destroy()
+
+        btns = tk.Frame(win, bg="#f3f4f6")
+        btns.pack(fill="x", padx=12, pady=(0, 12))
+        tk.Button(btns, text="Use selected", command=choose, bg="#2563eb", fg="white", padx=14, pady=7).pack(side="left")
+        tk.Button(btns, text="Refresh", command=lambda: self._refresh_picker(listbox)).pack(side="left", padx=8)
+        tk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
+
+    def _refresh_picker(self, listbox: tk.Listbox) -> None:
+        self.refresh_devices()
+        listbox.delete(0, "end")
+        for _, label in self.devices:
+            listbox.insert("end", label)
+        if self.devices:
+            listbox.selection_set(0)
 
     def selected_device(self) -> str | None:
         label = self.device_var.get().strip()
