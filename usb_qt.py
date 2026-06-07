@@ -39,8 +39,17 @@ def list_devices():
                     meta = plistlib.loads(info.stdout.encode())
                     size_bytes = int(meta.get("TotalSize", 0) or 0)
                     size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
-                    name = meta.get("MediaName") or meta.get("IORegistryEntryName") or "USB"
-                    label = f"{dev} ({size}) {name}"
+                    media = meta.get("MediaName") or meta.get("IORegistryEntryName") or "USB"
+                    volumes = []
+                    for part in disk.get("Partitions", []) or []:
+                        vol = part.get("VolumeName")
+                        content = part.get("Content")
+                        if vol:
+                            volumes.append(vol)
+                        elif content and content not in {"EFI", "Apple_partition_scheme"}:
+                            volumes.append(content)
+                    vol_text = f" — {', '.join(volumes)}" if volumes else ""
+                    label = f"{dev} ({size}) {media}{vol_text}"
                 except Exception:
                     pass
                 devices.append((dev, label))
@@ -244,6 +253,7 @@ class Main(QWidget):
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
         self.selected = QLabel("Selected USB: none")
+        self.selected.setWordWrap(True)
         self.selected.setStyleSheet("background:#ecfdf5;color:#065f46;font-weight:bold;padding:10px;border:1px solid #10b981;")
         self.status = QLabel("Select image and USB device.")
         self.log = QTextEdit(); self.log.setReadOnly(True)
@@ -266,6 +276,9 @@ class Main(QWidget):
         refresh = QPushButton("Refresh"); refresh.clicked.connect(self.refresh); row.addWidget(refresh); layout.addLayout(row)
         self.device.textChanged.connect(self.update_selected)
         layout.addWidget(self.selected)
+        hint = QLabel("Tip: the USB name/volume appears after the size, e.g. /dev/disk7 (62.0 GB) DataTraveler — MYUSB")
+        hint.setStyleSheet("color:#6b7280;")
+        layout.addWidget(hint)
         warn = QLabel("WARNING: Flashing will permanently erase selected USB device.")
         warn.setStyleSheet("color:#b91c1c;font-weight:bold;")
         layout.addWidget(warn)
