@@ -66,8 +66,9 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("720x430")
+        self.geometry("820x520")
         self.resizable(True, True)
+        self.configure(bg="#f3f4f6")
 
         self.image_var = tk.StringVar(value=str(Path.cwd() / "alpine-usb-xfce.img"))
         self.device_var = tk.StringVar()
@@ -78,38 +79,43 @@ class App(tk.Tk):
         self.refresh_devices()
 
     def _build_ui(self) -> None:
-        pad = {"padx": 10, "pady": 6}
-        ttk.Label(self, text="Alpine USB XFCE Installer", font=("TkDefaultFont", 16, "bold")).pack(anchor="w", padx=10, pady=(10, 2))
-        ttk.Label(self, text="Flash a preconfigured Alpine Linux XFCE image to a USB drive. This erases the target drive.").pack(anchor="w", padx=10)
+        # Use classic Tk widgets with explicit colors. macOS dark-mode + old Tk
+        # can render ttk text invisible, causing a blank window.
+        bg = "#f3f4f6"
+        fg = "#111827"
+        panel = "#ffffff"
+        pad = {"padx": 12, "pady": 7}
 
-        frm = ttk.Frame(self)
-        frm.pack(fill="x", **pad)
+        tk.Label(self, text="Alpine USB XFCE Installer", font=("Helvetica", 20, "bold"), bg=bg, fg=fg).pack(anchor="w", padx=14, pady=(14, 4))
+        tk.Label(self, text="Flash a preconfigured Alpine Linux XFCE image to a USB drive. This erases the target drive.", bg=bg, fg=fg).pack(anchor="w", padx=14)
 
-        ttk.Label(frm, text="Image:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(frm, textvariable=self.image_var).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(frm, text="Browse", command=self.browse_image).grid(row=0, column=2)
+        frm = tk.Frame(self, bg=panel, highlightthickness=1, highlightbackground="#d1d5db")
+        frm.pack(fill="x", padx=14, pady=12)
 
-        ttk.Label(frm, text="USB device:").grid(row=1, column=0, sticky="w")
+        tk.Label(frm, text="Image:", bg=panel, fg=fg).grid(row=0, column=0, sticky="w", **pad)
+        tk.Entry(frm, textvariable=self.image_var, bg="white", fg="black", insertbackground="black").grid(row=0, column=1, sticky="ew", padx=6, pady=7)
+        tk.Button(frm, text="Browse", command=self.browse_image).grid(row=0, column=2, **pad)
+
+        tk.Label(frm, text="USB device:", bg=panel, fg=fg).grid(row=1, column=0, sticky="w", **pad)
         self.combo = ttk.Combobox(frm, textvariable=self.device_var, state="readonly")
-        self.combo.grid(row=1, column=1, sticky="ew", padx=6)
-        ttk.Button(frm, text="Refresh", command=self.refresh_devices).grid(row=1, column=2)
+        self.combo.grid(row=1, column=1, sticky="ew", padx=6, pady=7)
+        tk.Button(frm, text="Refresh", command=self.refresh_devices).grid(row=1, column=2, **pad)
         frm.columnconfigure(1, weight=1)
 
-        warn = ttk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", foreground="red")
-        warn.pack(anchor="w", **pad)
+        tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
 
-        btns = ttk.Frame(self)
-        btns.pack(fill="x", **pad)
-        self.flash_btn = ttk.Button(btns, text="Flash USB", command=self.confirm_flash)
+        btns = tk.Frame(self, bg=bg)
+        btns.pack(fill="x", padx=14, pady=8)
+        self.flash_btn = tk.Button(btns, text="Flash USB", command=self.confirm_flash, bg="#2563eb", fg="white", activebackground="#1d4ed8", activeforeground="white", padx=18, pady=8)
         self.flash_btn.pack(side="left")
-        ttk.Button(btns, text="Quit", command=self.destroy).pack(side="right")
+        tk.Button(btns, text="Quit", command=self.destroy, padx=18, pady=8).pack(side="right")
 
         self.progress = ttk.Progressbar(self, mode="indeterminate")
-        self.progress.pack(fill="x", **pad)
+        self.progress.pack(fill="x", padx=14, pady=8)
 
-        ttk.Label(self, textvariable=self.status_var).pack(anchor="w", **pad)
-        self.log = tk.Text(self, height=10)
-        self.log.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        tk.Label(self, textvariable=self.status_var, bg=bg, fg=fg).pack(anchor="w", padx=14, pady=4)
+        self.log = tk.Text(self, height=12, bg="#111827", fg="#e5e7eb", insertbackground="white")
+        self.log.pack(fill="both", expand=True, padx=14, pady=(0, 14))
 
     def log_line(self, text: str) -> None:
         self.log.insert("end", text + "\n")
