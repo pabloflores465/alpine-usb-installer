@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
     QDialog, QTextEdit
 )
@@ -263,7 +263,7 @@ class Main(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(760, 460)
+        self.resize(900, 560)
         self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
         self.image.setReadOnly(True)
         self.image.setStyleSheet("background:#111827;color:#ffffff;border:1px solid #374151;padding:4px;")
@@ -280,6 +280,8 @@ class Main(QWidget):
 
     def build(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(10)
         title = QLabel("Alpine USB XFCE Installer")
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
@@ -288,21 +290,48 @@ class Main(QWidget):
             QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; }
             QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:7px 12px; }
             QPushButton:hover { background:#1d4ed8; }
+            QPushButton:disabled { background:#4b5563; color:#d1d5db; }
             QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
             QProgressBar { color:#ffffff; }
         """)
         title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;")
         layout.addWidget(title)
         layout.addWidget(QLabel("Flash a preconfigured Alpine Linux XFCE image to a USB drive."))
-        row = QHBoxLayout(); row.addWidget(QLabel("Image size:")); row.addWidget(self.image_size)
-        build = QPushButton("Build image"); build.clicked.connect(self.build_image); row.addWidget(build); row.addStretch(); layout.addLayout(row)
-        row = QHBoxLayout(); row.addWidget(QLabel("Image path:")); row.addWidget(self.image, 1); layout.addLayout(row)
-        row = QHBoxLayout(); row.addWidget(QLabel("USB device:")); row.addWidget(self.device, 1)
-        pick = QPushButton("Select USB"); pick.clicked.connect(self.pick); row.addWidget(pick)
+        img_title = QLabel("Image")
+        img_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:10px;")
+        layout.addWidget(img_title)
+        img_grid = QGridLayout()
+        img_grid.setColumnStretch(1, 1)
+        img_grid.setHorizontalSpacing(12)
+        img_grid.setVerticalSpacing(10)
+        build = QPushButton("Build image")
+        build.clicked.connect(self.build_image)
+        build.setFixedWidth(150)
+        img_grid.addWidget(QLabel("Size:"), 0, 0)
+        img_grid.addWidget(self.image_size, 0, 1)
+        img_grid.addWidget(build, 0, 2)
+        img_grid.addWidget(QLabel("Path:"), 1, 0)
+        img_grid.addWidget(self.image, 1, 1, 1, 2)
+        layout.addLayout(img_grid)
+
+        usb_title = QLabel("USB target")
+        usb_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:14px;")
+        layout.addWidget(usb_title)
+        usb_grid = QGridLayout()
+        usb_grid.setColumnStretch(1, 1)
+        usb_grid.setHorizontalSpacing(12)
+        pick = QPushButton("Select USB")
+        pick.clicked.connect(self.pick)
+        pick.setFixedWidth(150)
         flash = QPushButton("Flash USB")
         flash.clicked.connect(self.flash)
-        flash.setFixedWidth(160)
-        row.addWidget(flash); layout.addLayout(row)
+        flash.setFixedWidth(150)
+        flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:7px 12px;font-weight:bold;")
+        usb_grid.addWidget(QLabel("Device:"), 0, 0)
+        usb_grid.addWidget(self.device, 0, 1)
+        usb_grid.addWidget(pick, 0, 2)
+        usb_grid.addWidget(flash, 0, 3)
+        layout.addLayout(usb_grid)
         self.device.textChanged.connect(self.update_selected)
         layout.addWidget(self.selected)
         hint = QLabel("Tip: the USB name/volume appears after the size, e.g. /dev/disk7 (62.0 GB) DataTraveler — MYUSB")
