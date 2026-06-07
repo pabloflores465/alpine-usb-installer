@@ -290,30 +290,31 @@ class App(tk.Tk):
                         "or grant Terminal/Python Full Disk Access, then retry. "
                         f"Details: {exc}"
                     )
-                self.log_line("Unmounting disk...")
-                subprocess.run(["diskutil", "unmountDisk", dev], check=True)
-                log_path = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.log")
-                try:
-                    os.remove(log_path)
-                except FileNotFoundError:
-                    pass
-                size = os.path.getsize(tmp_image)
-                # macOS dd has no status=progress. Send SIGINFO every 2s and
-                # stream dd stderr from a temp log into the GUI.
-                cmd = (
-                    f"/bin/sh -c "
-                    f"{sh_quote('( /bin/dd if=' + sh_quote(tmp_image) + ' of=' + sh_quote(raw) + ' bs=4m 2> ' + sh_quote(log_path) + '; echo __DD_DONE__$? >> ' + sh_quote(log_path) + '; /bin/sync; /usr/sbin/diskutil eject ' + sh_quote(dev) + ' >> ' + sh_quote(log_path) + ' 2>&1 ) & pid=$!; while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null; sleep 2; done; wait $pid')}"
-                )
-                self.log_line("Requesting administrator permissions...")
-                proc = subprocess.Popen(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'])
-                last_pos = 0
-                last_percent = -1
-                while proc.poll() is None:
-                    last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
-                    threading.Event().wait(1.0)
-                last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
-                if proc.returncode:
-                    raise subprocess.CalledProcessError(proc.returncode, proc.args)
+                self.log_line("Opening Terminal flasher...")
+                # Do the heavy write in Terminal, not inside this Python process.
+                # This avoids Python/Tk memory growth and lets macOS show dd output.
+                flash_script = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.sh")
+                with open(flash_script, "w") as fh:
+                    fh.write("#!/bin/sh\nset -e\n")
+                    fh.write(f"diskutil unmountDisk {sh_quote(dev)}\n")
+                    fh.write(f"echo 'Flashing {tmp_image} -> {raw}'\n")
+                    fh.write(f"sudo /bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m &\n")
+                    fh.write("pid=$!\n")
+                    fh.write("while kill -0 $pid 2>/dev/null; do sudo kill -INFO $pid 2>/dev/null || true; sleep 2; done\n")
+                    fh.write("wait $pid\n")
+                    fh.write("sync\n")
+                    fh.write(f"diskutil eject {sh_quote(dev)}\n")
+                    fh.write("echo 'DONE. You can close this Terminal.'\n")
+                os.chmod(flash_script, 0o755)
+                subprocess.run([
+                    "osascript",
+                    "-e",
+                    f'tell application "Terminal" to do script {sh_quote(flash_script)!r}',
+                    "-e",
+                    'tell application "Terminal" to activate',
+                ], check=True)
+                self.log_line("Flashing is running in Terminal. This GUI can be closed.")
+                self.status_var.set("Flashing in Terminal...")
             elif sys == "Linux":
                 if os.geteuid() != 0:
                     sudo = shutil.which("pkexec") or shutil.which("sudo")
