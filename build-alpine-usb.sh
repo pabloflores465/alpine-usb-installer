@@ -32,6 +32,10 @@ EOF
 
 cd "$SCRIPT_DIR"
 
+# Always rebuild from a clean image. Reusing an old raw image can leave stale
+# filesystem signatures and confuse NBD partition node creation.
+rm -f "$SCRIPT_DIR/$IMAGE_NAME"
+
 # raw image: easiest to dd to USB. serial console kept useful for debug; graphical boot still LightDM.
 sudo "$MAKE_VM_IMAGE" \
   --image-format raw \

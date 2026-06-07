@@ -125,6 +125,7 @@ class BuildWorker(QThread):
                     "apk add --no-cache bash curl sudo e2fsprogs dosfstools util-linux sfdisk "
                     "multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools "
                     "xorriso rsync kmod >/dev/null && "
+                    "rm -f alpine-usb-xfce.img && "
                     "chmod +x .work/alpine-make-vm-image.uefi build-alpine-usb.sh configure-alpine-usb.sh && "
                     f"IMAGE_SIZE={self.image_size} ./build-alpine-usb.sh"
                 )
