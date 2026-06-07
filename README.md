@@ -46,6 +46,15 @@ GUI Qt:
 ./run_qt_gui.sh
 ```
 
+Desde la GUI puedes:
+
+- construir la imagen (`Build image`)
+- seleccionar tamaño (`16G`, `32G`, etc.)
+- seleccionar USB
+- grabar la imagen (`Flash USB`)
+
+En macOS, `Build image` usa Docker Desktop porque la construcción necesita Linux/NBD.
+
 Si el selector no detecta tu USB, puedes escribir manualmente el dispositivo, por ejemplo `/dev/disk7` en macOS o `/dev/sdb` en Linux.
 
 Soporte:

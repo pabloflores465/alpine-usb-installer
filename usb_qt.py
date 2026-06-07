@@ -106,6 +106,43 @@ class DeviceDialog(QDialog):
         self.accept()
 
 
+class BuildWorker(QThread):
+    log = Signal(str)
+    done = Signal(bool, str)
+
+    def __init__(self, image_size: str):
+        super().__init__()
+        self.image_size = image_size
+
+    def run(self):
+        try:
+            env = os.environ.copy()
+            env["IMAGE_SIZE"] = self.image_size
+            cmd = ["./build-alpine-usb.sh"]
+            if platform.system() == "Darwin":
+                # Build script works inside Docker Desktop on macOS.
+                docker_cmd = (
+                    "apk add --no-cache bash curl sudo e2fsprogs dosfstools util-linux sfdisk "
+                    "multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools "
+                    "xorriso rsync kmod >/dev/null && "
+                    "chmod +x .work/alpine-make-vm-image.uefi build-alpine-usb.sh configure-alpine-usb.sh && "
+                    f"IMAGE_SIZE={self.image_size} ./build-alpine-usb.sh"
+                )
+                cmd = [
+                    "docker", "run", "--rm", "--platform", "linux/amd64", "--privileged",
+                    "-v", f"{os.getcwd()}:/work", "-w", "/work", "alpine:latest", "sh", "-c", docker_cmd
+                ]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+            for line in proc.stdout or []:
+                self.log.emit(line.rstrip())
+            code = proc.wait()
+            if code != 0:
+                raise RuntimeError(f"Build failed with exit code {code}")
+            self.done.emit(True, "Image build complete: alpine-usb-xfce.img")
+        except Exception as e:
+            self.done.emit(False, str(e))
+
+
 class FlashWorker(QThread):
     log = Signal(str)
     progress = Signal(str)
@@ -203,6 +240,7 @@ class Main(QWidget):
         self.setWindowTitle(APP_TITLE)
         self.resize(760, 460)
         self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
+        self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
         self.selected = QLabel("Selected USB: none")
         self.selected.setStyleSheet("background:#ecfdf5;color:#065f46;font-weight:bold;padding:10px;border:1px solid #10b981;")
@@ -220,6 +258,8 @@ class Main(QWidget):
         layout.addWidget(QLabel("Flash a preconfigured Alpine Linux XFCE image to a USB drive."))
         row = QHBoxLayout(); row.addWidget(QLabel("Image:")); row.addWidget(self.image, 1)
         browse = QPushButton("Browse image"); browse.clicked.connect(self.browse); row.addWidget(browse); layout.addLayout(row)
+        row = QHBoxLayout(); row.addWidget(QLabel("Image size:")); row.addWidget(self.image_size)
+        build = QPushButton("Build image"); build.clicked.connect(self.build_image); row.addWidget(build); row.addStretch(); layout.addLayout(row)
         row = QHBoxLayout(); row.addWidget(QLabel("USB device:")); row.addWidget(self.device, 1)
         pick = QPushButton("Select USB"); pick.clicked.connect(self.pick); row.addWidget(pick)
         refresh = QPushButton("Refresh"); refresh.clicked.connect(self.refresh); row.addWidget(refresh); layout.addLayout(row)
@@ -252,6 +292,28 @@ class Main(QWidget):
         val = self.device.text().strip() or "none"
         self.selected.setText(f"Selected USB: {val}")
         self.setWindowTitle(f"{APP_TITLE} — {val}" if val != "none" else APP_TITLE)
+
+    def build_image(self):
+        size = self.image_size.text().strip() or "16G"
+        if platform.system() == "Darwin" and not shutil.which("docker"):
+            QMessageBox.critical(self, APP_TITLE, "Docker not found. Install/start Docker Desktop.")
+            return
+        if not QMessageBox.question(self, APP_TITLE, f"Build Alpine image with size {size}?") == QMessageBox.Yes:
+            return
+        self.progress.show()
+        self.status.setText("Building image...")
+        self.builder = BuildWorker(size)
+        self.builder.log.connect(self.append_log)
+        self.builder.done.connect(self.build_done)
+        self.builder.start()
+
+    def build_done(self, ok, msg):
+        self.progress.hide()
+        self.status.setText(msg)
+        self.log.append(msg)
+        if ok:
+            self.image.setText(str(Path.cwd() / "alpine-usb-xfce.img"))
+        (QMessageBox.information if ok else QMessageBox.critical)(self, APP_TITLE, msg)
 
     def flash(self):
         img = self.image.text().strip()
