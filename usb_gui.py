@@ -109,7 +109,8 @@ class App(tk.Tk):
         self.device_var.trace_add("write", lambda *_: self.update_selected_usb_label())
         disk_btns = tk.Frame(frm, bg=panel)
         disk_btns.grid(row=1, column=2, sticky="ew", **pad)
-        tk.Button(disk_btns, text="Select USB", command=self.open_device_picker).pack(side="left", padx=(0, 6))
+        self.select_usb_btn = tk.Button(disk_btns, text="Select USB: none", command=self.open_device_picker)
+        self.select_usb_btn.pack(side="left", padx=(0, 6))
         tk.Button(disk_btns, text="Refresh", command=self.refresh_devices).pack(side="left")
         frm.columnconfigure(1, weight=1)
 
@@ -148,9 +149,17 @@ class App(tk.Tk):
     def update_selected_usb_label(self) -> None:
         value = self.device_var.get().strip()
         if value:
-            self.selected_usb_var.set(f"Selected USB: {value}")
+            text = f"Selected USB: {value}"
+            self.selected_usb_var.set(text)
+            if hasattr(self, "select_usb_btn"):
+                short = value if len(value) < 48 else value[:45] + "..."
+                self.select_usb_btn.config(text=f"USB: {short}")
+            self.title(f"{APP_TITLE} — {value}")
         else:
             self.selected_usb_var.set("Selected USB: none")
+            if hasattr(self, "select_usb_btn"):
+                self.select_usb_btn.config(text="Select USB: none")
+            self.title(APP_TITLE)
 
     def _tail_progress(self, log_path: str, last_pos: int, total_size: int, last_percent: int) -> tuple[int, int]:
         if not os.path.exists(log_path):
@@ -198,6 +207,7 @@ class App(tk.Tk):
 
         def choose_label(label: str) -> None:
             self.device_var.set(label)
+            messagebox.showinfo("USB selected", f"Selected USB:\n{label}", parent=win)
             win.destroy()
 
         def populate() -> None:
