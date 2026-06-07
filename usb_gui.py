@@ -109,12 +109,15 @@ class App(tk.Tk):
         self.device_var.trace_add("write", lambda *_: self.update_selected_usb_label())
         disk_btns = tk.Frame(frm, bg=panel)
         disk_btns.grid(row=1, column=2, sticky="ew", **pad)
-        self.select_usb_btn = tk.Button(disk_btns, text="Select USB: none", command=self.open_device_picker)
+        self.select_usb_btn = tk.Button(disk_btns, text="Select USB", command=self.open_device_picker)
         self.select_usb_btn.pack(side="left", padx=(0, 6))
         tk.Button(disk_btns, text="Refresh", command=self.refresh_devices).pack(side="left")
         frm.columnconfigure(1, weight=1)
 
-        tk.Label(self, textvariable=self.selected_usb_var, bg=bg, fg="#065f46", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 4))
+        selected_panel = tk.Frame(self, bg="#ecfdf5", highlightthickness=1, highlightbackground="#10b981")
+        selected_panel.pack(fill="x", padx=14, pady=(0, 8))
+        tk.Label(selected_panel, text="Selected USB device", bg="#ecfdf5", fg="#064e3b", font=("Helvetica", 11, "bold")).pack(anchor="w", padx=10, pady=(8, 0))
+        tk.Label(selected_panel, textvariable=self.selected_usb_var, bg="#ecfdf5", fg="#065f46", font=("Helvetica", 13, "bold"), wraplength=760, justify="left").pack(anchor="w", padx=10, pady=(2, 8))
         tk.Label(self, text="WARNING: Flashing will permanently erase the selected USB device.", bg=bg, fg="#b91c1c", font=("Helvetica", 12, "bold")).pack(anchor="w", padx=14, pady=(0, 8))
 
         btns = tk.Frame(self, bg=bg)
@@ -151,14 +154,9 @@ class App(tk.Tk):
         if value:
             text = f"Selected USB: {value}"
             self.selected_usb_var.set(text)
-            if hasattr(self, "select_usb_btn"):
-                short = value if len(value) < 48 else value[:45] + "..."
-                self.select_usb_btn.config(text=f"USB: {short}")
             self.title(f"{APP_TITLE} — {value}")
         else:
             self.selected_usb_var.set("Selected USB: none")
-            if hasattr(self, "select_usb_btn"):
-                self.select_usb_btn.config(text="Select USB: none")
             self.title(APP_TITLE)
 
     def _tail_progress(self, log_path: str, last_pos: int, total_size: int, last_percent: int) -> tuple[int, int]:
