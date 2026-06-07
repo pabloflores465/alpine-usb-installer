@@ -75,6 +75,7 @@ class App(tk.Tk):
         self.device_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Select image and USB device.")
         self.devices: list[tuple[str, str]] = []
+        self.main_thread_id = threading.get_ident()
 
         self._build_ui()
         self.refresh_devices()
@@ -119,7 +120,14 @@ class App(tk.Tk):
         self.log.pack(fill="both", expand=True, padx=14, pady=(0, 14))
 
     def log_line(self, text: str) -> None:
+        if threading.get_ident() != self.main_thread_id:
+            self.after(0, self.log_line, text)
+            return
         self.log.insert("end", text + "\n")
+        # Keep log small. Prevent Tk Text memory growth during long flashes.
+        lines = int(self.log.index("end-1c").split(".")[0])
+        if lines > 300:
+            self.log.delete("1.0", f"{lines - 300}.0")
         self.log.see("end")
 
     def browse_image(self) -> None:
@@ -140,7 +148,7 @@ class App(tk.Tk):
             if m and total_size:
                 percent = min(100, int(int(m.group(1)) * 100 / total_size))
                 if percent != last_percent:
-                    self.status_var.set(f"Flashing... {percent}%")
+                    self.after(0, self.status_var.set, f"Flashing... {percent}%")
                     last_percent = percent
         return last_pos, last_percent
 
@@ -221,8 +229,7 @@ class App(tk.Tk):
                 last_percent = -1
                 while proc.poll() is None:
                     last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
-                    self.after(0, self.update_idletasks)
-                    threading.Event().wait(0.5)
+                    threading.Event().wait(1.0)
                 last_pos, last_percent = self._tail_progress(log_path, last_pos, size, last_percent)
                 if proc.returncode:
                     raise subprocess.CalledProcessError(proc.returncode, proc.args)
