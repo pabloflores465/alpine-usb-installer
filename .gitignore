@@ -1,0 +1,14 @@
+# Generated images and large build artifacts
+*.img
+*.qcow2
+*.raw
+*.iso
+.work/
+aports/
+
+# macOS
+.DS_Store
+._*
+
+# Temporary EFI build outputs
+efi-fallback/BOOTX64.EFI
