@@ -185,10 +185,22 @@ class App(tk.Tk):
             if sys == "Darwin":
                 raw = dev.replace("/dev/disk", "/dev/rdisk")
                 # macOS TCC can block root/osascript from reading files under
-                # Documents/Desktop. Copy image to /tmp first; admin dd can read it.
+                # Documents/Desktop. Expose the image via a hard link in /tmp.
+                # This does NOT copy the 16GB image or load it into RAM.
                 tmp_image = os.path.join(tempfile.gettempdir(), "alpine-usb-xfce.img")
-                self.log_line(f"Copying image to temporary path: {tmp_image}")
-                shutil.copyfile(image, tmp_image)
+                try:
+                    os.remove(tmp_image)
+                except FileNotFoundError:
+                    pass
+                self.log_line(f"Linking image to temporary path: {tmp_image}")
+                try:
+                    os.link(image, tmp_image)
+                except OSError as exc:
+                    raise RuntimeError(
+                        "Could not create hard link in /tmp. Move the image to /tmp "
+                        "or grant Terminal/Python Full Disk Access, then retry. "
+                        f"Details: {exc}"
+                    )
                 self.log_line("Unmounting disk...")
                 subprocess.run(["diskutil", "unmountDisk", dev], check=True)
                 log_path = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.log")
