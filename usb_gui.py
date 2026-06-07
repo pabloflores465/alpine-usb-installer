@@ -183,41 +183,44 @@ class App(tk.Tk):
         tk.Label(win, text="Select target USB device", font=("Helvetica", 16, "bold"), bg="#f3f4f6", fg="#111827").pack(anchor="w", padx=12, pady=(12, 4))
         tk.Label(win, text="WARNING: selected device will be erased.", bg="#f3f4f6", fg="#b91c1c").pack(anchor="w", padx=12)
 
-        listbox = tk.Listbox(win, height=10, bg="white", fg="black")
-        listbox.pack(fill="both", expand=True, padx=12, pady=10)
-        for _, label in self.devices:
-            listbox.insert("end", label)
-        if self.devices:
-            listbox.selection_set(0)
+        device_frame = tk.Frame(win, bg="#f3f4f6")
+        device_frame.pack(fill="both", expand=True, padx=12, pady=10)
 
-        manual = tk.StringVar()
+        def choose_label(label: str) -> None:
+            self.device_var.set(label)
+            win.destroy()
+
+        def populate() -> None:
+            self.refresh_devices()
+            for child in device_frame.winfo_children():
+                child.destroy()
+            if not self.devices:
+                tk.Label(device_frame, text="No USB devices detected. You can use manual entry below.", bg="#f3f4f6", fg="#111827").pack(anchor="w", pady=6)
+            for _, label in self.devices:
+                tk.Button(
+                    device_frame,
+                    text=label,
+                    command=lambda lab=label: choose_label(lab),
+                    bg="#ffffff",
+                    fg="#111827",
+                    activebackground="#dbeafe",
+                    anchor="w",
+                    padx=12,
+                    pady=10,
+                ).pack(fill="x", pady=4)
+
+        manual = tk.StringVar(value="/dev/disk7" if platform.system() == "Darwin" else "/dev/sdX")
         row = tk.Frame(win, bg="#f3f4f6")
         row.pack(fill="x", padx=12, pady=(0, 10))
-        tk.Label(row, text="Manual:", bg="#f3f4f6", fg="#111827").pack(side="left")
-        tk.Entry(row, textvariable=manual, bg="white", fg="black").pack(side="left", fill="x", expand=True, padx=8)
-        manual.set("/dev/disk7" if platform.system() == "Darwin" else "/dev/sdX")
-
-        def choose() -> None:
-            sel = listbox.curselection()
-            if sel:
-                self.device_var.set(listbox.get(sel[0]))
-            elif manual.get().strip():
-                self.device_var.set(manual.get().strip())
-            win.destroy()
+        tk.Label(row, text="Manual device:", bg="#f3f4f6", fg="#111827").pack(side="left")
+        tk.Entry(row, textvariable=manual, bg="white", fg="black", insertbackground="black").pack(side="left", fill="x", expand=True, padx=8)
 
         btns = tk.Frame(win, bg="#f3f4f6")
         btns.pack(fill="x", padx=12, pady=(0, 12))
-        tk.Button(btns, text="Use selected", command=choose, bg="#2563eb", fg="white", padx=14, pady=7).pack(side="left")
-        tk.Button(btns, text="Refresh", command=lambda: self._refresh_picker(listbox)).pack(side="left", padx=8)
+        tk.Button(btns, text="Use manual", command=lambda: choose_label(manual.get().strip()), bg="#2563eb", fg="white", padx=14, pady=7).pack(side="left")
+        tk.Button(btns, text="Refresh", command=populate).pack(side="left", padx=8)
         tk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
-
-    def _refresh_picker(self, listbox: tk.Listbox) -> None:
-        self.refresh_devices()
-        listbox.delete(0, "end")
-        for _, label in self.devices:
-            listbox.insert("end", label)
-        if self.devices:
-            listbox.selection_set(0)
+        populate()
 
     def selected_device(self) -> str | None:
         label = self.device_var.get().strip()
