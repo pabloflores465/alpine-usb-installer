@@ -40,7 +40,9 @@ def list_devices():
                     meta = plistlib.loads(info.stdout.encode())
                     size_bytes = int(meta.get("TotalSize", 0) or 0)
                     size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
-                    media = meta.get("MediaName") or meta.get("IORegistryEntryName") or "USB"
+                    # Prefer IORegistryEntryName because it often includes the brand
+                    # shown on the physical USB, e.g. "Kingston DataTraveler 3.0 Media".
+                    media = meta.get("IORegistryEntryName") or meta.get("MediaName") or "USB"
                     volumes = []
                     for part in disk.get("Partitions", []) or []:
                         vol = part.get("VolumeName")
@@ -320,7 +322,6 @@ class Main(QWidget):
         dlg = DeviceDialog(self)
         if dlg.exec() and dlg.selected:
             self.device.setText(dlg.selected)
-            QMessageBox.information(self, "USB selected", f"Selected USB:\n{dlg.selected}")
 
     def update_selected(self):
         val = self.device.text().strip() or "none"
