@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -28,29 +29,31 @@ def list_devices() -> list[tuple[str, str]]:
     sys = platform.system()
     devices: list[tuple[str, str]] = []
     if sys == "Darwin":
-        cp = run(["diskutil", "list", "external", "physical"])
-        current = None
-        for line in cp.stdout.splitlines():
-            m = re.match(r"(/dev/disk\d+) \(external, physical\):", line)
-            if m:
-                current = m.group(1)
-                continue
-            if current and "GUID_partition_scheme" in line or (current and "FDisk_partition_scheme" in line) or (current and "*" in line and "disk" not in line):
-                pass
-        # Better parse all external disks with size from first block line.
-        blocks = cp.stdout.split("/dev/")
-        for block in blocks:
-            if not block.startswith("disk"):
-                continue
-            first = "/dev/" + block.splitlines()[0].split()[0]
-            size = "unknown size"
-            for line in block.splitlines():
-                if "*" in line:
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        size = " ".join(parts[-3:-1]) if parts[-1].startswith("disk") else " ".join(parts[-2:])
-                    break
-            devices.append((first, f"{first} ({size})"))
+        # Prefer diskutil plist: much more reliable than table parsing.
+        cp = run(["diskutil", "list", "-plist", "external", "physical"])
+        try:
+            data = plistlib.loads(cp.stdout.encode())
+            for disk in data.get("AllDisksAndPartitions", []):
+                ident = disk.get("DeviceIdentifier")
+                if not ident:
+                    continue
+                dev = f"/dev/{ident}"
+                info = run(["diskutil", "info", "-plist", dev])
+                label = dev
+                try:
+                    meta = plistlib.loads(info.stdout.encode())
+                    size_bytes = int(meta.get("TotalSize", 0) or 0)
+                    size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
+                    name = meta.get("MediaName") or meta.get("IORegistryEntryName") or "USB"
+                    label = f"{dev} ({size}) {name}"
+                except Exception:
+                    pass
+                devices.append((dev, label))
+        except Exception:
+            # Fallback text parser.
+            cp = run(["diskutil", "list", "external", "physical"])
+            for m in re.finditer(r"(/dev/disk\d+) \(external, physical\):[\s\S]*?\n\s*0:.*?\*(\S+\s+\S+)", cp.stdout):
+                devices.append((m.group(1), f"{m.group(1)} ({m.group(2)})"))
     elif sys == "Linux":
         cp = run(["lsblk", "-dpno", "NAME,SIZE,TRAN,TYPE,MODEL"])
         for line in cp.stdout.splitlines():
