@@ -40,16 +40,10 @@ En macOS, Docker Desktop puede funcionar mejor que Colima para este flujo porque
 
 El repo incluye una utilidad gráfica simple, cross-platform, para seleccionar la imagen y grabarla a la USB.
 
-GUI Qt recomendada:
+GUI Qt:
 
 ```sh
 ./run_qt_gui.sh
-```
-
-GUI Tk legacy:
-
-```sh
-./run_gui.sh
 ```
 
 Si el selector no detecta tu USB, puedes escribir manualmente el dispositivo, por ejemplo `/dev/disk7` en macOS o `/dev/sdb` en Linux.

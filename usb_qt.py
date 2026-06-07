@@ -108,6 +108,7 @@ class DeviceDialog(QDialog):
 
 class FlashWorker(QThread):
     log = Signal(str)
+    progress = Signal(str)
     done = Signal(bool, str)
 
     def __init__(self, image: str, label: str):
@@ -136,32 +137,64 @@ class FlashWorker(QThread):
                 except OSError:
                     # fallback only if link impossible
                     shutil.copyfile(self.image, tmp_image)
-                script = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.sh")
+                log_path = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.log")
+                try: os.remove(log_path)
+                except FileNotFoundError: pass
+                total = os.path.getsize(tmp_image)
                 inner = (
-                    f"/bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m & "
-                    "pid=$!; while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null || true; sleep 2; done; wait $pid"
+                    f"/bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m 2>>{sh_quote(log_path)} & "
+                    "pid=$!; while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null || true; sleep 2; done; wait $pid; "
+                    f"echo __DONE__$? >> {sh_quote(log_path)}"
                 )
-                with open(script, "w") as fh:
-                    fh.write("#!/bin/sh\nset -e\n")
-                    fh.write(f"diskutil unmountDisk {sh_quote(dev)}\n")
-                    fh.write(f"echo 'Flashing {tmp_image} -> {raw}'\n")
-                    fh.write(f"sudo /bin/sh -c {sh_quote(inner)}\n")
-                    fh.write("sync\n")
-                    fh.write(f"diskutil eject {sh_quote(dev)}\n")
-                    fh.write("echo 'DONE. USB ejected.'\n")
-                os.chmod(script, 0o755)
-                subprocess.Popen(["/bin/sh", script])
-                self.done.emit(True, "Flashing started in launching terminal backend.")
+                cmd = (
+                    f"diskutil unmountDisk {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1 && "
+                    f"/bin/sh -c {sh_quote(inner)} && sync && "
+                    f"diskutil eject {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1"
+                )
+                proc = subprocess.Popen(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'])
+                pos = 0
+                last_percent = -1
+                while proc.poll() is None:
+                    pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
+                    self.msleep(500)
+                pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
+                if proc.returncode:
+                    raise RuntimeError(f"Flashing failed with exit code {proc.returncode}")
+                self.done.emit(True, "DONE. USB flashed and ejected.")
             elif platform.system() == "Linux":
                 cmd = ["dd", f"if={self.image}", f"of={dev}", "bs=4M", "status=progress", "conv=fsync"]
                 if os.geteuid() != 0:
                     cmd.insert(0, shutil.which("pkexec") or "sudo")
-                subprocess.Popen(cmd)
-                self.done.emit(True, "Flashing started in backend.")
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in proc.stdout or []:
+                    self.log.emit(line.rstrip())
+                    m = re.search(r"(\d+) bytes", line)
+                    if m:
+                        self.progress.emit(f"Flashing... {m.group(1)} bytes written")
+                if proc.wait() != 0:
+                    raise RuntimeError("Flashing failed")
+                self.done.emit(True, "DONE. USB flashed.")
             else:
                 raise RuntimeError("Windows flashing not implemented. Use Rufus/balenaEtcher.")
         except Exception as e:
             self.done.emit(False, str(e))
+
+    def tail_progress(self, log_path: str, pos: int, total: int, last_percent: int):
+        if not os.path.exists(log_path):
+            return pos, last_percent
+        with open(log_path, "r", errors="ignore") as fh:
+            fh.seek(pos)
+            data = fh.read()
+            pos = fh.tell()
+        for line in data.splitlines():
+            self.log.emit(line)
+            m = re.search(r"(\d+) bytes", line)
+            if m and total:
+                percent = min(100, int(int(m.group(1)) * 100 / total))
+                if percent != last_percent:
+                    self.progress.emit(f"Flashing... {percent}% ({m.group(1)} bytes)")
+                    last_percent = percent
+        return pos, last_percent
 
 
 class Main(QWidget):
@@ -231,8 +264,19 @@ class Main(QWidget):
             return
         self.progress.show()
         self.worker = FlashWorker(img, dev)
+        self.worker.log.connect(self.append_log)
+        self.worker.progress.connect(self.status.setText)
         self.worker.done.connect(self.flash_done)
         self.worker.start()
+
+    def append_log(self, line):
+        self.log.append(line)
+        if self.log.document().blockCount() > 300:
+            cursor = self.log.textCursor()
+            cursor.movePosition(cursor.Start)
+            cursor.select(cursor.BlockUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()
 
     def flash_done(self, ok, msg):
         self.progress.hide()
