@@ -277,8 +277,9 @@ class Main(QWidget):
         self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
-        self.status = QLabel("Ready.")
+        self.status = QLabel("")
         self.status.setStyleSheet("color:#d1d5db;")
+        self.status.hide()
         self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:14px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
@@ -373,7 +374,8 @@ class Main(QWidget):
         devs = list_devices()
         if devs and not self.device.text().strip():
             self.device.setText(devs[0][1])
-        self.status.setText("Ready.")
+        self.status.clear()
+        self.status.hide()
 
     def pick(self):
         dlg = DeviceDialog(self)
@@ -393,6 +395,7 @@ class Main(QWidget):
         if not QMessageBox.question(self, APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}") == QMessageBox.Yes:
             return
         self.progress.show()
+        self.status.show()
         self.status.setText("Building image...")
         self.builder = BuildWorker(size, output_path)
         self.builder.log.connect(self.append_log)
@@ -401,6 +404,7 @@ class Main(QWidget):
 
     def build_done(self, ok, msg):
         self.progress.hide()
+        self.status.show()
         self.status.setText(msg)
         self.log.append(msg)
         if ok:
@@ -419,6 +423,7 @@ class Main(QWidget):
         if not QMessageBox.question(self, APP_TITLE, f"Erase and flash?\n\n{dev}\n\nImage: {img}") == QMessageBox.Yes:
             return
         self.progress.show()
+        self.status.show()
         self.worker = FlashWorker(img, dev)
         self.worker.log.connect(self.append_log)
         self.worker.progress.connect(self.status.setText)
@@ -436,6 +441,7 @@ class Main(QWidget):
 
     def flash_done(self, ok, msg):
         self.progress.hide()
+        self.status.show()
         self.status.setText(msg)
         self.log.append(msg)
         (QMessageBox.information if ok else QMessageBox.critical)(self, APP_TITLE, msg)
