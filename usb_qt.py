@@ -281,39 +281,41 @@ class Main(QWidget):
         self.status.setStyleSheet("color:#d1d5db;")
         self.status.hide()
         self.console_title = QLabel("Console output")
-        self.console_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:14px;")
+        self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin-top:6px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        self.log.setMinimumHeight(220)
-        self.log.setMaximumHeight(320)
+        self.log.setMinimumHeight(240)
+        self.log.setMaximumHeight(360)
         self.build()
         self.refresh()
 
     def build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(6)
         title = QLabel("Alpine USB XFCE Installer")
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
             QLabel { color:#ffffff; }
-            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; padding:4px; }
-            QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; }
-            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:7px 12px; }
+            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:4px; }
+            QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
+            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:6px 10px; }
             QPushButton:hover { background:#1d4ed8; }
             QPushButton:disabled { background:#4b5563; color:#d1d5db; }
             QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
             QProgressBar { color:#ffffff; }
         """)
         title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;")
+        subtitle = QLabel("Build and flash a preconfigured Alpine Linux XFCE USB image.")
+        subtitle.setStyleSheet("color:#cbd5e1;margin-bottom:4px;")
         layout.addWidget(title)
-        layout.addWidget(QLabel("Flash a preconfigured Alpine Linux XFCE image to a USB drive."))
-        img_title = QLabel("Image")
-        img_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:10px;")
+        layout.addWidget(subtitle)
+        img_title = QLabel("1. Image")
+        img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin-top:6px;")
         layout.addWidget(img_title)
         img_grid = QGridLayout()
         img_grid.setColumnStretch(1, 1)
-        img_grid.setHorizontalSpacing(12)
-        img_grid.setVerticalSpacing(10)
+        img_grid.setHorizontalSpacing(8)
+        img_grid.setVerticalSpacing(4)
         choose_output = QPushButton("Select path")
         choose_output.clicked.connect(self.choose_output_path)
         choose_output.setFixedWidth(120)
@@ -327,12 +329,13 @@ class Main(QWidget):
         img_grid.addWidget(build, 0, 3)
         layout.addLayout(img_grid)
 
-        usb_title = QLabel("USB target")
-        usb_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:14px;")
+        usb_title = QLabel("2. USB target")
+        usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin-top:6px;")
         layout.addWidget(usb_title)
         usb_grid = QGridLayout()
         usb_grid.setColumnStretch(1, 1)
-        usb_grid.setHorizontalSpacing(12)
+        usb_grid.setHorizontalSpacing(8)
+        usb_grid.setVerticalSpacing(4)
         pick = QPushButton("Select USB")
         pick.clicked.connect(self.pick)
         pick.setFixedWidth(150)
@@ -346,8 +349,8 @@ class Main(QWidget):
         usb_grid.addWidget(flash, 0, 3)
         layout.addLayout(usb_grid)
         self.device.textChanged.connect(self.update_selected)
-        warn = QLabel("WARNING: Flashing will permanently erase selected USB device.")
-        warn.setStyleSheet("color:#b91c1c;font-weight:bold;")
+        warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
+        warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin-top:2px;")
         layout.addWidget(warn)
         self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide(); layout.addWidget(self.progress)
         layout.addWidget(self.status)
