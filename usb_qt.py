@@ -34,35 +34,62 @@ def make_app_icon() -> QIcon:
     return QIcon(pix)
 
 
-def make_button_icon(kind: str) -> QIcon:
-    pix = QPixmap(20, 20)
+def make_button_icon(kind: str, size: int = 20) -> QIcon:
+    pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(QColor("#ffffff"), 2)
+    scale = size / 20
+    pen = QPen(QColor("#ffffff"), max(2, int(2 * scale)))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
     def pts(items):
         return [QPoint(x, y) for x, y in items]
+    def xy(v): return int(v * scale)
     if kind == "folder":
-        p.drawPolyline(pts([(3, 7), (3, 16), (17, 16), (17, 6), (9, 6), (7, 4), (3, 4), (3, 7)]))
+        p.drawPolyline(pts([(xy(3), xy(7)), (xy(3), xy(16)), (xy(17), xy(16)), (xy(17), xy(6)), (xy(9), xy(6)), (xy(7), xy(4)), (xy(3), xy(4)), (xy(3), xy(7))]))
     elif kind == "build":
-        p.drawLine(10, 3, 10, 14)
-        p.drawLine(6, 7, 10, 3)
-        p.drawLine(14, 7, 10, 3)
-        p.drawLine(4, 16, 16, 16)
+        p.drawLine(xy(10), xy(3), xy(10), xy(14))
+        p.drawLine(xy(6), xy(7), xy(10), xy(3))
+        p.drawLine(xy(14), xy(7), xy(10), xy(3))
+        p.drawLine(xy(4), xy(16), xy(16), xy(16))
     elif kind == "usb":
-        p.drawLine(10, 3, 10, 14)
-        p.drawLine(6, 7, 14, 7)
-        p.drawEllipse(5, 6, 2, 2)
-        p.drawRect(13, 5, 3, 3)
-        p.drawEllipse(8, 14, 4, 4)
+        p.drawLine(xy(10), xy(3), xy(10), xy(14))
+        p.drawLine(xy(6), xy(7), xy(14), xy(7))
+        p.drawEllipse(xy(5), xy(6), xy(2), xy(2))
+        p.drawRect(xy(13), xy(5), xy(3), xy(3))
+        p.drawEllipse(xy(8), xy(14), xy(4), xy(4))
     elif kind == "flash":
-        p.drawPolyline(pts([(11, 2), (5, 11), (10, 11), (8, 18), (15, 8), (10, 8), (11, 2)]))
+        p.drawPolyline(pts([(xy(11), xy(2)), (xy(5), xy(11)), (xy(10), xy(11)), (xy(8), xy(18)), (xy(15), xy(8)), (xy(10), xy(8)), (xy(11), xy(2))]))
+    elif kind == "check":
+        p.drawLine(xy(4), xy(10), xy(8), xy(15)); p.drawLine(xy(8), xy(15), xy(16), xy(5))
+    elif kind == "warn":
+        p.drawPolyline(pts([(xy(10), xy(3)), (xy(18), xy(17)), (xy(2), xy(17)), (xy(10), xy(3))])); p.drawLine(xy(10), xy(7), xy(10), xy(12)); p.drawPoint(xy(10), xy(15))
+    elif kind == "error":
+        p.drawEllipse(xy(3), xy(3), xy(14), xy(14)); p.drawLine(xy(7), xy(7), xy(13), xy(13)); p.drawLine(xy(13), xy(7), xy(7), xy(13))
     p.end()
     return QIcon(pix)
+
+
+def modal(parent, kind: str, title: str, text: str, question: bool = False) -> bool:
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setWindowIcon(make_app_icon())
+    icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
+    box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
+    if question:
+        ok = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        cancel.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
+        ok.setStyleSheet("background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
+        box.exec()
+        return box.clickedButton() == ok
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.exec()
+    return True
 
 
 def run(cmd):
@@ -154,8 +181,12 @@ class DeviceDialog(QDialog):
         layout.addLayout(row)
         btns = QHBoxLayout()
         self.use = QPushButton("Use selected")
+        self.use.setIcon(make_button_icon("check"))
         self.refresh = QPushButton("Refresh")
+        self.refresh.setIcon(make_button_icon("build"))
         self.cancel = QPushButton("Cancel")
+        self.cancel.setIcon(make_button_icon("error"))
+        self.cancel.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
         btns.addWidget(self.use); btns.addWidget(self.refresh); btns.addStretch(); btns.addWidget(self.cancel)
         layout.addLayout(btns)
         self.use.clicked.connect(self.accept_selection)
@@ -470,9 +501,9 @@ class Main(QWidget):
         size = self.image_size.text().strip() or "16G"
         output_path = self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img")
         if platform.system() == "Darwin" and not shutil.which("docker"):
-            QMessageBox.critical(self, APP_TITLE, "Docker not found. Install/start Docker Desktop.")
+            modal(self, "error", APP_TITLE, "Docker not found. Install/start Docker Desktop.")
             return
-        if not QMessageBox.question(self, APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}") == QMessageBox.Yes:
+        if not modal(self, "question", APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}", question=True):
             return
         self.progress.show()
         self.status.show()
@@ -491,16 +522,16 @@ class Main(QWidget):
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
                 self.image.setText(m.group(1))
-        (QMessageBox.information if ok else QMessageBox.critical)(self, APP_TITLE, msg)
+        modal(self, "info" if ok else "error", APP_TITLE, msg)
 
     def flash(self):
         img = self.image.text().strip()
         dev = self.device.text().strip()
         if not Path(img).exists():
-            QMessageBox.critical(self, APP_TITLE, "Image not found."); return
+            modal(self, "error", APP_TITLE, "Image not found."); return
         if not dev:
-            QMessageBox.critical(self, APP_TITLE, "Select USB device."); return
-        if not QMessageBox.question(self, APP_TITLE, f"Erase and flash?\n\n{dev}\n\nImage: {img}") == QMessageBox.Yes:
+            modal(self, "error", APP_TITLE, "Select USB device."); return
+        if not modal(self, "question", APP_TITLE, f"Erase and flash?\n\n{dev}\n\nImage: {img}", question=True):
             return
         self.progress.show()
         self.status.show()
@@ -524,7 +555,7 @@ class Main(QWidget):
         self.status.show()
         self.status.setText(msg)
         self.log.append(msg)
-        (QMessageBox.information if ok else QMessageBox.critical)(self, APP_TITLE, msg)
+        modal(self, "info" if ok else "error", APP_TITLE, msg)
 
 
 if __name__ == "__main__":
