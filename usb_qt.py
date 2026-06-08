@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json, os, platform, plistlib, re, shutil, subprocess, sys, tempfile
+import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QThread, Signal
@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
-    QDialog, QStyle, QTextEdit
+    QDialog, QInputDialog, QStyle, QTextEdit
 )
 
 APP_TITLE = "Alpine USB XFCE Installer"
@@ -268,10 +268,11 @@ class FlashWorker(QThread):
     progress = Signal(str)
     done = Signal(bool, str)
 
-    def __init__(self, image: str, label: str):
+    def __init__(self, image: str, label: str, sudo_password: str | None = None):
         super().__init__()
         self.image = image
         self.label = label
+        self.sudo_password = sudo_password
 
     def selected_device(self):
         if self.label.startswith("/dev/"):
@@ -298,49 +299,43 @@ class FlashWorker(QThread):
                 try: os.remove(log_path)
                 except FileNotFoundError: pass
                 total = os.path.getsize(tmp_image)
-                terminal_script = (
-                    "echo 'Alpine USB XFCE Installer - Flash USB'\n"
-                    f"echo 'Target: {dev}'\n"
-                    f"echo 'Image: {tmp_image}'\n"
-                    "echo 'Enter your macOS password when sudo asks for it.'\n"
-                    f"echo 'Log: {log_path}'\n\n"
-                    f": > {sh_quote(log_path)}\n"
-                    f"sudo -v || {{ echo __DONE__1 >> {sh_quote(log_path)}; exit 1; }}\n"
-                    f"diskutil unmountDisk {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1\n"
-                    f"sudo /bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m 2>>{sh_quote(log_path)} &\n"
-                    "pid=$!\n"
-                    "while kill -0 $pid 2>/dev/null; do sudo kill -INFO $pid 2>/dev/null || true; sleep 2; done\n"
-                    "wait $pid; code=$?\n"
-                    "sync\n"
-                    f"if [ $code -eq 0 ]; then diskutil eject {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1; fi\n"
-                    f"echo __DONE__$code >> {sh_quote(log_path)}\n"
-                    "echo\n"
-                    "if [ $code -eq 0 ]; then echo 'DONE. USB flashed and ejected.'; else echo \"Flashing failed with exit code $code\"; fi\n"
-                    "echo 'You can close this terminal window.'\n"
-                    "exit $code\n"
+                if not self.sudo_password:
+                    raise RuntimeError("Administrator password is required to flash the USB.")
+                with open(log_path, "w") as log:
+                    log.write("Alpine USB XFCE Installer - Flash USB\n")
+                    log.write(f"Target: {dev}\nImage: {tmp_image}\n\n")
+                auth = subprocess.run(
+                    ["sudo", "-S", "-v"],
+                    input=self.sudo_password + "\n",
+                    text=True,
+                    capture_output=True,
                 )
-                cp = subprocess.run([
-                    "osascript",
-                    "-e", 'tell application "Terminal" to activate',
-                    "-e", f'tell application "Terminal" to do script {json.dumps(terminal_script)}',
-                ], text=True, capture_output=True)
-                if cp.returncode:
-                    raise RuntimeError(cp.stderr.strip() or "Could not open Terminal for flashing")
-                pos = 0
-                last_percent = -1
-                done_code = None
-                while done_code is None:
+                if auth.returncode != 0:
+                    raise RuntimeError("Invalid administrator password or sudo was cancelled.")
+                with open(log_path, "a") as log:
+                    subprocess.run(["diskutil", "unmountDisk", dev], stdout=log, stderr=subprocess.STDOUT, text=True)
+                    proc = subprocess.Popen(
+                        ["sudo", "-S", "/bin/dd", f"if={tmp_image}", f"of={raw}", "bs=4m"],
+                        stdin=subprocess.PIPE,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                    if proc.stdin:
+                        proc.stdin.write(self.sudo_password + "\n")
+                        proc.stdin.close()
+                    pos = 0
+                    last_percent = -1
+                    while proc.poll() is None:
+                        subprocess.run(["sudo", "-n", "kill", "-INFO", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
+                        self.msleep(500)
+                    log.flush()
                     pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
-                    if os.path.exists(log_path):
-                        with open(log_path, "r", errors="ignore") as fh:
-                            m = re.search(r"__DONE__(\d+)", fh.read())
-                            if m:
-                                done_code = int(m.group(1))
-                                break
-                    self.msleep(500)
-                pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
-                if done_code:
-                    raise RuntimeError(f"Flashing failed with exit code {done_code}")
+                    if proc.returncode:
+                        raise RuntimeError(f"Flashing failed with exit code {proc.returncode}")
+                    subprocess.run(["sync"])
+                    subprocess.run(["diskutil", "eject", dev], stdout=log, stderr=subprocess.STDOUT, text=True)
                 self.done.emit(True, "DONE. USB flashed and ejected.")
             elif platform.system() == "Linux":
                 cmd = ["dd", f"if={self.image}", f"of={dev}", "bs=4M", "status=progress", "conv=fsync"]
@@ -578,9 +573,19 @@ class Main(QWidget):
             modal(self, "error", APP_TITLE, "Select USB device."); return
         if not modal(self, "question", APP_TITLE, f"Erase and flash?\n\n{dev}\n\nImage: {img}", question=True):
             return
+        sudo_password = None
+        if platform.system() == "Darwin":
+            sudo_password, ok = QInputDialog.getText(
+                self,
+                APP_TITLE,
+                "Administrator password for flashing:",
+                QLineEdit.EchoMode.Password,
+            )
+            if not ok or not sudo_password:
+                return
         self.progress.show()
         self.status.show()
-        self.worker = FlashWorker(img, dev)
+        self.worker = FlashWorker(img, dev, sudo_password)
         self.worker.log.connect(self.append_log)
         self.worker.progress.connect(self.status.setText)
         self.worker.done.connect(self.flash_done)
