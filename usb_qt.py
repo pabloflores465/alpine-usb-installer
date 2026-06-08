@@ -271,7 +271,7 @@ class Main(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(900, 520)
+        self.resize(900, 480)
         self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
         self.image.setReadOnly(False)
         self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
@@ -283,22 +283,22 @@ class Main(QWidget):
         self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        self.log.setMinimumHeight(260)
-        self.log.setMaximumHeight(420)
+        self.log.setMinimumHeight(280)
+        self.log.setMaximumHeight(460)
         self.build()
         self.refresh()
 
     def build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(2)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(0)
         title = QLabel("Alpine USB XFCE Installer")
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
-            QLabel { color:#ffffff; }
-            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; min-height:24px; }
+            QLabel { color:#ffffff; margin:0px; padding:0px; }
+            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:1px 4px; min-height:22px; max-height:24px; }
             QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
-            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:4px 8px; min-height:24px; }
+            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:3px 8px; min-height:22px; max-height:26px; }
             QPushButton:hover { background:#1d4ed8; }
             QPushButton:disabled { background:#4b5563; color:#d1d5db; }
             QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
@@ -309,34 +309,36 @@ class Main(QWidget):
         subtitle.setStyleSheet("color:#cbd5e1;margin:0px;padding:0px;")
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addSpacing(2)
         img_title = QLabel("1. Image")
         img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         layout.addWidget(img_title)
         img_grid = QGridLayout()
         img_grid.setContentsMargins(0, 0, 0, 0)
         img_grid.setColumnStretch(1, 1)
-        img_grid.setHorizontalSpacing(8)
-        img_grid.setVerticalSpacing(3)
+        img_grid.setHorizontalSpacing(6)
+        img_grid.setVerticalSpacing(0)
         choose_output = QPushButton("Select path")
         choose_output.clicked.connect(self.choose_output_path)
         choose_output.setFixedWidth(120)
         build = QPushButton("Build image")
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
-        build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:4px 8px;font-weight:bold;min-height:24px;")
+        build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
         self.image_size.hide()
         img_grid.addWidget(QLabel("Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
         img_grid.addWidget(choose_output, 0, 2)
         img_grid.addWidget(build, 0, 3)
         layout.addLayout(img_grid)
+        layout.addSpacing(3)
 
         usb_title = QLabel("2. USB target")
         usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         layout.addWidget(usb_title)
         usb_box = QVBoxLayout()
         usb_box.setContentsMargins(0, 0, 0, 0)
-        usb_box.setSpacing(1)
+        usb_box.setSpacing(0)
         usb_row = QHBoxLayout()
         usb_row.setContentsMargins(0, 0, 0, 0)
         usb_row.setSpacing(4)
@@ -346,7 +348,7 @@ class Main(QWidget):
         flash = QPushButton("Flash USB")
         flash.clicked.connect(self.flash)
         flash.setFixedWidth(150)
-        flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:4px 8px;font-weight:bold;min-height:24px;")
+        flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
         device_label = QLabel("Device:")
         device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         usb_row.addWidget(device_label)
@@ -355,11 +357,12 @@ class Main(QWidget):
         usb_row.addWidget(flash)
         usb_box.addLayout(usb_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
-        warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;")
-        warn.setContentsMargins(58, 0, 0, 0)
+        warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;font-size:12px;")
+        warn.setContentsMargins(58, -2, 0, 0)
         usb_box.addWidget(warn)
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
+        layout.addSpacing(3)
         self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide(); layout.addWidget(self.progress)
         layout.addWidget(self.status)
         layout.addWidget(self.console_title)
