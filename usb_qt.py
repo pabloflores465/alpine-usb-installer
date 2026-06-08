@@ -366,7 +366,7 @@ class Main(QWidget):
         usb_box.addLayout(flash_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
         warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;font-size:12px;")
-        warn.setContentsMargins(0, -2, 0, 0)
+        warn.setContentsMargins(0, 8, 0, 0)
         usb_box.addWidget(warn)
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
