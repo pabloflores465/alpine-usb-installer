@@ -5,7 +5,7 @@ import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
@@ -31,6 +31,35 @@ def make_app_icon() -> QIcon:
     painter.drawLine(32, 24, 40, 34)
     painter.drawLine(32, 24, 32, 44)
     painter.end()
+    return QIcon(pix)
+
+
+def make_button_icon(kind: str) -> QIcon:
+    pix = QPixmap(20, 20)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor("#ffffff"), 2)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    if kind == "folder":
+        p.drawPolyline([(3, 7), (3, 16), (17, 16), (17, 6), (9, 6), (7, 4), (3, 4), (3, 7)])
+    elif kind == "build":
+        p.drawLine(10, 3, 10, 14)
+        p.drawLine(6, 7, 10, 3)
+        p.drawLine(14, 7, 10, 3)
+        p.drawLine(4, 16, 16, 16)
+    elif kind == "usb":
+        p.drawLine(10, 3, 10, 14)
+        p.drawLine(6, 7, 14, 7)
+        p.drawEllipse(5, 6, 2, 2)
+        p.drawRect(13, 5, 3, 3)
+        p.drawEllipse(8, 14, 4, 4)
+    elif kind == "flash":
+        p.drawPolyline([(11, 2), (5, 11), (10, 11), (8, 18), (15, 8), (10, 8), (11, 2)])
+    p.end()
     return QIcon(pix)
 
 
@@ -339,11 +368,11 @@ class Main(QWidget):
         img_grid.setHorizontalSpacing(6)
         img_grid.setVerticalSpacing(0)
         choose_output = QPushButton("Select path")
-        choose_output.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        choose_output.setIcon(make_button_icon("folder"))
         choose_output.clicked.connect(self.choose_output_path)
         choose_output.setFixedWidth(120)
         build = QPushButton("Build image")
-        build.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
+        build.setIcon(make_button_icon("build"))
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
         build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
@@ -369,11 +398,11 @@ class Main(QWidget):
         usb_row.setContentsMargins(0, 0, 0, 0)
         usb_row.setSpacing(4)
         pick = QPushButton("Select USB")
-        pick.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon))
+        pick.setIcon(make_button_icon("usb"))
         pick.clicked.connect(self.pick)
         pick.setFixedWidth(150)
         flash = QPushButton("Flash USB")
-        flash.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        flash.setIcon(make_button_icon("flash"))
         flash.clicked.connect(self.flash)
         flash.setFixedWidth(150)
         flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
