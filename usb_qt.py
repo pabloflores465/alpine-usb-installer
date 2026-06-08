@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
+import json, os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QThread, Signal
@@ -82,12 +82,18 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
     box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
     if question:
         ok = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        ok.setIcon(make_button_icon("check"))
         cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        cancel.setIcon(make_button_icon("error"))
         cancel.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
         ok.setStyleSheet("background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
         box.exec()
         return box.clickedButton() == ok
     box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    ok = box.button(QMessageBox.StandardButton.Ok)
+    if ok:
+        ok.setIcon(make_button_icon("check"))
+        ok.setStyleSheet("background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
     box.exec()
     return True
 
@@ -292,25 +298,49 @@ class FlashWorker(QThread):
                 try: os.remove(log_path)
                 except FileNotFoundError: pass
                 total = os.path.getsize(tmp_image)
-                inner = (
-                    f"/bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m 2>>{sh_quote(log_path)} & "
-                    "pid=$!; while kill -0 $pid 2>/dev/null; do kill -INFO $pid 2>/dev/null || true; sleep 2; done; wait $pid; "
-                    f"echo __DONE__$? >> {sh_quote(log_path)}"
+                terminal_script = (
+                    "echo 'Alpine USB XFCE Installer - Flash USB'\n"
+                    f"echo 'Target: {dev}'\n"
+                    f"echo 'Image: {tmp_image}'\n"
+                    "echo 'Enter your macOS password when sudo asks for it.'\n"
+                    f"echo 'Log: {log_path}'\n\n"
+                    f": > {sh_quote(log_path)}\n"
+                    f"sudo -v || {{ echo __DONE__1 >> {sh_quote(log_path)}; exit 1; }}\n"
+                    f"diskutil unmountDisk {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1\n"
+                    f"sudo /bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m 2>>{sh_quote(log_path)} &\n"
+                    "pid=$!\n"
+                    "while kill -0 $pid 2>/dev/null; do sudo kill -INFO $pid 2>/dev/null || true; sleep 2; done\n"
+                    "wait $pid; code=$?\n"
+                    "sync\n"
+                    f"if [ $code -eq 0 ]; then diskutil eject {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1; fi\n"
+                    f"echo __DONE__$code >> {sh_quote(log_path)}\n"
+                    "echo\n"
+                    "if [ $code -eq 0 ]; then echo 'DONE. USB flashed and ejected.'; else echo \"Flashing failed with exit code $code\"; fi\n"
+                    "echo 'You can close this terminal window.'\n"
+                    "exit $code\n"
                 )
-                cmd = (
-                    f"diskutil unmountDisk {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1 && "
-                    f"/bin/sh -c {sh_quote(inner)} && sync && "
-                    f"diskutil eject {sh_quote(dev)} >> {sh_quote(log_path)} 2>&1"
-                )
-                proc = subprocess.Popen(["osascript", "-e", f'do shell script {cmd!r} with administrator privileges'])
+                cp = subprocess.run([
+                    "osascript",
+                    "-e", 'tell application "Terminal" to activate',
+                    "-e", f'tell application "Terminal" to do script {json.dumps(terminal_script)}',
+                ], text=True, capture_output=True)
+                if cp.returncode:
+                    raise RuntimeError(cp.stderr.strip() or "Could not open Terminal for flashing")
                 pos = 0
                 last_percent = -1
-                while proc.poll() is None:
+                done_code = None
+                while done_code is None:
                     pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
+                    if os.path.exists(log_path):
+                        with open(log_path, "r", errors="ignore") as fh:
+                            m = re.search(r"__DONE__(\d+)", fh.read())
+                            if m:
+                                done_code = int(m.group(1))
+                                break
                     self.msleep(500)
                 pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
-                if proc.returncode:
-                    raise RuntimeError(f"Flashing failed with exit code {proc.returncode}")
+                if done_code:
+                    raise RuntimeError(f"Flashing failed with exit code {done_code}")
                 self.done.emit(True, "DONE. USB flashed and ejected.")
             elif platform.system() == "Linux":
                 cmd = ["dd", f"if={self.image}", f"of={dev}", "bs=4M", "status=progress", "conv=fsync"]
@@ -362,6 +392,9 @@ class Main(QWidget):
         self.status = QLabel("")
         self.status.setStyleSheet("color:#d1d5db;")
         self.status.hide()
+        self.build_status = QLabel("")
+        self.build_status.setStyleSheet("color:#d1d5db;margin-top:8px;padding:0px;font-size:12px;")
+        self.build_status.hide()
         self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
@@ -402,7 +435,7 @@ class Main(QWidget):
         img_grid.setContentsMargins(0, 0, 0, 0)
         img_grid.setColumnStretch(1, 1)
         img_grid.setHorizontalSpacing(6)
-        img_grid.setVerticalSpacing(0)
+        img_grid.setVerticalSpacing(6)
         choose_output = QPushButton("Select path")
         choose_output.setIcon(make_button_icon("folder"))
         choose_output.clicked.connect(self.choose_output_path)
@@ -421,6 +454,9 @@ class Main(QWidget):
         img_buttons.addWidget(build)
         img_buttons.addStretch()
         img_grid.addLayout(img_buttons, 1, 0, 1, 3)
+        img_grid.addWidget(self.build_status, 2, 0, 1, 3)
+        self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide()
+        img_grid.addWidget(self.progress, 3, 0, 1, 3)
         layout.addLayout(img_grid)
         layout.addSpacing(3)
 
@@ -437,11 +473,15 @@ class Main(QWidget):
         pick.setIcon(make_button_icon("usb"))
         pick.clicked.connect(self.pick)
         pick.setFixedWidth(150)
-        flash = QPushButton("Flash USB")
-        flash.setIcon(make_button_icon("flash"))
-        flash.clicked.connect(self.flash)
-        flash.setFixedWidth(150)
-        flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
+        self.flash_button = QPushButton("Flash USB")
+        self.flash_button.setIcon(make_button_icon("flash"))
+        self.flash_button.clicked.connect(self.flash)
+        self.flash_button.setFixedWidth(150)
+        self.flash_button.setEnabled(False)
+        self.flash_button.setStyleSheet("""
+            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px; }
+            QPushButton:disabled { background:#374151;color:#9ca3af; }
+        """)
         device_label = QLabel("Device:")
         device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         usb_row.addWidget(device_label)
@@ -450,7 +490,7 @@ class Main(QWidget):
         usb_box.addLayout(usb_row)
         flash_row = QHBoxLayout()
         flash_row.setContentsMargins(0, 6, 0, 0)
-        flash_row.addWidget(flash)
+        flash_row.addWidget(self.flash_button)
         flash_row.addStretch()
         usb_box.addLayout(flash_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
@@ -460,7 +500,6 @@ class Main(QWidget):
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
         layout.addSpacing(3)
-        self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide(); layout.addWidget(self.progress)
         layout.addWidget(self.status)
         layout.addWidget(self.console_title)
         layout.addWidget(self.log)
@@ -487,6 +526,8 @@ class Main(QWidget):
             self.device.setText(devs[0][1])
         self.status.clear()
         self.status.hide()
+        self.build_status.clear()
+        self.build_status.hide()
 
     def pick(self):
         dlg = DeviceDialog(self)
@@ -506,8 +547,10 @@ class Main(QWidget):
         if not modal(self, "question", APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}", question=True):
             return
         self.progress.show()
-        self.status.show()
-        self.status.setText("Building image...")
+        self.build_status.show()
+        self.build_status.setText("Building image...")
+        self.status.hide()
+        self.flash_button.setEnabled(False)
         self.builder = BuildWorker(size, output_path)
         self.builder.log.connect(self.append_log)
         self.builder.done.connect(self.build_done)
@@ -515,13 +558,15 @@ class Main(QWidget):
 
     def build_done(self, ok, msg):
         self.progress.hide()
-        self.status.show()
-        self.status.setText(msg)
+        self.build_status.show()
+        self.build_status.setText(msg)
+        self.status.hide()
         self.log.append(msg)
         if ok:
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
                 self.image.setText(m.group(1))
+            self.flash_button.setEnabled(True)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
     def flash(self):

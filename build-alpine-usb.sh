@@ -25,13 +25,48 @@ fi
 
 chmod +x "$SCRIPT_DIR/configure-alpine-usb.sh"
 
-# Docker Desktop/macOS can be slow to expose NBD partition nodes (/dev/nbdXp2).
-# Patch alpine-make-vm-image to force partition re-read and wait longer.
+# Docker Desktop/macOS can be slow or unable to expose NBD partition nodes
+# (/dev/nbdXp1, /dev/nbdXp2). Patch alpine-make-vm-image to force a partition
+# re-read and fall back to kpartx mapper nodes (/dev/mapper/nbdXpN).
 python3 - <<'PY'
 from pathlib import Path
+import re
 p = Path('.work/alpine-make-vm-image.uefi')
 s = p.read_text()
-s = s.replace('''\t# This is needed when running in a container.\n\tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"''', '''\t# This is needed when running in a container. Docker Desktop can be slow\n\t# to expose NBD partition nodes, so force a partition re-read first.\n\tpartprobe "$disk_dev" 2>/dev/null || true\n\tblockdev --rereadpt "$disk_dev" 2>/dev/null || true\n\tpartx -u "$disk_dev" 2>/dev/null || true\n\tfor i in $(seq 1 30); do\n\t\tsettle_dev_node "$root_dev" && break\n\t\tsleep 1\n\tdone\n\tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"''')
+
+# Remove kpartx mappings before disconnecting NBD; otherwise qemu-nbd can fail.
+s = s.replace('''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''', '''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tkpartx -d "$disk_dev" >/dev/null 2>&1 || true\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''')
+
+old = r'''\t# This is needed when running in a container(?:.|
+)*?\tsettle_dev_node "\$root_dev" \|\| die "system didn't create \$root_dev node"'''
+new = '''\t# This is needed when running in a container. Docker Desktop can be slow
+\t# or unable to expose NBD partition nodes, so force a partition re-read.
+\tpartprobe "$disk_dev" 2>/dev/null || true
+\tblockdev --rereadpt "$disk_dev" 2>/dev/null || true
+\tpartx -a "$disk_dev" 2>/dev/null || partx -u "$disk_dev" 2>/dev/null || true
+\tfor i in $(seq 1 45); do
+\t\tsettle_dev_node "$root_dev" && break
+\t\tsleep 1
+\tdone
+\tif ! [ -e "$root_dev" ]; then
+\t\t# Fallback for Docker Desktop: create /dev/mapper/nbdXpN nodes.
+\t\tkpartx -avs "$disk_dev" || true
+\t\tmapper_base="/dev/mapper/$(basename "$disk_dev")"
+\t\tif [ "$BOOT_MODE" = 'BIOS' ]; then
+\t\t\troot_dev="${mapper_base}p1"
+\t\telse
+\t\t\tesp_dev="${mapper_base}p1"
+\t\t\troot_dev="${mapper_base}p2"
+\t\tfi
+\tfi
+\tfor i in $(seq 1 20); do
+\t\tsettle_dev_node "$root_dev" && break
+\t\tsleep 1
+\tdone
+\tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"'''
+s, n = re.subn(old, new, s, count=1)
+if n != 1:
+    raise SystemExit('Could not patch alpine-make-vm-image partition wait block')
 p.write_text(s)
 PY
 
