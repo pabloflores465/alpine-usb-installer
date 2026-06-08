@@ -322,6 +322,7 @@ class Main(QWidget):
         build = QPushButton("Build image")
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
+        build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:6px 10px;font-weight:bold;")
         self.image_size.hide()
         img_grid.addWidget(QLabel("Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
