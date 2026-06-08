@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
-    QDialog, QTextEdit
+    QDialog, QStyle, QTextEdit
 )
 
 APP_TITLE = "Alpine USB XFCE Installer"
@@ -300,7 +300,7 @@ class Main(QWidget):
         self.status = QLabel("")
         self.status.setStyleSheet("color:#d1d5db;")
         self.status.hide()
-        self.console_title = QLabel("🖥 Console output")
+        self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(280)
@@ -312,7 +312,7 @@ class Main(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(0)
-        title = QLabel("💽 Alpine USB XFCE Installer")
+        title = QLabel("Alpine USB XFCE Installer")
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
             QLabel { color:#ffffff; margin:0px; padding:0px; }
@@ -330,7 +330,7 @@ class Main(QWidget):
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addSpacing(2)
-        img_title = QLabel("1. 🧱 Image")
+        img_title = QLabel("1. Image")
         img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         layout.addWidget(img_title)
         img_grid = QGridLayout()
@@ -338,10 +338,12 @@ class Main(QWidget):
         img_grid.setColumnStretch(1, 1)
         img_grid.setHorizontalSpacing(6)
         img_grid.setVerticalSpacing(0)
-        choose_output = QPushButton("📁 Select path")
+        choose_output = QPushButton("Select path")
+        choose_output.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         choose_output.clicked.connect(self.choose_output_path)
         choose_output.setFixedWidth(120)
-        build = QPushButton("🛠 Build image")
+        build = QPushButton("Build image")
+        build.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
         build.clicked.connect(self.build_image)
         build.setFixedWidth(150)
         build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
@@ -357,7 +359,7 @@ class Main(QWidget):
         layout.addLayout(img_grid)
         layout.addSpacing(3)
 
-        usb_title = QLabel("2. 🔌 USB target")
+        usb_title = QLabel("2. USB target")
         usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         layout.addWidget(usb_title)
         usb_box = QVBoxLayout()
@@ -366,10 +368,12 @@ class Main(QWidget):
         usb_row = QHBoxLayout()
         usb_row.setContentsMargins(0, 0, 0, 0)
         usb_row.setSpacing(4)
-        pick = QPushButton("🔍 Select USB")
+        pick = QPushButton("Select USB")
+        pick.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon))
         pick.clicked.connect(self.pick)
         pick.setFixedWidth(150)
-        flash = QPushButton("⚡ Flash USB")
+        flash = QPushButton("Flash USB")
+        flash.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         flash.clicked.connect(self.flash)
         flash.setFixedWidth(150)
         flash.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
