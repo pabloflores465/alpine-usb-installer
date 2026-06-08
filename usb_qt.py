@@ -4,7 +4,7 @@ from __future__ import annotations
 import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QPoint, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -44,8 +44,10 @@ def make_button_icon(kind: str) -> QIcon:
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
+    def pts(items):
+        return [QPoint(x, y) for x, y in items]
     if kind == "folder":
-        p.drawPolyline([(3, 7), (3, 16), (17, 16), (17, 6), (9, 6), (7, 4), (3, 4), (3, 7)])
+        p.drawPolyline(pts([(3, 7), (3, 16), (17, 16), (17, 6), (9, 6), (7, 4), (3, 4), (3, 7)]))
     elif kind == "build":
         p.drawLine(10, 3, 10, 14)
         p.drawLine(6, 7, 10, 3)
@@ -58,7 +60,7 @@ def make_button_icon(kind: str) -> QIcon:
         p.drawRect(13, 5, 3, 3)
         p.drawEllipse(8, 14, 4, 4)
     elif kind == "flash":
-        p.drawPolyline([(11, 2), (5, 11), (10, 11), (8, 18), (15, 8), (10, 8), (11, 2)])
+        p.drawPolyline(pts([(11, 2), (5, 11), (10, 11), (8, 18), (15, 8), (10, 8), (11, 2)]))
     p.end()
     return QIcon(pix)
 
