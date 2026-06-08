@@ -277,7 +277,7 @@ class Main(QWidget):
         self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
-        self.status = QLabel("Select image and USB device.")
+        self.status = QLabel("Console output")
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(220)
         self.log.setMaximumHeight(320)
@@ -368,7 +368,7 @@ class Main(QWidget):
         devs = list_devices()
         if devs and not self.device.text().strip():
             self.device.setText(devs[0][1])
-        self.status.setText(f"Found {len(devs)} removable device(s)." if devs else "No USB found. Use Select USB/manual device.")
+        self.status.setText("Console output")
 
     def pick(self):
         dlg = DeviceDialog(self)
