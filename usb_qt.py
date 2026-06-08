@@ -277,9 +277,6 @@ class Main(QWidget):
         self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
-        self.selected = QLabel("Selected USB: none")
-        self.selected.setWordWrap(True)
-        self.selected.setStyleSheet("background:#064e3b;color:#ffffff;font-weight:bold;padding:10px;border:1px solid #10b981;")
         self.status = QLabel("Select image and USB device.")
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(220)
@@ -345,10 +342,6 @@ class Main(QWidget):
         usb_grid.addWidget(flash, 0, 3)
         layout.addLayout(usb_grid)
         self.device.textChanged.connect(self.update_selected)
-        layout.addWidget(self.selected)
-        hint = QLabel("Tip: the USB name/volume appears after the size, e.g. /dev/disk7 (62.0 GB) DataTraveler — MYUSB")
-        hint.setStyleSheet("color:#d1d5db;")
-        layout.addWidget(hint)
         warn = QLabel("WARNING: Flashing will permanently erase selected USB device.")
         warn.setStyleSheet("color:#b91c1c;font-weight:bold;")
         layout.addWidget(warn)
@@ -384,7 +377,6 @@ class Main(QWidget):
 
     def update_selected(self):
         val = self.device.text().strip() or "none"
-        self.selected.setText(f"Selected USB: {val}")
         self.setWindowTitle(f"{APP_TITLE} — {val}" if val != "none" else APP_TITLE)
 
     def build_image(self):
