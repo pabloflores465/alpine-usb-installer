@@ -334,8 +334,8 @@ class Main(QWidget):
         self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        self.log.setMinimumHeight(280)
-        self.log.setMaximumHeight(460)
+        self.log.setMinimumHeight(320)
+        self.log.setMaximumHeight(520)
         self.build()
         self.refresh()
 
