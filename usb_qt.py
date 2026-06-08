@@ -197,7 +197,7 @@ class BuildWorker(QThread):
             if platform.system() == "Darwin":
                 # Build script works inside Docker Desktop on macOS.
                 docker_cmd = (
-                    "apk add --no-cache bash curl sudo e2fsprogs dosfstools util-linux sfdisk "
+                    "apk add --no-cache bash curl sudo python3 e2fsprogs dosfstools util-linux sfdisk "
                     "multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools "
                     "xorriso rsync kmod >/dev/null && "
                     "rm -f alpine-usb-xfce.img && "

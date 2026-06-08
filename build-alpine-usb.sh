@@ -25,6 +25,16 @@ fi
 
 chmod +x "$SCRIPT_DIR/configure-alpine-usb.sh"
 
+# Docker Desktop/macOS can be slow to expose NBD partition nodes (/dev/nbdXp2).
+# Patch alpine-make-vm-image to force partition re-read and wait longer.
+python3 - <<'PY'
+from pathlib import Path
+p = Path('.work/alpine-make-vm-image.uefi')
+s = p.read_text()
+s = s.replace('''\t# This is needed when running in a container.\n\tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"''', '''\t# This is needed when running in a container. Docker Desktop can be slow\n\t# to expose NBD partition nodes, so force a partition re-read first.\n\tpartprobe "$disk_dev" 2>/dev/null || true\n\tblockdev --rereadpt "$disk_dev" 2>/dev/null || true\n\tpartx -u "$disk_dev" 2>/dev/null || true\n\tfor i in $(seq 1 30); do\n\t\tsettle_dev_node "$root_dev" && break\n\t\tsleep 1\n\tdone\n\tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"''')
+p.write_text(s)
+PY
+
 cat > "$SCRIPT_DIR/repositories" <<EOF
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/main
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/community
