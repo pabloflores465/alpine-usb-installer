@@ -277,7 +277,10 @@ class Main(QWidget):
         self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
         self.image_size = QLineEdit("16G")
         self.device = QLineEdit()
-        self.status = QLabel("Console output")
+        self.status = QLabel("Ready.")
+        self.status.setStyleSheet("color:#d1d5db;")
+        self.console_title = QLabel("Console output")
+        self.console_title.setStyleSheet("font-size:16px;font-weight:bold;color:#ffffff;margin-top:14px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(220)
         self.log.setMaximumHeight(320)
@@ -346,7 +349,9 @@ class Main(QWidget):
         warn.setStyleSheet("color:#b91c1c;font-weight:bold;")
         layout.addWidget(warn)
         self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide(); layout.addWidget(self.progress)
-        layout.addWidget(self.status); layout.addWidget(self.log)
+        layout.addWidget(self.status)
+        layout.addWidget(self.console_title)
+        layout.addWidget(self.log)
 
     def browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.img *.raw *.iso);;All files (*)")
@@ -368,7 +373,7 @@ class Main(QWidget):
         devs = list_devices()
         if devs and not self.device.text().strip():
             self.device.setText(devs[0][1])
-        self.status.setText("Console output")
+        self.status.setText("Ready.")
 
     def pick(self):
         dlg = DeviceDialog(self)
