@@ -14,6 +14,9 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; };
 
 need curl
 need sudo
+need python3
+need mmd
+need mcopy
 
 mkdir -p "$WORK_DIR"
 
@@ -70,6 +73,113 @@ if n != 1:
 p.write_text(s)
 PY
 
+install_uefi_removable_bootloader() {
+  # Many real PCs only list USB media as bootable when the removable-media
+  # fallback path exists. alpine-make-vm-image only creates startup.nsh plus
+  # /grub/grub.cfg, which works in some EFI shells/QEMU but is not enough for
+  # typical firmware boot menus.
+  local image="$1"
+  local fallback="$SCRIPT_DIR/efi-fallback/BOOTX64.EFI"
+  local standalone_cfg="$SCRIPT_DIR/efi-fallback/grub-standalone.cfg"
+  local esp_offset root_uuid image_meta grub_cfg
+
+  image_meta="$(python3 - "$image" <<'PY'
+import struct
+import sys
+import uuid
+
+image = sys.argv[1]
+esp_type = bytes.fromhex("28732ac11ff8d211ba4b00a0c93ec93b")    # C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+linux_type = bytes.fromhex("af3dc60f838472478e793d69d8477de4")  # 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+sector = 512
+esp_offset = None
+root_offset = None
+
+with open(image, "rb") as f:
+    f.seek(sector)
+    header = f.read(sector)
+    if header[:8] != b"EFI PART":
+        raise SystemExit("Image does not contain a GPT header")
+    entries_lba = struct.unpack_from("<Q", header, 72)[0]
+    num_entries = struct.unpack_from("<I", header, 80)[0]
+    entry_size = struct.unpack_from("<I", header, 84)[0]
+    f.seek(entries_lba * sector)
+    for _ in range(num_entries):
+        entry = f.read(entry_size)
+        first_lba = struct.unpack_from("<Q", entry, 32)[0]
+        if entry[:16] == esp_type:
+            esp_offset = first_lba * sector
+        elif entry[:16] == linux_type and root_offset is None:
+            root_offset = first_lba * sector
+    if esp_offset is None:
+        raise SystemExit("EFI System Partition not found")
+    if root_offset is None:
+        raise SystemExit("Linux root partition not found")
+    f.seek(root_offset + 1024)
+    superblock = f.read(2048)
+    if superblock[0x38:0x3a] != b"\x53\xef":
+        raise SystemExit("Root partition does not look like ext2/3/4")
+    root_uuid = uuid.UUID(bytes=superblock[0x68:0x78])
+
+print(f"esp_offset={esp_offset}")
+print(f"root_uuid={root_uuid}")
+PY
+)"
+  eval "$image_meta"
+
+  grub_cfg="$WORK_DIR/grub-usb.cfg"
+  mkdir -p "$SCRIPT_DIR/efi-fallback"
+  cat > "$grub_cfg" <<EOF
+set default=0
+set timeout=3
+set timeout_style=menu
+
+insmod part_gpt
+insmod fat
+insmod gzio
+insmod linux
+insmod search_fs_file
+search --no-floppy --file --set=root /vmlinuz-lts
+
+menuentry 'Alpine Linux XFCE (LightDM)' {
+    linux /vmlinuz-lts root=UUID=$root_uuid ro rootfstype=ext4 rootwait rootdelay=5 modules=ata,base,ext4,kms,mmc,nvme,scsi,usb,virtio console=tty0
+    initrd /initramfs-lts
+}
+
+menuentry 'Alpine Linux XFCE (safe graphics)' {
+    linux /vmlinuz-lts root=UUID=$root_uuid ro rootfstype=ext4 rootwait rootdelay=5 modules=ata,base,ext4,kms,mmc,nvme,scsi,usb,virtio console=tty0 nomodeset
+    initrd /initramfs-lts
+}
+EOF
+
+  need grub-mkstandalone
+  cat > "$standalone_cfg" <<EOF
+insmod part_gpt
+insmod fat
+insmod search_fs_file
+search --no-floppy --file --set=esp /grub/grub.cfg
+# Keep prefix on the standalone memdisk so GRUB can load embedded modules.
+# If prefix points to the USB ESP, GRUB looks for /grub/x86_64-efi/*.mod there.
+set prefix=(memdisk)/boot/grub
+configfile (\$esp)/grub/grub.cfg
+
+$(cat "$grub_cfg")
+EOF
+  grub-mkstandalone \
+    -O x86_64-efi \
+    --modules="part_gpt fat gzio linux search_fs_file configfile normal" \
+    -o "$fallback" \
+    "boot/grub/grub.cfg=$standalone_cfg"
+
+  mmd -i "${image}@@${esp_offset}" ::/EFI >/dev/null 2>&1 || true
+  mmd -i "${image}@@${esp_offset}" ::/EFI/BOOT >/dev/null 2>&1 || true
+  mmd -i "${image}@@${esp_offset}" ::/grub >/dev/null 2>&1 || true
+  mcopy -o -i "${image}@@${esp_offset}" "$fallback" ::/EFI/BOOT/BOOTX64.EFI
+  mcopy -o -i "${image}@@${esp_offset}" "$grub_cfg" ::/grub/grub.cfg
+  echo "Installed removable UEFI bootloader: /EFI/BOOT/BOOTX64.EFI"
+  echo "Installed USB GRUB config: /grub/grub.cfg (root UUID $root_uuid)"
+}
+
 cat > "$SCRIPT_DIR/repositories" <<EOF
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/main
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/community
@@ -92,6 +202,8 @@ sudo "$MAKE_VM_IMAGE" \
   --script-chroot \
   "$SCRIPT_DIR/$IMAGE_NAME" \
   "$SCRIPT_DIR/configure-alpine-usb.sh"
+
+install_uefi_removable_bootloader "$SCRIPT_DIR/$IMAGE_NAME"
 
 cat <<EOF
 

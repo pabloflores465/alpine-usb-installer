@@ -1,86 +1,90 @@
 # Alpine USB XFCE Builder
 
-Herramienta para construir una imagen USB booteable de Alpine Linux x86_64 con escritorio XFCE preconfigurado.
+Tool for building a bootable Alpine Linux x86_64 USB image with a preconfigured XFCE desktop.
 
-La imagen generada está pensada para grabarse directamente a una USB y arrancar como sistema Alpine instalado, no solo como instalador básico.
+The generated image is meant to be written directly to a USB drive and booted as an installed Alpine system, not just as a basic installer.
 
-## Estado
+## Status
 
-Este software está en desarrollo constante. La configuración puede cambiar según nuevas versiones de Alpine, cambios en hardware, controladores, gestores de sesión y mejoras detectadas durante pruebas reales.
+This software is under active development. The configuration may change as Alpine versions, hardware support, drivers, display managers, and real-world testing evolve.
 
-## Qué configura
+## What it configures
 
 - Alpine Linux `latest-stable`
-- Boot UEFI para USB removible
+- Removable USB UEFI boot support (`/EFI/BOOT/BOOTX64.EFI`)
 - XFCE
 - LightDM + `lightdm-gtk-greeter`
-- Teclado español
-- Usuario inicial `pablo`
-- `sudo` y `doas`
-- D-Bus, elogind, eudev, seatd
-- NetworkManager
+- English system language + Latin American Spanish keyboard layout (`latam`)
+- Initial user `pablo`
+- `sudo` and `doas`
+- D-Bus, elogind, polkit, eudev, seatd
+- NetworkManager + Wi-Fi (`wpa_supplicant`, Linux firmware)
 - PipeWire audio
 - Firefox ESR
-- Soporte input/video común:
+- Common input/video support:
   - `xf86-input-libinput`
-  - AMDGPU/ATI/VESA
-- Optimizaciones para uso en USB:
-  - `tmpfs` para `/tmp` y `/var/tmp`
-  - menor swappiness
-  - menos escrituras de cache APK
-  - `noatime` donde aplica
+  - AMDGPU/ATI/Intel/Nouveau/VESA/FBDEV
+- USB-friendly optimizations:
+  - `tmpfs` for `/tmp` and `/var/tmp`
+  - lower swappiness
+  - fewer APK cache writes
+  - `noatime` where applicable
 
-## Requisitos
+## Requirements
 
-Construcción recomendada en Linux o Docker Desktop con soporte NBD.
+Building is recommended on Linux or Docker Desktop with NBD support.
 
-En macOS, Docker Desktop puede funcionar mejor que Colima para este flujo porque la herramienta usa `qemu-nbd`.
+On macOS, Docker Desktop may work better than Colima for this workflow because the build uses `qemu-nbd`.
 
-## GUI rápida para grabar USB
+On native Linux you also need `mtools` and `grub-efi`/`grub-mkstandalone` to install the removable UEFI bootloader into the EFI partition.
 
-El repo incluye una utilidad gráfica simple, cross-platform, para seleccionar la imagen y grabarla a la USB.
+Python GUI dependencies are listed in `requirements.txt`. The helper script creates its own `.qtvenv` automatically if needed.
 
-GUI Qt:
+## Quick USB flashing GUI
+
+The repository includes a simple cross-platform graphical utility to select an image and write it to a USB drive.
+
+Qt GUI:
 
 ```sh
 ./run_qt_gui.sh
 ```
 
-Desde la GUI puedes:
+From the GUI you can:
 
-- construir la imagen (`Build image`)
-- seleccionar tamaño (`16G`, `32G`, etc.)
-- seleccionar USB
-- grabar la imagen (`Flash USB`)
+- build the image (`Build image`)
+- select the image size (`16G`, `32G`, etc.)
+- select the target USB drive
+- write the image (`Flash USB`)
 
-En macOS, `Build image` usa Docker Desktop porque la construcción necesita Linux/NBD.
+On macOS, `Build image` uses Docker Desktop because the build requires Linux/NBD.
 
-Si el selector no detecta tu USB, puedes escribir manualmente el dispositivo, por ejemplo `/dev/disk7` en macOS o `/dev/sdb` en Linux.
+If the selector does not detect your USB drive, you can type the device manually, for example `/dev/disk7` on macOS or `/dev/sdb` on Linux.
 
-Soporte:
+Support:
 
-- macOS: usa `diskutil`, `dd` y pide permisos de administrador.
-- Linux: usa `lsblk`, `dd` y `sudo`/`pkexec` si hace falta.
-- Windows: por seguridad no hace raw flashing todavía; usa Rufus/balenaEtcher con la imagen generada.
+- macOS: uses `diskutil`, `dd`, and asks for administrator permissions.
+- Linux: uses `lsblk`, `dd`, and `sudo`/`pkexec` when needed.
+- Windows: raw flashing is not implemented yet for safety; use Rufus/balenaEtcher with the generated image.
 
-## Construir imagen
+## Build the image
 
 ```sh
 chmod +x build-alpine-usb.sh configure-alpine-usb.sh
 IMAGE_SIZE=16G ./build-alpine-usb.sh
 ```
 
-Resultado:
+Result:
 
 ```txt
 alpine-usb-xfce.img
 ```
 
-## Grabar USB
+## Write to USB
 
-⚠️ Esto borra por completo el dispositivo destino.
+⚠️ This completely erases the target device.
 
-En macOS:
+On macOS:
 
 ```sh
 diskutil unmountDisk /dev/diskX
@@ -89,40 +93,40 @@ sync
 diskutil eject /dev/diskX
 ```
 
-En Linux:
+On Linux:
 
 ```sh
 lsblk
 sudo dd if=alpine-usb-xfce.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-Usa disco completo (`/dev/sdX`, `/dev/diskX`), no partición (`/dev/sdX1`).
+Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`).
 
-## Login inicial
+## Initial login
 
 ```txt
-usuario: pablo
+user: pablo
 password: pablo
 root password: pablo
 ```
 
-Cambia passwords después del primer arranque:
+Change passwords after the first boot:
 
 ```sh
 passwd
 sudo passwd root
 ```
 
-## Notas
+## Notes
 
-- La imagen generada no se incluye en el repo.
-- El repo contiene scripts para reproducir la imagen.
-- Si LightDM falla, se puede iniciar XFCE manualmente con:
+- The generated image is not included in the repository.
+- The repository contains the scripts needed to reproduce the image.
+- If LightDM fails, XFCE can be started manually with:
 
 ```sh
 startx /usr/bin/startxfce4
 ```
 
-## Licencia
+## License
 
 MIT
