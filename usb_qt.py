@@ -411,11 +411,11 @@ class Main(QWidget):
         self.builder = None
         self.worker = None
         self.console_toggle = QPushButton("Console output ▾")
-        self.console_toggle.setStyleSheet("text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:3px 8px;background:#1f2937;")
         self.console_toggle.clicked.connect(self.toggle_console)
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(320)
         self.log.setMaximumHeight(520)
+        self.update_console_style(expanded=True)
         self.build()
         self.refresh()
 
@@ -523,10 +523,33 @@ class Main(QWidget):
         layout.addWidget(self.console_toggle)
         layout.addWidget(self.log)
 
+    def update_console_style(self, expanded: bool):
+        if expanded:
+            self.console_toggle.setStyleSheet(
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:5px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-bottom:0;"
+                "border-top-left-radius:6px;border-top-right-radius:6px;"
+                "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
+            )
+            self.log.setStyleSheet(
+                "background:#0b1220;color:#ffffff;border:1px solid #374151;"
+                "border-top:0;border-top-left-radius:0px;border-top-right-radius:0px;"
+                "border-bottom-left-radius:6px;border-bottom-right-radius:6px;"
+            )
+        else:
+            self.console_toggle.setStyleSheet(
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:5px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-radius:6px;"
+            )
+
     def toggle_console(self):
         visible = self.log.isVisible()
-        self.log.setVisible(not visible)
-        self.console_toggle.setText("Console output ▸" if visible else "Console output ▾")
+        expanded = not visible
+        self.log.setVisible(expanded)
+        self.console_toggle.setText("Console output ▾" if expanded else "Console output ▸")
+        self.update_console_style(expanded)
 
     def browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.img *.raw *.iso);;All files (*)")
