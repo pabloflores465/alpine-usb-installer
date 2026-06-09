@@ -4,11 +4,11 @@ from __future__ import annotations
 import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSize, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QTextCursor
+from PySide6.QtCore import QPoint, Qt, QThread, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
+    QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
     QDialog, QInputDialog, QStyle, QTextEdit
 )
 
@@ -180,6 +180,11 @@ class DeviceDialog(QDialog):
         layout.addWidget(warn)
         self.list = QListWidget()
         layout.addWidget(self.list, 1)
+        self.empty_usb_message = QLabel("No USB devices found. Please connect a drive and rescan.")
+        self.empty_usb_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_usb_message.setStyleSheet("background:#0b1220;color:#ffffff;border:1px solid #374151;font-size:15pt;font-weight:bold;")
+        self.empty_usb_message.hide()
+        layout.addWidget(self.empty_usb_message, 1)
         row = QHBoxLayout()
         row.addWidget(QLabel("Manual device:"))
         self.manual = QLineEdit()
@@ -207,18 +212,13 @@ class DeviceDialog(QDialog):
         self.list.clear()
         self.devices = list_devices()
         if self.devices:
+            self.list.show()
+            self.empty_usb_message.hide()
             for _, label in self.devices:
                 self.list.addItem(label)
         else:
-            item = QListWidgetItem("No USB devices found. Please connect a drive and rescan.")
-            item.setFlags(Qt.ItemFlag.NoItemFlags)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = QFont()
-            font.setBold(True)
-            font.setPointSize(15)
-            item.setFont(font)
-            item.setSizeHint(QSize(0, max(220, self.list.viewport().height())))
-            self.list.addItem(item)
+            self.list.hide()
+            self.empty_usb_message.show()
         self.list.clearSelection()
         self.update_use_button()
         if show_empty_modal and not self.devices:
