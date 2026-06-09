@@ -5,7 +5,7 @@ import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
@@ -212,6 +212,10 @@ class DeviceDialog(QDialog):
         else:
             item = QListWidgetItem("No USB devices found. Please connect a drive and rescan.")
             item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            font = QFont()
+            font.setBold(True)
+            item.setFont(font)
             self.list.addItem(item)
         self.list.clearSelection()
         self.update_use_button()
