@@ -415,9 +415,6 @@ class Main(QWidget):
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(320)
         self.log.setMaximumHeight(520)
-        self.console_placeholder = QWidget()
-        self.console_placeholder.setMinimumHeight(320)
-        self.console_placeholder.hide()
         self.update_console_style(expanded=True)
         self.build()
         self.refresh()
@@ -525,31 +522,33 @@ class Main(QWidget):
         layout.addSpacing(3)
         layout.addWidget(self.console_toggle)
         layout.addWidget(self.log)
-        layout.addWidget(self.console_placeholder)
+        layout.addStretch(1)
 
     def update_console_style(self, expanded: bool):
-        self.console_toggle.setStyleSheet(
-            "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
-            "margin:0px;padding:5px 10px;background:#1f2937;"
-            "border:1px solid #374151;border-bottom:0;"
-            "border-top-left-radius:6px;border-top-right-radius:6px;"
-            "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
-        )
-        panel_style = (
-            "background:#0b1220;color:#ffffff;border:1px solid #374151;"
-            "border-top:0;border-top-left-radius:0px;border-top-right-radius:0px;"
-            "border-bottom-left-radius:6px;border-bottom-right-radius:6px;"
-        )
-        self.log.setStyleSheet(panel_style)
-        self.console_placeholder.setStyleSheet(panel_style)
+        if expanded:
+            self.console_toggle.setStyleSheet(
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:5px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-bottom:0;"
+                "border-top-left-radius:6px;border-top-right-radius:6px;"
+                "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
+            )
+            self.log.setStyleSheet(
+                "background:#0b1220;color:#ffffff;border:1px solid #374151;"
+                "border-top:0;border-top-left-radius:0px;border-top-right-radius:0px;"
+                "border-bottom-left-radius:6px;border-bottom-right-radius:6px;"
+            )
+        else:
+            self.console_toggle.setStyleSheet(
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:5px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-radius:6px;"
+            )
 
     def toggle_console(self):
         visible = self.log.isVisible()
         expanded = not visible
-        if not expanded:
-            self.console_placeholder.setFixedHeight(max(self.log.height(), self.log.minimumHeight()))
         self.log.setVisible(expanded)
-        self.console_placeholder.setVisible(not expanded)
         self.console_toggle.setText("Console output ▾" if expanded else "Console output ▸")
         self.update_console_style(expanded)
 
