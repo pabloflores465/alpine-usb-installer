@@ -63,6 +63,10 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
         p.drawEllipse(xy(8), xy(14), xy(4), xy(4))
     elif kind == "flash":
         p.drawPolyline(pts([(xy(11), xy(2)), (xy(5), xy(11)), (xy(10), xy(11)), (xy(8), xy(18)), (xy(15), xy(8)), (xy(10), xy(8)), (xy(11), xy(2))]))
+    elif kind == "refresh":
+        p.drawArc(xy(4), xy(4), xy(12), xy(12), 35 * 16, 285 * 16)
+        p.drawLine(xy(15), xy(4), xy(15), xy(9))
+        p.drawLine(xy(15), xy(4), xy(10), xy(4))
     elif kind == "check":
         p.drawLine(xy(4), xy(10), xy(8), xy(15)); p.drawLine(xy(8), xy(15), xy(16), xy(5))
     elif kind == "warn":
@@ -165,12 +169,21 @@ def list_devices():
     return devices
 
 
+class DeviceScanWorker(QThread):
+    done = Signal(list)
+
+    def run(self):
+        self.done.emit(list_devices())
+
+
 class DeviceDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select USB device")
         self.resize(620, 380)
         self.selected = None
+        self.scanner = None
+        self.pending_empty_modal = False
         layout = QVBoxLayout(self)
         title = QLabel("Select target USB device")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -192,7 +205,7 @@ class DeviceDialog(QDialog):
         self.use = QPushButton("Use selected")
         self.use.setIcon(make_button_icon("check"))
         self.refresh = QPushButton("Refresh")
-        self.refresh.setIcon(make_button_icon("build"))
+        self.refresh.setIcon(make_button_icon("refresh"))
         self.cancel = QPushButton("Cancel")
         self.cancel.setIcon(make_button_icon("error"))
         self.cancel.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
@@ -206,20 +219,44 @@ class DeviceDialog(QDialog):
         self.populate(show_empty_modal=True)
 
     def populate(self, show_empty_modal: bool = True):
+        if self.scanner and self.scanner.isRunning():
+            return
+        self.pending_empty_modal = show_empty_modal
+        self.devices = []
         self.list.clear()
-        self.devices = list_devices()
+        self.list.hide()
+        self.empty_usb_message.setText("Scanning for USB devices…")
+        self.empty_usb_message.show()
+        self.refresh.setEnabled(False)
+        self.refresh.setText("Scanning…")
+        self.use.setEnabled(False)
+        self.scanner = DeviceScanWorker(self)
+        self.scanner.done.connect(self.scan_done)
+        self.scanner.finished.connect(self.scan_finished)
+        self.scanner.start()
+
+    def scan_done(self, devices):
+        self.devices = devices
+        self.list.clear()
         if self.devices:
-            self.list.show()
             self.empty_usb_message.hide()
+            self.list.show()
             for _, label in self.devices:
                 self.list.addItem(label)
         else:
             self.list.hide()
+            self.empty_usb_message.setText("No USB devices found. Please connect a drive and rescan.")
             self.empty_usb_message.show()
         self.list.clearSelection()
         self.update_use_button()
-        if show_empty_modal and not self.devices:
+        if self.pending_empty_modal and not self.devices:
             modal(self, "info", "No USB devices found", "Please connect a drive and rescan.")
+
+    def scan_finished(self):
+        self.refresh.setEnabled(True)
+        self.refresh.setText("Refresh")
+        if self.sender() is self.scanner:
+            self.scanner = None
 
     def update_use_button(self):
         self.use.setEnabled(bool(self.list.currentItem() or self.manual.text().strip()))
@@ -234,6 +271,12 @@ class DeviceDialog(QDialog):
         else:
             return
         self.accept()
+
+    def closeEvent(self, event):
+        if self.scanner and self.scanner.isRunning():
+            event.ignore()
+            return
+        event.accept()
 
 
 class BuildWorker(QThread):
