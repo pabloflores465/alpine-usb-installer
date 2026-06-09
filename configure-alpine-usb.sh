@@ -1,64 +1,334 @@
 #!/bin/sh
 # Runs inside target Alpine image/chroot via alpine-make-vm-image.
-set -eux
+# The script is intentionally configurable through ALPINE_USB_* variables so
+# the Qt installer can build more than the original fixed XFCE profile.
+set -eu
 
-# ---- Base system ----
+# ---- Helpers -------------------------------------------------------------
+die() { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+is_enabled() {
+  case "$(lower "${1:-0}")" in
+    1|yes|true|on|enabled) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_words() {
+  printf '%s' "${1:-}" | tr ',;:' '   ' | tr '\n\t' '  '
+}
+
+has_word() {
+  needle="$1"
+  words=" $2 "
+  case "$words" in *" $needle "*) return 0 ;; *) return 1 ;; esac
+}
+
+PACKAGES=""
+append_packages() {
+  for pkg in "$@"; do
+    [ -n "$pkg" ] || continue
+    case " $PACKAGES " in
+      *" $pkg "*) ;;
+      *) PACKAGES="$PACKAGES $pkg" ;;
+    esac
+  done
+}
+
+shell_quote() {
+  # single-quote a value for generated shell scripts
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+safe_token() {
+  name="$1"; value="$2"
+  case "$value" in
+    *[!A-Za-z0-9_.,@%+=:/-]*|"") die "$name contains unsupported characters: $value" ;;
+  esac
+}
+
+safe_optional_token() {
+  name="$1"; value="$2"
+  [ -z "$value" ] && return 0
+  safe_token "$name" "$value"
+}
+
+# ---- Input configuration -------------------------------------------------
+USER_NAME="${ALPINE_USB_USER:-pablo}"
+USER_PASSWORD="${ALPINE_USB_PASSWORD:-pablo}"
+ROOT_PASSWORD="${ALPINE_USB_ROOT_PASSWORD:-$USER_PASSWORD}"
+HOSTNAME="${ALPINE_USB_HOSTNAME:-alpine-usb}"
+TIMEZONE="${ALPINE_USB_TIMEZONE:-UTC}"
+LOCALE="${ALPINE_USB_LOCALE:-en_US.UTF-8}"
+LANGUAGE_VALUE="${ALPINE_USB_LANGUAGE:-${LOCALE%%.*}:en}"
+CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-la-latin1}"
+XKB_LAYOUT="${ALPINE_USB_XKB_LAYOUT:-latam}"
+XKB_VARIANT="${ALPINE_USB_XKB_VARIANT:-}"
+XKB_MODEL="${ALPINE_USB_XKB_MODEL:-pc105}"
+
+DESKTOP="$(lower "${ALPINE_USB_DESKTOP:-xfce}")"
+TILING_WMS="$(normalize_words "${ALPINE_USB_TILING_WMS:-}")"
+DEFAULT_SESSION="$(lower "${ALPINE_USB_DEFAULT_SESSION:-auto}")"
+DISPLAY_MANAGER="$(lower "${ALPINE_USB_DISPLAY_MANAGER:-auto}")"
+NETWORK_BACKEND="$(lower "${ALPINE_USB_NETWORK:-networkmanager}")"
+WIFI="${ALPINE_USB_WIFI:-1}"
+BLUETOOTH="${ALPINE_USB_BLUETOOTH:-1}"
+AUDIO="$(lower "${ALPINE_USB_AUDIO:-pipewire}")"
+BROWSER="$(lower "${ALPINE_USB_BROWSER:-firefox-esr}")"
+FIRMWARE="$(lower "${ALPINE_USB_FIRMWARE:-full}")"
+BOOTLOADER="$(lower "${ALPINE_USB_BOOTLOADER:-grub}")"
+KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-lts}")"
+ROOTFS="$(lower "${ALPINE_USB_ROOTFS:-ext4}")"
+BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
+INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}"
+DRY_RUN="${ALPINE_USB_DRY_RUN:-0}"
+
+# ---- Validation and auto resolution --------------------------------------
+case "$USER_NAME" in [a-z_]*) ;; *) die "Username must start with a lowercase letter or underscore" ;; esac
+case "$USER_NAME" in *[!a-z0-9_-]*) die "Username may contain only lowercase letters, numbers, underscore and dash" ;; esac
+case "$USER_PASSWORD$ROOT_PASSWORD" in *:*|*"\n"*) die "Passwords may not contain ':' or newlines" ;; esac
+case "$HOSTNAME" in ""|-*|*-) die "Hostname must not be empty or start/end with '-'" ;; esac
+case "$HOSTNAME" in *[!A-Za-z0-9-]*) die "Hostname may contain only letters, numbers and dash" ;; esac
+safe_token "Timezone" "$TIMEZONE"
+safe_token "Locale" "$LOCALE"
+safe_token "Language" "$LANGUAGE_VALUE"
+safe_token "Console keymap" "$CONSOLE_KEYMAP"
+safe_token "XKB layout" "$XKB_LAYOUT"
+safe_optional_token "XKB variant" "$XKB_VARIANT"
+safe_token "XKB model" "$XKB_MODEL"
+case "$BOOT_TIMEOUT" in *[!0-9]*|"") die "Boot timeout must be a number" ;; esac
+
+case "$DESKTOP" in xfce|gnome|plasma|mate|lxqt|none) ;; *) die "Unsupported desktop: $DESKTOP" ;; esac
+case "$DISPLAY_MANAGER" in auto|lightdm|sddm|gdm|lxdm|greetd|none) ;; *) die "Unsupported display manager: $DISPLAY_MANAGER" ;; esac
+case "$NETWORK_BACKEND" in networkmanager|none) ;; *) die "Unsupported network backend: $NETWORK_BACKEND" ;; esac
+case "$AUDIO" in pipewire|alsa|none) ;; *) die "Unsupported audio option: $AUDIO" ;; esac
+case "$BROWSER" in firefox-esr|firefox|chromium|none) ;; *) die "Unsupported browser: $BROWSER" ;; esac
+case "$FIRMWARE" in full|none) ;; *) die "Unsupported firmware option: $FIRMWARE" ;; esac
+case "$BOOTLOADER" in grub|systemd-boot|systemdboot) ;; *) die "Unsupported bootloader: $BOOTLOADER" ;; esac
+[ "$BOOTLOADER" = "systemdboot" ] && BOOTLOADER="systemd-boot"
+case "$KERNEL_FLAVOR" in lts|stable) ;; *) die "Unsupported kernel flavor: $KERNEL_FLAVOR" ;; esac
+case "$ROOTFS" in ext4) ;; *) die "Unsupported root filesystem in this installer: $ROOTFS" ;; esac
+
+VALID_WMS="i3 sway hyprland awesome bspwm openbox labwc"
+for wm in $TILING_WMS; do
+  has_word "$wm" "$VALID_WMS" || die "Unsupported window manager: $wm"
+done
+
+if [ "$DEFAULT_SESSION" = "auto" ]; then
+  if [ "$DESKTOP" != "none" ]; then
+    DEFAULT_SESSION="$DESKTOP"
+  else
+    # shellcheck disable=SC2086 # TILING_WMS is normalized to space-separated identifiers.
+    set -- $TILING_WMS
+    DEFAULT_SESSION="${1:-shell}"
+  fi
+fi
+case "$DEFAULT_SESSION" in xfce|gnome|plasma|mate|lxqt|i3|sway|hyprland|awesome|bspwm|openbox|labwc|shell) ;;
+  *) die "Unsupported default session: $DEFAULT_SESSION" ;;
+esac
+
+if [ "$DISPLAY_MANAGER" = "auto" ]; then
+  case "$DESKTOP" in
+    gnome) DISPLAY_MANAGER="gdm" ;;
+    plasma|lxqt) DISPLAY_MANAGER="sddm" ;;
+    xfce|mate) DISPLAY_MANAGER="lightdm" ;;
+    none)
+      if [ -n "$TILING_WMS" ]; then DISPLAY_MANAGER="greetd"; else DISPLAY_MANAGER="none"; fi ;;
+  esac
+fi
+
+case "$DEFAULT_SESSION" in
+  shell)
+    case "$DISPLAY_MANAGER" in none|greetd) ;; *) die "A graphical display manager needs a desktop or WM session" ;; esac ;;
+  sway|hyprland|labwc)
+    case "$DISPLAY_MANAGER" in lightdm|lxdm) die "Wayland sessions ($DEFAULT_SESSION) require greetd, SDDM, GDM or no display manager" ;; esac ;;
+esac
+
+GRAPHICAL=0
+if [ "$DESKTOP" != "none" ] || [ -n "$TILING_WMS" ]; then GRAPHICAL=1; fi
+case "$DISPLAY_MANAGER" in lightdm|sddm|gdm|lxdm) GRAPHICAL=1 ;; esac
+
+# ---- Package selection ----------------------------------------------------
+append_packages \
+  alpine-base "linux-$KERNEL_FLAVOR" \
+  eudev seatd acpid kbd upower chrony ca-certificates tzdata \
+  dbus dbus-x11 elogind polkit-elogind \
+  doas sudo bash zsh curl wget git nano vim htop less \
+  e2fsprogs dosfstools lsblk blkid util-linux \
+  font-noto font-noto-emoji terminus-font
+
+if [ "$FIRMWARE" = "full" ]; then
+  append_packages linux-firmware
+else
+  append_packages linux-firmware-none
+fi
+
+case "$BOOTLOADER" in
+  grub) append_packages grub grub-efi efibootmgr ;;
+  systemd-boot) append_packages systemd-boot efibootmgr ;;
+esac
+
+if [ "$GRAPHICAL" = "1" ]; then
+  append_packages \
+    xorg-server xinit setxkbmap xkeyboard-config libinput xf86-input-libinput \
+    xf86-video-amdgpu xf86-video-ati xf86-video-intel xf86-video-nouveau \
+    xf86-video-vesa xf86-video-fbdev \
+    mesa-dri-gallium mesa-egl mesa-gl xrandr xdg-utils
+fi
+
+case "$DESKTOP" in
+  xfce)
+    append_packages xfce4 xfce4-terminal xfce4-screensaver xfce4-power-manager xfce4-notifyd \
+      gvfs udisks2 thunar-volman xfce-polkit ;;
+  gnome)
+    append_packages gnome gnome-terminal ;;
+  plasma)
+    append_packages plasma-desktop-meta konsole dolphin ;;
+  mate)
+    append_packages mate-desktop-environment mate-terminal gvfs udisks2 ;;
+  lxqt)
+    append_packages lxqt-desktop qterminal pcmanfm-qt gvfs udisks2 ;;
+  none) ;;
+esac
+
+for wm in $TILING_WMS; do
+  case "$wm" in
+    i3) append_packages i3wm i3status i3lock dmenu xterm feh picom polkit-gnome ;;
+    sway) append_packages sway swaybg swayidle swaylock foot waybar mako grim slurp xwayland xdg-desktop-portal xdg-desktop-portal-wlr polkit-gnome ;;
+    hyprland) append_packages hyprland foot waybar mako xwayland xdg-desktop-portal polkit-gnome ;;
+    awesome) append_packages awesome xterm rofi picom polkit-gnome ;;
+    bspwm) append_packages bspwm sxhkd polybar xterm dmenu feh picom polkit-gnome ;;
+    openbox) append_packages openbox tint2 xterm dmenu feh picom polkit-gnome ;;
+    labwc) append_packages labwc foot swaybg waybar mako xdg-desktop-portal xdg-desktop-portal-wlr polkit-gnome ;;
+  esac
+done
+
+case "$DISPLAY_MANAGER" in
+  lightdm) append_packages lightdm lightdm-gtk-greeter lightdm-openrc accountsservice ;;
+  sddm) append_packages sddm sddm-openrc accountsservice ;;
+  gdm) append_packages gdm gdm-openrc accountsservice ;;
+  lxdm) append_packages lxdm lxdm-openrc ;;
+  greetd) append_packages greetd greetd-openrc greetd-tuigreet ;;
+  none) ;;
+esac
+
+if [ "$NETWORK_BACKEND" = "networkmanager" ]; then
+  append_packages networkmanager networkmanager-cli networkmanager-tui
+  if is_enabled "$WIFI"; then
+    append_packages networkmanager-wifi wireless-regdb wpa_supplicant
+  fi
+  if [ "$GRAPHICAL" = "1" ]; then
+    append_packages network-manager-applet gnome-keyring
+  fi
+fi
+
+case "$AUDIO" in
+  pipewire) append_packages pipewire wireplumber pipewire-pulse alsa-utils pavucontrol ;;
+  alsa) append_packages alsa-utils ;;
+  none) ;;
+esac
+
+if is_enabled "$BLUETOOTH"; then
+  # Use obexd-enhanced instead of bluez-obexd. GNOME Bluetooth requires
+  # obexd-enhanced and it conflicts with bluez-obexd; obexd-enhanced provides
+  # the same obexd service plus PBAP support, so it is the compatible choice
+  # across GNOME, XFCE, Plasma, MATE, LXQt and WM-only profiles.
+  append_packages bluez bluez-openrc bluez-firmware bluez-btmgmt obexd-enhanced
+  [ "$GRAPHICAL" = "1" ] && append_packages blueman
+fi
+
+case "$BROWSER" in
+  firefox-esr) append_packages firefox-esr ;;
+  firefox) append_packages firefox ;;
+  chromium) append_packages chromium ;;
+  none) ;;
+esac
+
+# shellcheck disable=SC2086 # EXTRA_PACKAGES is intentionally word-split package names.
+append_packages $EXTRA_PACKAGES
+
+if [ "$DRY_RUN" = "1" ]; then
+  cat <<EOF
+DRY RUN OK
+ desktop=$DESKTOP
+ tiling_wms=$TILING_WMS
+ default_session=$DEFAULT_SESSION
+ display_manager=$DISPLAY_MANAGER
+ network=$NETWORK_BACKEND wifi=$WIFI bluetooth=$BLUETOOTH audio=$AUDIO
+ bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS
+ locale=$LOCALE keyboard=$XKB_LAYOUT console_keymap=$CONSOLE_KEYMAP
+ packages:$PACKAGES
+EOF
+  exit 0
+fi
+
+# ---- Base system ----------------------------------------------------------
 apk update
 apk upgrade --available
 
-apk add \
-  alpine-base \
-  linux-lts linux-firmware \
-  eudev seatd acpid kbd upower \
-  chrony \
-  dbus dbus-x11 elogind polkit-elogind xfce-polkit \
-  networkmanager networkmanager-cli networkmanager-tui networkmanager-wifi network-manager-applet wireless-regdb wpa_supplicant gnome-keyring \
-  xfce4 xfce4-terminal xfce4-screensaver xfce4-power-manager xfce4-notifyd \
-  lightdm lightdm-gtk-greeter accountsservice \
-  xorg-server xinit setxkbmap xkeyboard-config libinput xf86-input-libinput xf86-video-amdgpu xf86-video-ati xf86-video-intel xf86-video-nouveau xf86-video-vesa xf86-video-fbdev \
-  mesa-dri-gallium mesa-egl mesa-gl \
-  gvfs udisks2 thunar-volman \
-  pipewire wireplumber pipewire-pulse alsa-utils pavucontrol \
-  firefox-esr \
-  font-noto font-noto-emoji terminus-font \
-  doas sudo \
-  bash zsh curl wget git nano vim htop less \
-  e2fsprogs dosfstools lsblk blkid util-linux \
-  grub grub-efi efibootmgr
+# Install polkit-elogind before desktop packages. This prevents apk from
+# selecting the non-elogind polkit provider when a desktop/polkit-agent package
+# depends on "polkit". This fixes the previous xfce-polkit/polkit conflict.
+apk add alpine-base "linux-$KERNEL_FLAVOR" dbus dbus-x11 elogind polkit-elogind ca-certificates tzdata
+if [ "$FIRMWARE" = "full" ]; then
+  apk del linux-firmware-none >/dev/null 2>&1 || true
+fi
+# shellcheck disable=SC2086 # PACKAGES is a generated package list.
+apk add $PACKAGES
 
-# ---- English OS + Latin American Spanish keyboard ----
-# Alpine uses musl; full glibc locale generation is not needed here.
+# ---- Locale, timezone and keyboard ---------------------------------------
 mkdir -p /etc/profile.d /etc/X11/xorg.conf.d
-cat > /etc/profile.d/00-lang.sh <<'EOF'
-export LANG=en_US.UTF-8
-export LANGUAGE=en_US:en
-export LC_MESSAGES=en_US.UTF-8
+cat > /etc/profile.d/00-lang.sh <<EOF
+export LANG=$LOCALE
+export LANGUAGE=$LANGUAGE_VALUE
+export LC_MESSAGES=$LOCALE
 EOF
 chmod +x /etc/profile.d/00-lang.sh
-cat > /etc/environment <<'EOF'
-LANG=en_US.UTF-8
-LANGUAGE=en_US:en
-LC_MESSAGES=en_US.UTF-8
+cat > /etc/environment <<EOF
+LANG=$LOCALE
+LANGUAGE=$LANGUAGE_VALUE
+LC_MESSAGES=$LOCALE
 EOF
-cat > /etc/locale.conf <<'EOF'
-LANG=en_US.UTF-8
+cat > /etc/locale.conf <<EOF
+LANG=$LOCALE
 EOF
 
-cat > /etc/conf.d/keymaps <<'EOF'
-# Console keymap. Xorg/LightDM use the XKB "latam" layout below.
-KEYMAP="la-latin1"
+if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
+  cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+  echo "$TIMEZONE" > /etc/timezone
+else
+  warn "Timezone not found in tzdata: $TIMEZONE; keeping UTC"
+fi
+
+cat > /etc/conf.d/loadkeys <<EOF
+keymap="$CONSOLE_KEYMAP"
+windowkeys="YES"
+extended_keymaps=""
+dumpkeys_charset=""
+fix_euro="NO"
+unicode="YES"
+EOF
+# Compatibility for older Alpine/OpenRC setups that used /etc/conf.d/keymaps.
+cat > /etc/conf.d/keymaps <<EOF
+KEYMAP="$CONSOLE_KEYMAP"
 WINDOWKEYS="YES"
 EXTENDED_KEYMAPS=""
 DUMPKEYS_CHARSET=""
-FIX_euro="NO"
+FIX_EURO="NO"
+UNICODE="YES"
 EOF
 
-cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<'EOF'
+cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
-    Option "XkbLayout" "latam"
-    Option "XkbModel" "pc105"
+    Option "XkbLayout" "$XKB_LAYOUT"
+    Option "XkbModel" "$XKB_MODEL"
+    Option "XkbVariant" "$XKB_VARIANT"
 EndSection
 EOF
 
@@ -72,45 +342,141 @@ Section "InputClass"
 EndSection
 EOF
 
-# LightDM keyboard + greeter. It should show LightDM first, then start XFCE.
-mkdir -p /etc/lightdm/lightdm.conf.d /usr/local/bin
-cat > /usr/local/bin/alpine-usb-setxkbmap-latam <<'EOF'
+q_layout=$(shell_quote "$XKB_LAYOUT")
+q_variant=$(shell_quote "$XKB_VARIANT")
+cat > /usr/local/bin/alpine-usb-setxkbmap <<EOF
 #!/bin/sh
-/usr/bin/setxkbmap latam 2>/dev/null || true
+layout=$q_layout
+variant=$q_variant
+if [ -n "\$variant" ]; then
+  /usr/bin/setxkbmap -layout "\$layout" -variant "\$variant" 2>/dev/null || true
+else
+  /usr/bin/setxkbmap "\$layout" 2>/dev/null || true
+fi
 EOF
-chmod +x /usr/local/bin/alpine-usb-setxkbmap-latam
-cat > /etc/lightdm/lightdm.conf.d/50-alpine-usb.conf <<'EOF'
+chmod +x /usr/local/bin/alpine-usb-setxkbmap
+
+# ---- Session launcher and display managers -------------------------------
+cat > /usr/local/bin/alpine-usb-session <<EOF
+#!/bin/sh
+session="\${1:-$DEFAULT_SESSION}"
+export LANG=${LOCALE}
+export LANGUAGE=${LANGUAGE_VALUE}
+export LC_MESSAGES=${LOCALE}
+/usr/local/bin/alpine-usb-setxkbmap 2>/dev/null || true
+run_dbus() {
+  if command -v dbus-run-session >/dev/null 2>&1; then
+    exec dbus-run-session -- "\$@"
+  fi
+  exec "\$@"
+}
+start_x_if_needed() {
+  if [ -z "\${DISPLAY:-}" ] && [ -z "\${WAYLAND_DISPLAY:-}" ] && command -v startx >/dev/null 2>&1; then
+    exec startx /usr/local/bin/alpine-usb-session "\$session" --
+  fi
+}
+case "\$session" in
+  xfce) start_x_if_needed; exec startxfce4 ;;
+  gnome) run_dbus gnome-session ;;
+  plasma)
+    if [ -n "\${DISPLAY:-}" ] && command -v startplasma-x11 >/dev/null 2>&1; then exec startplasma-x11; fi
+    exec startplasma-wayland ;;
+  mate) start_x_if_needed; exec mate-session ;;
+  lxqt) start_x_if_needed; exec startlxqt ;;
+  i3) start_x_if_needed; exec i3 ;;
+  sway) run_dbus sway ;;
+  hyprland) run_dbus Hyprland ;;
+  awesome) start_x_if_needed; exec awesome ;;
+  bspwm) start_x_if_needed; exec bspwm ;;
+  openbox) start_x_if_needed; exec openbox-session ;;
+  labwc) run_dbus labwc ;;
+  shell) exec /bin/sh -l ;;
+  *) exec /bin/sh -l ;;
+esac
+EOF
+chmod +x /usr/local/bin/alpine-usb-session
+
+if [ "$GRAPHICAL" = "1" ]; then
+  mkdir -p /usr/share/xsessions /usr/share/wayland-sessions
+  cat > /usr/share/xsessions/alpine-usb.desktop <<EOF
+[Desktop Entry]
+Name=Alpine USB Default ($DEFAULT_SESSION)
+Comment=Default session selected by Alpine USB Installer
+Exec=/usr/local/bin/alpine-usb-session
+Type=Application
+DesktopNames=AlpineUSB
+EOF
+  cat > /usr/share/wayland-sessions/alpine-usb.desktop <<EOF
+[Desktop Entry]
+Name=Alpine USB Default ($DEFAULT_SESSION)
+Comment=Default session selected by Alpine USB Installer
+Exec=/usr/local/bin/alpine-usb-session
+Type=Application
+DesktopNames=AlpineUSB
+EOF
+fi
+
+case "$DISPLAY_MANAGER" in
+  lightdm)
+    mkdir -p /etc/lightdm/lightdm.conf.d
+    cat > /etc/lightdm/lightdm.conf.d/50-alpine-usb.conf <<EOF
 [Seat:*]
 greeter-session=lightdm-gtk-greeter
-user-session=xfce
+user-session=alpine-usb
 allow-guest=false
-display-setup-script=/usr/local/bin/alpine-usb-setxkbmap-latam
-greeter-setup-script=/usr/local/bin/alpine-usb-setxkbmap-latam
+display-setup-script=/usr/local/bin/alpine-usb-setxkbmap
+greeter-setup-script=/usr/local/bin/alpine-usb-setxkbmap
 EOF
-cat > /etc/lightdm/lightdm-gtk-greeter.conf <<'EOF'
+    cat > /etc/lightdm/lightdm-gtk-greeter.conf <<'EOF'
 [greeter]
 indicators=~host;~spacer;~clock;~spacer;~session;~language;~a11y;~power
 clock-format=%a, %b %d  %H:%M
 EOF
+    ;;
+  sddm)
+    mkdir -p /etc/sddm.conf.d
+    cat > /etc/sddm.conf.d/10-alpine-usb.conf <<'EOF'
+[General]
+HaltCommand=/sbin/poweroff
+RebootCommand=/sbin/reboot
+InputMethod=
 
-# ---- User ----
-# Create a normal primary group for pablo, then add desktop/admin groups.
-if ! getent group pablo >/dev/null 2>&1; then
-  addgroup pablo
+[Users]
+MinimumUid=1000
+MaximumUid=65000
+EOF
+    ;;
+  lxdm)
+    if [ -f /etc/lxdm/lxdm.conf ]; then
+      sed -i 's|^session=.*|session=/usr/local/bin/alpine-usb-session|' /etc/lxdm/lxdm.conf || true
+    fi
+    ;;
+  greetd)
+    mkdir -p /etc/greetd
+    cat > /etc/greetd/config.toml <<EOF
+[terminal]
+vt = 7
+
+[default_session]
+command = "tuigreet --time --remember --asterisks --cmd /usr/local/bin/alpine-usb-session"
+user = "greetd"
+EOF
+    ;;
+  gdm|none) ;;
+esac
+
+# ---- User ----------------------------------------------------------------
+if ! getent group "$USER_NAME" >/dev/null 2>&1; then
+  addgroup "$USER_NAME"
 fi
-if ! id pablo >/dev/null 2>&1; then
-  adduser -D -s /bin/bash -G pablo pablo
+if ! id "$USER_NAME" >/dev/null 2>&1; then
+  adduser -D -s /bin/bash -G "$USER_NAME" "$USER_NAME"
 fi
-echo 'pablo:pablo' | chpasswd
-echo 'root:pablo' | chpasswd
-addgroup pablo wheel || true
-addgroup pablo audio || true
-addgroup pablo video || true
-addgroup pablo input || true
-addgroup pablo plugdev || true
-addgroup pablo netdev || true
-addgroup pablo seat || true
-addgroup pablo tty || true
+printf '%s:%s\n' "$USER_NAME" "$USER_PASSWORD" | chpasswd
+printf 'root:%s\n' "$ROOT_PASSWORD" | chpasswd
+for group in wheel audio video input plugdev netdev seat tty lp scanner; do
+  addgroup "$USER_NAME" "$group" >/dev/null 2>&1 || true
+done
 
 mkdir -p /etc/doas.d
 cat > /etc/doas.d/doas.conf <<'EOF'
@@ -118,57 +484,51 @@ permit persist :wheel
 EOF
 chmod 600 /etc/doas.d/doas.conf
 
-# sudo fallback for tools/users expecting sudo.
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
 
-# Allow local users to start Xorg from tty if LightDM fails.
 mkdir -p /etc/X11
 cat > /etc/X11/Xwrapper.config <<'EOF'
 allowed_users=anybody
 needs_root_rights=yes
 EOF
 
-# Default LightDM/XFCE session for the initial user, plus a TTY fallback.
-cat > /home/pablo/.dmrc <<'EOF'
+cat > "/home/$USER_NAME/.dmrc" <<EOF
 [Desktop]
-Session=xfce
-Language=en_US.UTF-8
+Session=alpine-usb
+Language=$LOCALE
 EOF
-cat > /home/pablo/.xinitrc <<'EOF'
+cat > "/home/$USER_NAME/.xinitrc" <<'EOF'
 #!/bin/sh
-setxkbmap latam 2>/dev/null || true
-exec startxfce4
+exec /usr/local/bin/alpine-usb-session
 EOF
-chmod +x /home/pablo/.xinitrc
-chown pablo:pablo /home/pablo/.dmrc /home/pablo/.xinitrc
+chmod +x "/home/$USER_NAME/.xinitrc"
+chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.dmrc" "/home/$USER_NAME/.xinitrc"
 
-# Make sure the tray applet and polkit agent exist in XFCE even if package
-# autostart entries change upstream.
+# ---- Desktop applets and polkit agent ------------------------------------
 mkdir -p /usr/local/bin /etc/xdg/autostart
-cat > /usr/local/bin/alpine-usb-nm-applet <<'EOF'
-#!/bin/sh
-command -v nm-applet >/dev/null 2>&1 || exit 0
-exec nm-applet
-EOF
-chmod +x /usr/local/bin/alpine-usb-nm-applet
-cat > /etc/xdg/autostart/alpine-usb-nm-applet.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Network Manager Applet
-Exec=/usr/local/bin/alpine-usb-nm-applet
-OnlyShowIn=XFCE;
-X-GNOME-Autostart-enabled=true
-EOF
 cat > /usr/local/bin/alpine-usb-polkit-agent <<'EOF'
 #!/bin/sh
+# Avoid duplicate polkit agents when a DE autostarts its own agent.
+if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -f 'polkit.*authentication|xfce-polkit|lxqt-policykit|mate-polkit' >/dev/null 2>&1; then
+  exit 0
+fi
 for agent in \
   /usr/lib/xfce4/xfce-polkit \
   /usr/libexec/xfce-polkit \
-  /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+  /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 \
+  /usr/libexec/polkit-gnome-authentication-agent-1 \
+  /usr/lib/mate-polkit/polkit-mate-authentication-agent-1 \
+  /usr/libexec/polkit-mate-authentication-agent-1 \
+  /usr/lib/lxqt-policykit/lxqt-policykit-agent \
+  /usr/libexec/lxqt-policykit-agent \
+  /usr/lib/libexec/polkit-kde-authentication-agent-1 \
+  /usr/lib/polkit-kde-authentication-agent-1
  do
   [ -x "$agent" ] && exec "$agent"
 done
+command -v lxqt-policykit-agent >/dev/null 2>&1 && exec lxqt-policykit-agent
+command -v polkit-gnome-authentication-agent-1 >/dev/null 2>&1 && exec polkit-gnome-authentication-agent-1
 exit 0
 EOF
 chmod +x /usr/local/bin/alpine-usb-polkit-agent
@@ -177,12 +537,47 @@ cat > /etc/xdg/autostart/alpine-usb-polkit-agent.desktop <<'EOF'
 Type=Application
 Name=PolicyKit Authentication Agent
 Exec=/usr/local/bin/alpine-usb-polkit-agent
-OnlyShowIn=XFCE;
 X-GNOME-Autostart-enabled=true
+NoDisplay=true
 EOF
 
-# Allow local active wheel users to power off/reboot/suspend from XFCE/LightDM
-# instead of being bounced back to the display manager.
+if [ "$NETWORK_BACKEND" = "networkmanager" ] && [ "$GRAPHICAL" = "1" ]; then
+  cat > /usr/local/bin/alpine-usb-nm-applet <<'EOF'
+#!/bin/sh
+command -v nm-applet >/dev/null 2>&1 || exit 0
+if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -x nm-applet >/dev/null 2>&1; then exit 0; fi
+exec nm-applet
+EOF
+  chmod +x /usr/local/bin/alpine-usb-nm-applet
+  cat > /etc/xdg/autostart/alpine-usb-nm-applet.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Network Manager Applet
+Exec=/usr/local/bin/alpine-usb-nm-applet
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
+if is_enabled "$BLUETOOTH" && [ "$GRAPHICAL" = "1" ]; then
+  cat > /usr/local/bin/alpine-usb-blueman-applet <<'EOF'
+#!/bin/sh
+command -v blueman-applet >/dev/null 2>&1 || exit 0
+if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -x blueman-applet >/dev/null 2>&1; then exit 0; fi
+exec blueman-applet
+EOF
+  chmod +x /usr/local/bin/alpine-usb-blueman-applet
+  cat > /etc/xdg/autostart/alpine-usb-blueman-applet.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Bluetooth Applet
+Exec=/usr/local/bin/alpine-usb-blueman-applet
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
+# ---- PolicyKit rules ------------------------------------------------------
 mkdir -p /etc/polkit-1/rules.d
 cat > /etc/polkit-1/rules.d/49-alpine-usb-desktop.rules <<'EOF'
 polkit.addRule(function(action, subject) {
@@ -196,10 +591,13 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.login1.hibernate",
         "org.freedesktop.login1.hibernate-multiple-sessions"
     ];
-    if (powerActions.indexOf(action.id) >= 0 && subject.local && subject.active && (subject.isInGroup("wheel") || subject.user == "lightdm")) {
+    if (powerActions.indexOf(action.id) >= 0 && subject.local && subject.active && (subject.isInGroup("wheel") || subject.user == "lightdm" || subject.user == "sddm" || subject.user == "gdm" || subject.user == "greetd")) {
         return polkit.Result.YES;
     }
-    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.local && subject.active && subject.isInGroup("plugdev")) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.local && subject.active && (subject.isInGroup("plugdev") || subject.isInGroup("netdev") || subject.isInGroup("wheel"))) {
+        return polkit.Result.YES;
+    }
+    if (action.id.indexOf("org.bluez.") === 0 && subject.local && subject.active && (subject.isInGroup("plugdev") || subject.isInGroup("wheel"))) {
         return polkit.Result.YES;
     }
 });
@@ -217,7 +615,7 @@ KillUserProcesses=no
 IdleAction=ignore
 EOF
 
-# ---- Services: boot to display manager ----
+# ---- Services -------------------------------------------------------------
 rc-update add devfs sysinit || true
 rc-update add dmesg sysinit || true
 rc-update del mdev sysinit || true
@@ -226,29 +624,41 @@ rc-update add udev-trigger sysinit || true
 rc-update add udev-settle sysinit || true
 rc-update add hwdrivers sysinit || true
 rc-update add modules boot || true
-rc-update add keymaps boot || true
+rc-update add loadkeys boot || rc-update add keymaps boot || true
 rc-update add sysctl boot || true
 rc-update add hostname boot || true
 rc-update add bootmisc boot || true
 rc-update add syslog boot || true
 rc-update add networking boot || true
 rc-update add chronyd default || true
-rc-update add dbus default
-rc-update add elogind default
+rc-update add dbus default || true
+rc-update add elogind default || true
 rc-update add polkit default || true
 rc-update add seatd default || true
 rc-update add acpid default || true
-rc-update add wpa_supplicant default || true
-rc-update add networkmanager default
-rc-update add udisks2 default
-rc-update add lightdm default
+[ "$GRAPHICAL" = "1" ] && rc-update add udisks2 default || true
 
-# Prefer NetworkManager over classic network scripts for desktop.
-rc-update del networking default || true
+if [ "$NETWORK_BACKEND" = "networkmanager" ]; then
+  is_enabled "$WIFI" && rc-update add wpa_supplicant default || true
+  rc-update add networkmanager default || true
+  rc-update del networking default || true
+else
+  rc-update add networking default || true
+fi
 
-# ---- USB-friendly optimizations ----
-# noatime reduces writes. tmpfs for temp/cache/log volatility.
-# build script also patches root fstab after partition UUID known.
+if is_enabled "$BLUETOOTH"; then
+  rc-update add bluetooth default || true
+fi
+
+for svc in lightdm sddm gdm lxdm greetd; do
+  rc-update del "$svc" default >/dev/null 2>&1 || true
+done
+case "$DISPLAY_MANAGER" in
+  lightdm|sddm|gdm|lxdm|greetd) rc-update add "$DISPLAY_MANAGER" default || true ;;
+  none) ;;
+esac
+
+# ---- USB-friendly optimizations ------------------------------------------
 mkdir -p /etc/sysctl.d /etc/tmpfiles.d
 cat > /etc/sysctl.d/99-usb.conf <<'EOF'
 vm.swappiness=10
@@ -261,62 +671,168 @@ d /var/tmp 1777 root root -
 d /var/cache/apk 0755 root root -
 EOF
 
-# Keep apk cache disabled by default to avoid USB writes.
 rm -rf /var/cache/apk/* || true
-
-# fstab extras safe even before root line exists.
 sed -i 's/[[:space:]]relatime[[:space:]]/ noatime /' /etc/fstab 2>/dev/null || true
 grep -q '^tmpfs /tmp ' /etc/fstab 2>/dev/null || echo 'tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0' >> /etc/fstab
 grep -q '^tmpfs /var/tmp ' /etc/fstab 2>/dev/null || echo 'tmpfs /var/tmp tmpfs defaults,noatime,mode=1777 0 0' >> /etc/fstab
 
-# ---- NetworkManager: allow users to manage network ----
-mkdir -p /etc/NetworkManager/conf.d
-cat > /etc/NetworkManager/conf.d/10-globally-managed-devices.conf <<'EOF'
+# ---- NetworkManager -------------------------------------------------------
+if [ "$NETWORK_BACKEND" = "networkmanager" ]; then
+  mkdir -p /etc/NetworkManager/conf.d
+  cat > /etc/NetworkManager/conf.d/10-globally-managed-devices.conf <<'EOF'
 [keyfile]
 unmanaged-devices=none
 EOF
-cat > /etc/NetworkManager/conf.d/20-wifi-usb.conf <<'EOF'
+  cat > /etc/NetworkManager/conf.d/20-wifi-usb.conf <<'EOF'
 [device]
 wifi.scan-rand-mac-address=no
 
 [connection]
 wifi.powersave=2
 EOF
+fi
 
-# ---- XFCE defaults ----
-mkdir -p /etc/skel/Desktop
+# ---- Desktop and WM defaults ---------------------------------------------
+mkdir -p /etc/skel/Desktop /etc/skel/.config
 cat > /etc/skel/.xinitrc <<'EOF'
 #!/bin/sh
-setxkbmap latam 2>/dev/null || true
-exec startxfce4
+exec /usr/local/bin/alpine-usb-session
 EOF
 chmod +x /etc/skel/.xinitrc
-mkdir -p /etc/xdg/xfce4/xfconf/xfce-perchannel-xml
-cat > /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/keyboard-layout.xml <<'EOF'
+
+if [ "$DESKTOP" = "xfce" ]; then
+  mkdir -p /etc/xdg/xfce4/xfconf/xfce-perchannel-xml
+  cat > /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/keyboard-layout.xml <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="keyboard-layout" version="1.0">
   <property name="Default" type="empty">
     <property name="XkbDisable" type="bool" value="false"/>
-    <property name="XkbLayout" type="string" value="latam"/>
-    <property name="XkbVariant" type="string" value=""/>
+    <property name="XkbLayout" type="string" value="$XKB_LAYOUT"/>
+    <property name="XkbVariant" type="string" value="$XKB_VARIANT"/>
   </property>
 </channel>
 EOF
-cat > /etc/motd <<'EOF'
+fi
+
+if has_word i3 "$TILING_WMS"; then
+  mkdir -p /etc/skel/.config/i3
+  cat > /etc/skel/.config/i3/config <<'EOF'
+set $mod Mod4
+font pango:Noto Sans 10
+exec --no-startup-id /usr/local/bin/alpine-usb-polkit-agent
+exec --no-startup-id /usr/local/bin/alpine-usb-nm-applet
+exec --no-startup-id /usr/local/bin/alpine-usb-blueman-applet
+bindsym $mod+Return exec xterm
+bindsym $mod+d exec dmenu_run
+bindsym $mod+Shift+q kill
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Exit i3?' -B 'Yes' 'i3-msg exit'"
+bar { status_command i3status }
+EOF
+fi
+
+if has_word sway "$TILING_WMS"; then
+  mkdir -p /etc/skel/.config/sway
+  cat > /etc/skel/.config/sway/config <<EOF
+set \$mod Mod4
+input * {
+    xkb_layout "$XKB_LAYOUT"
+    xkb_variant "$XKB_VARIANT"
+}
+exec /usr/local/bin/alpine-usb-polkit-agent
+exec /usr/local/bin/alpine-usb-nm-applet
+exec /usr/local/bin/alpine-usb-blueman-applet
+include /etc/sway/config
+EOF
+fi
+
+if has_word bspwm "$TILING_WMS"; then
+  mkdir -p /etc/skel/.config/bspwm /etc/skel/.config/sxhkd
+  cat > /etc/skel/.config/bspwm/bspwmrc <<'EOF'
+#!/bin/sh
+/usr/local/bin/alpine-usb-polkit-agent &
+/usr/local/bin/alpine-usb-nm-applet &
+/usr/local/bin/alpine-usb-blueman-applet &
+pgrep -x sxhkd >/dev/null 2>&1 || sxhkd &
+bspc config border_width 2
+bspc config window_gap 8
+EOF
+  chmod +x /etc/skel/.config/bspwm/bspwmrc
+  cat > /etc/skel/.config/sxhkd/sxhkdrc <<'EOF'
+super + Return
+    xterm
+super + d
+    dmenu_run
+super + shift + q
+    bspc node -c
+super + alt + r
+    bspc wm -r
+EOF
+fi
+
+if [ -d /etc/skel/.config ]; then
+  mkdir -p "/home/$USER_NAME/.config"
+  cp -a /etc/skel/.config/. "/home/$USER_NAME/.config/" 2>/dev/null || true
+  chown -R "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.config"
+fi
+
+cat > /etc/motd <<EOF
 Alpine USB ready.
-User: pablo
-Initial password: pablo
+User: $USER_NAME
+Initial password: configured at build time
+Desktop: $DESKTOP
+Window managers: ${TILING_WMS:-none}
+Display manager: $DISPLAY_MANAGER
+Bootloader: $BOOTLOADER
+Kernel: linux-$KERNEL_FLAVOR
+Keyboard layout: $XKB_LAYOUT / console $CONSOLE_KEYMAP
 Change your password with: passwd
-Keyboard layout: Latin American Spanish
 EOF
 
-# Valid machine-id needed for dbus/lightdm at first boot.
+# ---- systemd-boot removable UEFI setup -----------------------------------
+if [ "$BOOTLOADER" = "systemd-boot" ]; then
+  mkdir -p /boot/EFI/BOOT /boot/loader/entries
+  efi_src=""
+  for candidate in /usr/lib/systemd/boot/efi/systemd-boot*.efi; do
+    [ -f "$candidate" ] && efi_src="$candidate" && break
+  done
+  [ -n "$efi_src" ] || die "systemd-boot EFI binary not found"
+  case "$(apk --print-arch 2>/dev/null || echo x86_64)" in
+    x86_64) efi_dst="BOOTX64.EFI" ;;
+    x86) efi_dst="BOOTIA32.EFI" ;;
+    aarch64) efi_dst="BOOTAA64.EFI" ;;
+    armv7|armhf) efi_dst="BOOTARM.EFI" ;;
+    *) efi_dst="BOOTX64.EFI" ;;
+  esac
+  cp "$efi_src" "/boot/EFI/BOOT/$efi_dst"
+  root_uuid="$(awk '$2 == "/" { sub(/^UUID=/, "", $1); print $1; exit }' /etc/fstab)"
+  [ -n "$root_uuid" ] || die "Could not determine root UUID for systemd-boot"
+  modules="$(printf '%s' "$INITFS_FEATURES" | tr ' ' ',')"
+  cat > /boot/loader/loader.conf <<EOF
+ default alpine.conf
+ timeout $BOOT_TIMEOUT
+ editor no
+EOF
+  cat > /boot/loader/entries/alpine.conf <<EOF
+title Alpine Linux USB
+linux /vmlinuz-$KERNEL_FLAVOR
+initrd /initramfs-$KERNEL_FLAVOR
+options root=UUID=$root_uuid ro rootfstype=$ROOTFS rootwait rootdelay=5 modules=$modules console=tty0
+EOF
+  cat > /boot/loader/entries/alpine-safe.conf <<EOF
+title Alpine Linux USB (safe graphics)
+linux /vmlinuz-$KERNEL_FLAVOR
+initrd /initramfs-$KERNEL_FLAVOR
+options root=UUID=$root_uuid ro rootfstype=$ROOTFS rootwait rootdelay=5 modules=$modules console=tty0 nomodeset
+EOF
+fi
+
+# Valid machine-id needed for dbus/display managers at first boot.
 rm -f /etc/machine-id
 if command -v dbus-uuidgen >/dev/null 2>&1; then
   dbus-uuidgen --ensure=/etc/machine-id
 fi
 
-# Stable hostname.
-echo 'alpine-usb' > /etc/hostname
+echo "$HOSTNAME" > /etc/hostname
 
-# Done.
+echo "Alpine USB configuration complete: desktop=$DESKTOP dm=$DISPLAY_MANAGER bootloader=$BOOTLOADER kernel=linux-$KERNEL_FLAVOR"

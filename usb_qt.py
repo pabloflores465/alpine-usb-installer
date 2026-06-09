@@ -7,12 +7,14 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMessageBox, QPushButton, QProgressBar, QStackedLayout, QVBoxLayout, QWidget,
-    QDialog, QInputDialog, QStyle, QTextEdit
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
+    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QMessageBox, QPushButton, QProgressBar, QScrollArea, QStackedLayout,
+    QTextEdit, QVBoxLayout, QWidget
 )
 
-APP_TITLE = "Alpine USB XFCE Installer"
+APP_TITLE = "Alpine USB Installer"
+DEFAULT_IMAGE_NAME = "alpine-usb.img"
 
 
 def make_app_icon() -> QIcon:
@@ -45,9 +47,13 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
+
     def pts(items):
         return [QPoint(x, y) for x, y in items]
-    def xy(v): return int(v * scale)
+
+    def xy(v):
+        return int(v * scale)
+
     if kind == "folder":
         p.drawPolyline(pts([(xy(3), xy(7)), (xy(3), xy(16)), (xy(17), xy(16)), (xy(17), xy(6)), (xy(9), xy(6)), (xy(7), xy(4)), (xy(3), xy(4)), (xy(3), xy(7))]))
     elif kind == "build":
@@ -110,6 +116,19 @@ def sh_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def combo_value(combo: QComboBox) -> str:
+    data = combo.currentData()
+    return str(data) if data not in (None, "") else combo.currentText().strip()
+
+
+def add_combo_items(combo: QComboBox, items):
+    for item in items:
+        if isinstance(item, tuple):
+            combo.addItem(item[0], item[1])
+        else:
+            combo.addItem(item)
+
+
 def list_devices():
     sysname = platform.system()
     devices = []
@@ -119,7 +138,8 @@ def list_devices():
             data = plistlib.loads(cp.stdout.encode())
             for disk in data.get("AllDisksAndPartitions", []):
                 ident = disk.get("DeviceIdentifier")
-                if not ident: continue
+                if not ident:
+                    continue
                 dev = f"/dev/{ident}"
                 info = run(["diskutil", "info", "-plist", dev])
                 label = dev
@@ -127,8 +147,6 @@ def list_devices():
                     meta = plistlib.loads(info.stdout.encode())
                     size_bytes = int(meta.get("TotalSize", 0) or 0)
                     size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
-                    # Prefer IORegistryEntryName because it often includes the brand
-                    # shown on the physical USB, e.g. "Kingston DataTraveler 3.0 Media".
                     media = meta.get("IORegistryEntryName") or meta.get("MediaName") or "USB"
                     volumes = []
                     for part in disk.get("Partitions", []) or []:
@@ -183,7 +201,6 @@ class DeviceDialog(QDialog):
         self.resize(620, 380)
         self.selected = None
         self.scanner = None
-        self.pending_empty_modal = False
         layout = QVBoxLayout(self)
         title = QLabel("Select target USB device")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -212,16 +229,15 @@ class DeviceDialog(QDialog):
         btns.addWidget(self.use); btns.addWidget(self.refresh); btns.addStretch(); btns.addWidget(self.cancel)
         layout.addLayout(btns)
         self.use.clicked.connect(self.accept_selection)
-        self.refresh.clicked.connect(lambda: self.populate(show_empty_modal=True))
+        self.refresh.clicked.connect(lambda: self.populate())
         self.cancel.clicked.connect(self.reject)
         self.list.itemSelectionChanged.connect(self.update_use_button)
         self.manual.textChanged.connect(self.update_use_button)
-        self.populate(show_empty_modal=True)
+        self.populate()
 
-    def populate(self, show_empty_modal: bool = True):
+    def populate(self):
         if self.scanner and self.scanner.isRunning():
             return
-        self.pending_empty_modal = show_empty_modal
         self.devices = []
         self.list.clear()
         self.list.hide()
@@ -277,22 +293,66 @@ class DeviceDialog(QDialog):
         event.accept()
 
 
+class CollapsibleSection(QWidget):
+    def __init__(self, title: str, collapsed: bool = True, parent=None):
+        super().__init__(parent)
+        self.title = title
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.toggle = QPushButton()
+        self.toggle.setCheckable(True)
+        self.toggle.setChecked(not collapsed)
+        self.toggle.clicked.connect(self.update_state)
+        self.toggle.setStyleSheet(
+            "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
+            "margin:0px;padding:6px 10px;background:#1f2937;"
+            "border:1px solid #374151;border-radius:6px;"
+        )
+        root.addWidget(self.toggle)
+        self.body = QWidget()
+        self.body.setStyleSheet("background:#111827;border:1px solid #374151;border-top:0;border-bottom-left-radius:6px;border-bottom-right-radius:6px;")
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(10, 10, 10, 10)
+        self.body_layout.setSpacing(8)
+        root.addWidget(self.body)
+        self.body.setVisible(not collapsed)
+        self.update_state()
+
+    def update_state(self):
+        expanded = self.toggle.isChecked()
+        self.body.setVisible(expanded)
+        self.toggle.setText(f"{self.title}  {'▼' if expanded else '▶'}")
+        if expanded:
+            self.toggle.setStyleSheet(
+                "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:6px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-bottom:0;"
+                "border-top-left-radius:6px;border-top-right-radius:6px;"
+                "border-bottom-left-radius:0;border-bottom-right-radius:0;"
+            )
+        else:
+            self.toggle.setStyleSheet(
+                "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
+                "margin:0px;padding:6px 10px;background:#1f2937;"
+                "border:1px solid #374151;border-radius:6px;"
+            )
+
+
 class BuildWorker(QThread):
     log = Signal(str)
     done = Signal(bool, str)
 
-    def __init__(self, image_size: str, output_path: str):
+    def __init__(self, config_env: dict[str, str], output_path: str):
         super().__init__()
-        self.image_size = image_size
+        self.config_env = config_env
         self.output_path = output_path
 
     def run(self):
         try:
             env = os.environ.copy()
-            env["IMAGE_SIZE"] = self.image_size
-            # On macOS the build script itself verifies Docker Desktop is
-            # installed/running, creates a fresh build-tools container, runs the
-            # build, and removes the container with --rm.
+            env.update({k: str(v) for k, v in self.config_env.items()})
+            env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
             cmd = ["./build-alpine-usb.sh"]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
             for line in proc.stdout or []:
@@ -300,7 +360,7 @@ class BuildWorker(QThread):
             code = proc.wait()
             if code != 0:
                 raise RuntimeError(f"Build failed with exit code {code}")
-            built = str(Path.cwd() / "alpine-usb-xfce.img")
+            built = str(Path.cwd() / env.get("IMAGE_NAME", DEFAULT_IMAGE_NAME))
             final = str(Path(self.output_path).expanduser())
             if final != built:
                 Path(final).parent.mkdir(parents=True, exist_ok=True)
@@ -336,13 +396,12 @@ class FlashWorker(QThread):
                 raise RuntimeError("Invalid USB device")
             if platform.system() == "Darwin":
                 raw = dev.replace("/dev/disk", "/dev/rdisk")
-                tmp_image = os.path.join(tempfile.gettempdir(), "alpine-usb-xfce.img")
+                tmp_image = os.path.join(tempfile.gettempdir(), DEFAULT_IMAGE_NAME)
                 try: os.remove(tmp_image)
                 except FileNotFoundError: pass
                 try:
                     os.link(self.image, tmp_image)
                 except OSError:
-                    # fallback only if link impossible
                     shutil.copyfile(self.image, tmp_image)
                 log_path = os.path.join(tempfile.gettempdir(), "alpine-usb-flash.log")
                 try: os.remove(log_path)
@@ -351,7 +410,7 @@ class FlashWorker(QThread):
                 if not self.sudo_password:
                     raise RuntimeError("Administrator password is required to flash the USB.")
                 with open(log_path, "w") as log:
-                    log.write("Alpine USB XFCE Installer - Flash USB\n")
+                    log.write("Alpine USB Installer - Flash USB\n")
                     log.write(f"Target: {dev}\nImage: {tmp_image}\n\n")
                 auth = subprocess.run(
                     ["sudo", "-S", "-v"],
@@ -434,11 +493,10 @@ class Main(QWidget):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(make_app_icon())
-        self.resize(900, 480)
-        self.image = QLineEdit(str(Path.cwd() / "alpine-usb-xfce.img"))
-        self.image.setReadOnly(False)
-        self.image.setPlaceholderText("Output image path, e.g. /Users/you/Downloads/alpine-usb-xfce.img")
-        self.image_size = QLineEdit("16G")
+        self.resize(1120, 760)
+
+        self.image = QLineEdit(str(Path.cwd() / DEFAULT_IMAGE_NAME))
+        self.image.setPlaceholderText(f"Output image path, e.g. /Users/you/Downloads/{DEFAULT_IMAGE_NAME}")
         self.device = QLineEdit()
         self.status = QLabel("")
         self.status.setStyleSheet("color:#d1d5db;")
@@ -448,135 +506,204 @@ class Main(QWidget):
         self.build_status.hide()
         self.builder = None
         self.worker = None
-        self.console_toggle = QPushButton("Console output  ▼")
+
+        self.make_config_widgets()
+
+        self.console_toggle = QPushButton("Console output  ▶")
         self.console_toggle.clicked.connect(self.toggle_console)
         self.log = QTextEdit(); self.log.setReadOnly(True)
-        self.log.setMinimumHeight(320)
-        self.log.setMaximumHeight(520)
+        self.log.setMinimumHeight(260)
+        self.log.setMaximumHeight(420)
         self.console_empty = QLabel("No console output")
         self.console_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.console_empty.setMinimumHeight(320)
+        self.console_empty.setMinimumHeight(260)
         self.console_stack = QWidget()
         self.console_stack_layout = QStackedLayout(self.console_stack)
         self.console_stack_layout.setContentsMargins(0, 0, 0, 0)
         self.console_stack_layout.addWidget(self.console_empty)
         self.console_stack_layout.addWidget(self.log)
         self.console_stack_layout.setCurrentWidget(self.console_empty)
-        self.update_console_style(expanded=True)
+
         self.build()
+        self.console_stack.hide()
+        self.update_console_style(expanded=False)
         self.refresh()
+
+    def make_config_widgets(self):
+        self.image_size = QComboBox(); self.image_size.setEditable(True)
+        add_combo_items(self.image_size, ["16G", "32G", "64G", "128G"])
+        self.alpine_branch = QComboBox(); self.alpine_branch.setEditable(True)
+        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        self.arch = QComboBox(); add_combo_items(self.arch, ["x86_64"])
+        self.hostname = QLineEdit("alpine-usb")
+        self.username = QLineEdit("pablo")
+        self.password = QLineEdit("pablo"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.root_password = QLineEdit("pablo"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.timezone = QComboBox(); self.timezone.setEditable(True)
+        add_combo_items(self.timezone, ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"])
+        self.locale = QComboBox(); self.locale.setEditable(True)
+        add_combo_items(self.locale, ["en_US.UTF-8", "es_ES.UTF-8", "es_MX.UTF-8"])
+        self.console_keymap = QComboBox(); self.console_keymap.setEditable(True)
+        add_combo_items(self.console_keymap, ["la-latin1", "es", "us", "br-abnt2", "fr", "de"])
+        self.xkb_layout = QComboBox(); self.xkb_layout.setEditable(True)
+        add_combo_items(self.xkb_layout, [("Latin American Spanish", "latam"), ("Spanish", "es"), ("US English", "us"), ("Brazil ABNT2", "br"), ("French", "fr"), ("German", "de")])
+        self.xkb_variant = QLineEdit("")
+        self.xkb_model = QLineEdit("pc105")
+
+        self.desktop = QComboBox()
+        add_combo_items(self.desktop, [
+            ("XFCE (default)", "xfce"), ("GNOME", "gnome"), ("KDE Plasma", "plasma"),
+            ("MATE", "mate"), ("LXQt", "lxqt"), ("No desktop / WM only", "none"),
+        ])
+        self.display_manager = QComboBox()
+        add_combo_items(self.display_manager, [
+            ("Auto recommended", "auto"), ("LightDM", "lightdm"), ("SDDM", "sddm"),
+            ("GDM", "gdm"), ("LXDM", "lxdm"), ("greetd + tuigreet", "greetd"), ("None / TTY", "none"),
+        ])
+        self.default_session = QComboBox()
+        add_combo_items(self.default_session, [
+            ("Auto", "auto"), ("XFCE", "xfce"), ("GNOME", "gnome"), ("Plasma", "plasma"),
+            ("MATE", "mate"), ("LXQt", "lxqt"), ("i3", "i3"), ("Sway", "sway"),
+            ("Hyprland", "hyprland"), ("Awesome", "awesome"), ("bspwm", "bspwm"),
+            ("Openbox", "openbox"), ("labwc", "labwc"), ("Shell only", "shell"),
+        ])
+        self.wm_checks: dict[str, QCheckBox] = {}
+        for key, label in [
+            ("i3", "i3 (X11 tiling)"), ("sway", "Sway (Wayland tiling)"),
+            ("hyprland", "Hyprland (Wayland tiling)"), ("awesome", "AwesomeWM"),
+            ("bspwm", "bspwm"), ("openbox", "Openbox"), ("labwc", "labwc (Wayland)"),
+        ]:
+            self.wm_checks[key] = QCheckBox(label)
+        self.browser = QComboBox(); add_combo_items(self.browser, [("Firefox ESR", "firefox-esr"), ("Firefox", "firefox"), ("Chromium", "chromium"), ("None", "none")])
+        self.audio = QComboBox(); add_combo_items(self.audio, [("PipeWire", "pipewire"), ("ALSA only", "alsa"), ("None", "none")])
+
+        self.network = QComboBox(); add_combo_items(self.network, [("NetworkManager", "networkmanager"), ("Classic / none", "none")])
+        self.wifi = QCheckBox("Wi-Fi support (wpa_supplicant, wireless-regdb, NM Wi-Fi)"); self.wifi.setChecked(True)
+        self.bluetooth = QCheckBox("Bluetooth support (bluez, blueman, firmware)"); self.bluetooth.setChecked(True)
+
+        self.bootloader = QComboBox(); add_combo_items(self.bootloader, [("GRUB removable UEFI", "grub"), ("systemd-boot removable UEFI", "systemd-boot")])
+        self.kernel = QComboBox(); add_combo_items(self.kernel, [("linux-lts", "lts"), ("linux-stable", "stable")])
+        self.firmware = QComboBox(); add_combo_items(self.firmware, [("Full linux-firmware (recommended)", "full"), ("linux-firmware-none", "none")])
+        self.boot_timeout = QLineEdit("3")
+        self.extra_packages = QLineEdit("")
+        self.extra_packages.setPlaceholderText("Space-separated apk packages, e.g. neovim tmux docker")
 
     def build(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        title = QLabel("Alpine USB XFCE Installer")
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
             QLabel { color:#ffffff; margin:0px; padding:0px; }
-            QLineEdit { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:1px 4px; min-height:22px; max-height:24px; }
+            QLineEdit, QComboBox { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:2px 5px; min-height:24px; }
+            QComboBox QAbstractItemView { background:#1f2937; color:#ffffff; selection-background-color:#2563eb; }
+            QCheckBox { color:#ffffff; spacing:8px; min-height:22px; }
             QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
-            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:3px 8px; min-height:22px; max-height:26px; }
+            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:3px 8px; min-height:24px; }
             QPushButton:hover { background:#1d4ed8; }
             QPushButton:disabled { background:#4b5563; color:#d1d5db; }
             QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
             QProgressBar { color:#ffffff; }
+            QScrollArea { border:0; }
         """)
-        title.setStyleSheet("font-size:20px;font-weight:bold;color:#ffffff;margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash a preconfigured Alpine Linux XFCE USB image.")
+        title = QLabel("Alpine USB Installer")
+        title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;margin:0px;padding:0px;")
+        subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
         subtitle.setStyleSheet("color:#cbd5e1;margin:0px;padding:0px;font-size:12px;")
-        header = QVBoxLayout()
-        header.setContentsMargins(0, 0, 0, 10)
-        header.setSpacing(3)
-        header.addWidget(title)
-        header.addWidget(subtitle)
-        layout.addLayout(header)
+        header = QVBoxLayout(); header.setContentsMargins(0, 0, 0, 10); header.setSpacing(3)
+        header.addWidget(title); header.addWidget(subtitle); layout.addLayout(header)
+
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        content = QWidget(); content_layout = QVBoxLayout(content); content_layout.setContentsMargins(0, 0, 0, 0); content_layout.setSpacing(10)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+
         img_title = QLabel("1. Image")
         img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;")
-        layout.addWidget(img_title)
-        img_grid = QGridLayout()
-        img_grid.setContentsMargins(0, 0, 0, 0)
-        img_grid.setColumnStretch(1, 1)
-        img_grid.setHorizontalSpacing(10)
-        img_grid.setVerticalSpacing(8)
-        choose_output = QPushButton("Select path")
-        choose_output.setIcon(make_button_icon("folder"))
-        choose_output.clicked.connect(self.choose_output_path)
-        choose_output.setFixedWidth(120)
-        self.build_button = QPushButton("Build image")
-        self.build_button.setIcon(make_button_icon("build"))
-        self.build_button.clicked.connect(self.build_image)
-        self.build_button.setFixedWidth(150)
-        self.build_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
-        self.image_size.hide()
-        img_grid.addWidget(QLabel("Output path:"), 0, 0)
-        img_grid.addWidget(self.image, 0, 1)
-        img_grid.addWidget(choose_output, 0, 2)
-        img_buttons = QHBoxLayout()
-        img_buttons.setContentsMargins(0, 10, 0, 0)
-        img_buttons.addWidget(self.build_button)
-        img_buttons.addStretch()
-        img_grid.addLayout(img_buttons, 1, 0, 1, 3)
+        content_layout.addWidget(img_title)
+        img_grid = QGridLayout(); img_grid.setColumnStretch(1, 1); img_grid.setHorizontalSpacing(10); img_grid.setVerticalSpacing(8)
+        choose_output = QPushButton("Select path"); choose_output.setIcon(make_button_icon("folder")); choose_output.clicked.connect(self.choose_output_path); choose_output.setFixedWidth(120)
+        self.build_button = QPushButton("Build image"); self.build_button.setIcon(make_button_icon("build")); self.build_button.clicked.connect(self.build_image); self.build_button.setFixedWidth(150)
+        self.build_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;")
+        img_grid.addWidget(QLabel("Output path:"), 0, 0); img_grid.addWidget(self.image, 0, 1); img_grid.addWidget(choose_output, 0, 2)
+        img_buttons = QHBoxLayout(); img_buttons.addWidget(self.build_button); img_buttons.addStretch(); img_grid.addLayout(img_buttons, 1, 0, 1, 3)
         img_grid.addWidget(self.build_status, 2, 0, 1, 3)
-        self.build_progress = QProgressBar(); self.build_progress.setRange(0,0); self.build_progress.hide()
-        img_grid.addWidget(self.build_progress, 3, 0, 1, 3)
-        layout.addLayout(img_grid)
-        layout.addSpacing(12)
+        self.build_progress = QProgressBar(); self.build_progress.setRange(0, 0); self.build_progress.hide(); img_grid.addWidget(self.build_progress, 3, 0, 1, 3)
+        content_layout.addLayout(img_grid)
+
+        config_note = QLabel("Configuration sections are collapsed by default; open only what you want to customize.")
+        config_note.setStyleSheet("color:#cbd5e1;font-size:12px;margin-top:6px;")
+        content_layout.addWidget(config_note)
+        self.add_config_sections(content_layout)
 
         usb_title = QLabel("2. USB target")
-        usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;")
-        layout.addWidget(usb_title)
-        usb_box = QVBoxLayout()
-        usb_box.setContentsMargins(0, 0, 0, 0)
-        usb_box.setSpacing(6)
-        usb_row = QHBoxLayout()
-        usb_row.setContentsMargins(0, 0, 0, 0)
-        usb_row.setSpacing(8)
-        self.pick_button = QPushButton("Select USB")
-        self.pick_button.setIcon(make_button_icon("usb"))
-        self.pick_button.clicked.connect(self.pick)
-        self.pick_button.setFixedWidth(150)
-        self.flash_button = QPushButton("Flash USB")
-        self.flash_button.setIcon(make_button_icon("flash"))
-        self.flash_button.clicked.connect(self.flash)
-        self.flash_button.setFixedWidth(150)
-        self.flash_button.setEnabled(False)
+        usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
+        content_layout.addWidget(usb_title)
+        usb_box = QVBoxLayout(); usb_box.setSpacing(6)
+        usb_row = QHBoxLayout(); usb_row.setSpacing(8)
+        self.pick_button = QPushButton("Select USB"); self.pick_button.setIcon(make_button_icon("usb")); self.pick_button.clicked.connect(self.pick); self.pick_button.setFixedWidth(150)
+        self.flash_button = QPushButton("Flash USB"); self.flash_button.setIcon(make_button_icon("flash")); self.flash_button.clicked.connect(self.flash); self.flash_button.setFixedWidth(150); self.flash_button.setEnabled(False)
         self.flash_button.setStyleSheet("""
-            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px; }
+            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
             QPushButton:disabled { background:#374151;color:#9ca3af; }
         """)
-        device_label = QLabel("Device:")
-        device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        usb_row.addWidget(device_label)
-        usb_row.addWidget(self.device, 1)
-        usb_row.addWidget(self.pick_button)
-        usb_box.addLayout(usb_row)
-        flash_row = QHBoxLayout()
-        flash_row.setContentsMargins(0, 10, 0, 0)
-        flash_row.addWidget(self.flash_button)
-        flash_row.addStretch()
-        usb_box.addLayout(flash_row)
+        device_label = QLabel("Device:"); device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        usb_row.addWidget(device_label); usb_row.addWidget(self.device, 1); usb_row.addWidget(self.pick_button); usb_box.addLayout(usb_row)
+        flash_row = QHBoxLayout(); flash_row.addWidget(self.flash_button); flash_row.addStretch(); usb_box.addLayout(flash_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
         warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;font-size:12px;")
-        warn.setContentsMargins(0, 12, 0, 0)
-        usb_box.addWidget(warn)
-        usb_box.addSpacing(10)
-        usb_box.addWidget(self.status)
-        self.flash_progress = QProgressBar(); self.flash_progress.setRange(0,100); self.flash_progress.setValue(0); self.flash_progress.hide()
-        usb_box.addWidget(self.flash_progress)
-        layout.addLayout(usb_box)
+        usb_box.addWidget(warn); usb_box.addWidget(self.status)
+        self.flash_progress = QProgressBar(); self.flash_progress.setRange(0, 100); self.flash_progress.setValue(0); self.flash_progress.hide(); usb_box.addWidget(self.flash_progress)
+        content_layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
-        layout.addSpacing(14)
-        console_box = QVBoxLayout()
-        console_box.setContentsMargins(0, 0, 0, 0)
-        console_box.setSpacing(0)
-        console_box.addWidget(self.console_toggle)
-        console_box.addWidget(self.console_stack)
-        layout.addLayout(console_box)
-        layout.addStretch(1)
+        content_layout.addStretch(1)
+
+        console_box = QVBoxLayout(); console_box.setContentsMargins(0, 8, 0, 0); console_box.setSpacing(0)
+        console_box.addWidget(self.console_toggle); console_box.addWidget(self.console_stack); layout.addLayout(console_box)
+
+    def add_config_sections(self, parent_layout: QVBoxLayout):
+        system = CollapsibleSection("System, user, localization", collapsed=True)
+        form = QFormLayout(); form.setLabelAlignment(Qt.AlignmentFlag.AlignRight); form.setHorizontalSpacing(12); form.setVerticalSpacing(8)
+        for label, widget in [
+            ("Image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
+            ("Hostname:", self.hostname), ("User:", self.username), ("User password:", self.password),
+            ("Root password:", self.root_password), ("Timezone:", self.timezone), ("Locale:", self.locale),
+            ("Console keymap:", self.console_keymap), ("XKB layout:", self.xkb_layout), ("XKB variant:", self.xkb_variant),
+            ("XKB model:", self.xkb_model),
+        ]:
+            form.addRow(label, widget)
+        system.body_layout.addLayout(form); parent_layout.addWidget(system)
+
+        desktop = CollapsibleSection("Desktop environments, display manager and window managers", collapsed=True)
+        dform = QFormLayout(); dform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); dform.setHorizontalSpacing(12); dform.setVerticalSpacing(8)
+        dform.addRow("Desktop:", self.desktop); dform.addRow("Display manager:", self.display_manager); dform.addRow("Default session:", self.default_session)
+        dform.addRow("Browser:", self.browser); dform.addRow("Audio:", self.audio)
+        desktop.body_layout.addLayout(dform)
+        wm_label = QLabel("Optional tiling/window managers:"); wm_label.setStyleSheet("color:#cbd5e1;font-weight:bold;")
+        desktop.body_layout.addWidget(wm_label)
+        wm_grid = QGridLayout(); wm_grid.setHorizontalSpacing(18); wm_grid.setVerticalSpacing(6)
+        for i, cb in enumerate(self.wm_checks.values()):
+            wm_grid.addWidget(cb, i // 2, i % 2)
+        desktop.body_layout.addLayout(wm_grid); parent_layout.addWidget(desktop)
+
+        network = CollapsibleSection("Network, Wi‑Fi and Bluetooth", collapsed=True)
+        nform = QFormLayout(); nform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); nform.setHorizontalSpacing(12); nform.setVerticalSpacing(8)
+        nform.addRow("Network backend:", self.network); nform.addRow("Wi‑Fi:", self.wifi); nform.addRow("Bluetooth:", self.bluetooth)
+        network.body_layout.addLayout(nform); parent_layout.addWidget(network)
+
+        boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True)
+        bform = QFormLayout(); bform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); bform.setHorizontalSpacing(12); bform.setVerticalSpacing(8)
+        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout)
+        boot.body_layout.addLayout(bform); parent_layout.addWidget(boot)
+
+        extra = CollapsibleSection("Extra APK packages", collapsed=True)
+        extra.body_layout.addWidget(QLabel("Optional package names are passed directly to apk add."))
+        extra.body_layout.addWidget(self.extra_packages)
+        parent_layout.addWidget(extra)
 
     def update_console_style(self, expanded: bool):
         if expanded:
+            self.console_toggle.setText("Console output  ▼")
             self.console_toggle.setStyleSheet(
                 "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
                 "margin:0px;padding:5px 10px;background:#1f2937;"
@@ -593,6 +720,7 @@ class Main(QWidget):
             self.console_stack.setStyleSheet(panel_style)
             self.console_empty.setStyleSheet("background:#0b1220;color:#ffffff;font-size:15pt;font-weight:bold;")
         else:
+            self.console_toggle.setText("Console output  ▶")
             self.console_toggle.setStyleSheet(
                 "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
                 "margin:0px;padding:5px 10px;background:#1f2937;"
@@ -600,21 +728,15 @@ class Main(QWidget):
             )
 
     def toggle_console(self):
-        visible = self.console_stack.isVisible()
-        expanded = not visible
+        expanded = not self.console_stack.isVisible()
         self.console_stack.setVisible(expanded)
-        self.console_toggle.setText("Console output  ▼" if expanded else "Console output  ▲")
         self.update_console_style(expanded)
-
-    def browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.img *.raw *.iso);;All files (*)")
-        if path: self.image.setText(path)
 
     def choose_output_path(self):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Select output image path",
-            self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img"),
+            self.image.text().strip() or str(Path.cwd() / DEFAULT_IMAGE_NAME),
             "Disk images (*.img);;All files (*)",
         )
         if path:
@@ -624,12 +746,9 @@ class Main(QWidget):
 
     def refresh(self):
         self.device.clear()
-        self.status.clear()
-        self.status.hide()
-        self.build_status.clear()
-        self.build_status.hide()
-        self.build_progress.hide()
-        self.flash_progress.hide()
+        self.status.clear(); self.status.hide()
+        self.build_status.clear(); self.build_status.hide()
+        self.build_progress.hide(); self.flash_progress.hide()
 
     def pick(self):
         dlg = DeviceDialog(self)
@@ -649,18 +768,97 @@ class Main(QWidget):
         return self.thread_running(self.builder) or self.thread_running(self.worker)
 
     def set_busy(self, busy: bool):
-        self.build_button.setEnabled(not busy)
-        self.pick_button.setEnabled(not busy)
-        self.device.setEnabled(not busy)
-        self.image.setEnabled(not busy)
+        widgets = [
+            self.build_button, self.pick_button, self.device, self.image,
+            self.image_size, self.alpine_branch, self.arch, self.hostname,
+            self.username, self.password, self.root_password, self.timezone,
+            self.locale, self.console_keymap, self.xkb_layout, self.xkb_variant,
+            self.xkb_model, self.desktop, self.display_manager, self.default_session,
+            self.browser, self.audio, self.network, self.wifi, self.bluetooth,
+            self.bootloader, self.kernel, self.firmware, self.boot_timeout,
+            self.extra_packages,
+        ] + list(self.wm_checks.values())
+        for widget in widgets:
+            widget.setEnabled(not busy)
         self.flash_button.setEnabled(False if busy else bool(self.device.text().strip() and self.image.text().strip()))
+
+    def selected_wms(self) -> list[str]:
+        return [key for key, cb in self.wm_checks.items() if cb.isChecked()]
+
+    def collect_build_env(self) -> dict[str, str]:
+        password = self.password.text()
+        root_password = self.root_password.text() or password
+        return {
+            "IMAGE_NAME": DEFAULT_IMAGE_NAME,
+            "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
+            "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
+            "ARCH": combo_value(self.arch) or "x86_64",
+            "ALPINE_USB_USER": self.username.text().strip() or "pablo",
+            "ALPINE_USB_PASSWORD": password,
+            "ALPINE_USB_ROOT_PASSWORD": root_password,
+            "ALPINE_USB_HOSTNAME": self.hostname.text().strip() or "alpine-usb",
+            "ALPINE_USB_TIMEZONE": self.timezone.currentText().strip() or "UTC",
+            "ALPINE_USB_LOCALE": self.locale.currentText().strip() or "en_US.UTF-8",
+            "ALPINE_USB_CONSOLE_KEYMAP": self.console_keymap.currentText().strip() or "la-latin1",
+            "ALPINE_USB_XKB_LAYOUT": combo_value(self.xkb_layout) or "latam",
+            "ALPINE_USB_XKB_VARIANT": self.xkb_variant.text().strip(),
+            "ALPINE_USB_XKB_MODEL": self.xkb_model.text().strip() or "pc105",
+            "ALPINE_USB_DESKTOP": combo_value(self.desktop),
+            "ALPINE_USB_TILING_WMS": " ".join(self.selected_wms()),
+            "ALPINE_USB_DEFAULT_SESSION": combo_value(self.default_session),
+            "ALPINE_USB_DISPLAY_MANAGER": combo_value(self.display_manager),
+            "ALPINE_USB_NETWORK": combo_value(self.network),
+            "ALPINE_USB_WIFI": "1" if self.wifi.isChecked() else "0",
+            "ALPINE_USB_BLUETOOTH": "1" if self.bluetooth.isChecked() else "0",
+            "ALPINE_USB_AUDIO": combo_value(self.audio),
+            "ALPINE_USB_BROWSER": combo_value(self.browser),
+            "ALPINE_USB_FIRMWARE": combo_value(self.firmware),
+            "ALPINE_USB_BOOTLOADER": combo_value(self.bootloader),
+            "ALPINE_USB_KERNEL_FLAVOR": combo_value(self.kernel),
+            "ALPINE_USB_BOOT_TIMEOUT": self.boot_timeout.text().strip() or "3",
+            "ALPINE_USB_EXTRA_PACKAGES": self.extra_packages.text().strip(),
+        }
+
+    def validate_build_config(self, env: dict[str, str]) -> str | None:
+        size = env["IMAGE_SIZE"]
+        if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
+            return "Image size must look like 16G, 32768M, etc."
+        if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
+            return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
+        if not env["ALPINE_USB_PASSWORD"]:
+            return "User password cannot be empty."
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env["ALPINE_USB_HOSTNAME"]):
+            return "Hostname may contain only letters, numbers and dash; it cannot start/end with dash."
+        if not env["ALPINE_USB_BOOT_TIMEOUT"].isdigit():
+            return "Boot menu timeout must be a number."
+        if env["ALPINE_USB_DESKTOP"] == "none" and not env["ALPINE_USB_TILING_WMS"] and env["ALPINE_USB_DISPLAY_MANAGER"] not in {"auto", "none", "greetd"}:
+            return "Select a desktop/WM or use display manager Auto/None/greetd."
+        session = env["ALPINE_USB_DEFAULT_SESSION"]
+        if session == "auto":
+            session = env["ALPINE_USB_DESKTOP"] if env["ALPINE_USB_DESKTOP"] != "none" else (env["ALPINE_USB_TILING_WMS"].split() or ["shell"])[0]
+        if session in {"sway", "hyprland", "labwc"} and env["ALPINE_USB_DISPLAY_MANAGER"] in {"lightdm", "lxdm"}:
+            return "Wayland sessions (Sway/Hyprland/labwc) need Auto, greetd, SDDM, GDM or no display manager; LightDM/LXDM are X11-only here."
+        return None
+
+    def config_summary_text(self, env: dict[str, str]) -> str:
+        return (
+            f"Size: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | "
+            f"Desktop: {env['ALPINE_USB_DESKTOP']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'} | "
+            f"DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Kernel: linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | "
+            f"Bootloader: {env['ALPINE_USB_BOOTLOADER']} | Wi‑Fi: {env['ALPINE_USB_WIFI']} | Bluetooth: {env['ALPINE_USB_BLUETOOTH']} | "
+            f"Keyboard: {env['ALPINE_USB_XKB_LAYOUT']}"
+        )
 
     def build_image(self):
         if self.has_running_worker():
             modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
             return
-        size = self.image_size.text().strip() or "16G"
-        output_path = self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img")
+        output_path = self.image.text().strip() or str(Path.cwd() / DEFAULT_IMAGE_NAME)
+        env = self.collect_build_env()
+        validation_error = self.validate_build_config(env)
+        if validation_error:
+            modal(self, "error", APP_TITLE, validation_error)
+            return
         if platform.system() == "Darwin":
             if not shutil.which("docker"):
                 modal(self, "error", APP_TITLE, "Docker not found. Install Docker Desktop and try again.")
@@ -668,15 +866,13 @@ class Main(QWidget):
             if subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
                 modal(self, "error", APP_TITLE, "Docker is not running. Start Docker Desktop and try again.")
                 return
-        if not modal(self, "question", APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}", question=True):
+        confirm = f"Build Alpine image?\n\nOutput:\n{output_path}\n\n{self.config_summary_text(env)}"
+        if not modal(self, "question", APP_TITLE, confirm, question=True):
             return
-        self.build_progress.show()
-        self.flash_progress.hide()
-        self.build_status.show()
-        self.build_status.setText("Building image...")
-        self.status.hide()
-        self.set_busy(True)
-        self.builder = BuildWorker(size, output_path)
+        self.build_progress.show(); self.flash_progress.hide()
+        self.build_status.show(); self.build_status.setText("Building image...")
+        self.status.hide(); self.set_busy(True)
+        self.builder = BuildWorker(env, output_path)
         self.builder.log.connect(self.append_log)
         self.builder.done.connect(self.build_done)
         self.builder.finished.connect(self.build_thread_finished)
@@ -684,10 +880,8 @@ class Main(QWidget):
 
     def build_done(self, ok, msg):
         self.build_progress.hide()
-        self.build_status.show()
-        self.build_status.setText(msg)
-        self.status.hide()
-        self.append_log(msg)
+        self.build_status.show(); self.build_status.setText(msg)
+        self.status.hide(); self.append_log(msg)
         if ok:
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
@@ -721,12 +915,8 @@ class Main(QWidget):
             )
             if not ok or not sudo_password:
                 return
-        self.build_progress.hide()
-        self.flash_progress.setRange(0,100)
-        self.flash_progress.setValue(0)
-        self.flash_progress.show()
-        self.status.show()
-        self.status.setText("Flashing... 0%")
+        self.build_progress.hide(); self.flash_progress.setRange(0, 100); self.flash_progress.setValue(0); self.flash_progress.show()
+        self.status.show(); self.status.setText("Flashing... 0%")
         self.set_busy(True)
         self.worker = FlashWorker(img, dev, sudo_password)
         self.worker.log.connect(self.append_log)
@@ -755,11 +945,8 @@ class Main(QWidget):
     def flash_done(self, ok, msg):
         if ok:
             self.flash_progress.setValue(100)
-        self.flash_progress.hide()
-        self.status.show()
-        self.status.setText(msg)
-        self.append_log(msg)
-        self.set_busy(False)
+        self.flash_progress.hide(); self.status.show(); self.status.setText(msg)
+        self.append_log(msg); self.set_busy(False)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
     def flash_thread_finished(self):
@@ -769,8 +956,7 @@ class Main(QWidget):
     def closeEvent(self, event):
         if self.has_running_worker():
             modal(self, "error", APP_TITLE, "An operation is still running. Wait for it to finish before closing the app.")
-            event.ignore()
-            return
+            event.ignore(); return
         event.accept()
 
 

@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Build a preconfigured Alpine Linux USB image that boots straight to LightDM/XFCE.
+# Build a configurable, preinstalled Alpine Linux USB image.
 set -euo pipefail
 
-IMAGE_NAME="${IMAGE_NAME:-alpine-usb-xfce.img}"
+IMAGE_NAME="${IMAGE_NAME:-alpine-usb.img}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ALPINE_BRANCH="${ALPINE_BRANCH:-latest-stable}"
 ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
 MAKE_VM_IMAGE="$WORK_DIR/alpine-make-vm-image.uefi"
+
+ALPINE_USB_KERNEL_FLAVOR="${ALPINE_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
+ALPINE_USB_BOOTLOADER="${ALPINE_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
+ALPINE_USB_ROOTFS="${ALPINE_USB_ROOTFS:-ext4}"
+ALPINE_USB_BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
+ALPINE_USB_INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+ALPINE_USB_USER="${ALPINE_USB_USER:-pablo}"
+
+ALPINE_USB_BOOTLOADER="$(printf '%s' "$ALPINE_USB_BOOTLOADER" | tr '[:upper:]' '[:lower:]')"
+[ "$ALPINE_USB_BOOTLOADER" = "systemdboot" ] && ALPINE_USB_BOOTLOADER="systemd-boot"
+case "$ALPINE_USB_BOOTLOADER" in grub|systemd-boot) ;; *) echo "Invalid bootloader: $ALPINE_USB_BOOTLOADER" >&2; exit 1 ;; esac
+case "$ALPINE_USB_KERNEL_FLAVOR" in lts|stable) ;; *) echo "Invalid kernel flavor: $ALPINE_USB_KERNEL_FLAVOR" >&2; exit 1 ;; esac
+case "$ALPINE_USB_ROOTFS" in ext4) ;; *) echo "Only ext4 rootfs is supported by this USB installer" >&2; exit 1 ;; esac
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
 
@@ -25,13 +38,24 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
     exit 1
   fi
 
+  pass_env=(
+    IMAGE_NAME IMAGE_SIZE ALPINE_BRANCH ARCH
+    ALPINE_USB_USER ALPINE_USB_PASSWORD ALPINE_USB_ROOT_PASSWORD ALPINE_USB_HOSTNAME
+    ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE
+    ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL
+    ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER
+    ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER
+    ALPINE_USB_FIRMWARE ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_ROOTFS
+    ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_INITFS_FEATURES ALPINE_USB_EXTRA_PACKAGES
+  )
+  docker_env=(-e ALPINE_USB_BUILD_IN_DOCKER=1)
+  for name in "${pass_env[@]}"; do
+    docker_env+=( -e "$name=${!name-}" )
+  done
+
   echo "Starting fresh Docker build container with Alpine build tools..."
   exec docker run --rm --platform linux/amd64 --privileged \
-    -e ALPINE_USB_BUILD_IN_DOCKER=1 \
-    -e IMAGE_NAME="$IMAGE_NAME" \
-    -e IMAGE_SIZE="$IMAGE_SIZE" \
-    -e ALPINE_BRANCH="$ALPINE_BRANCH" \
-    -e ARCH="$ARCH" \
+    "${docker_env[@]}" \
     -v "$SCRIPT_DIR:/work" \
     -w /work \
     alpine:latest \
@@ -49,6 +73,7 @@ need sudo
 need python3
 need mmd
 need mcopy
+need mdir
 
 mkdir -p "$WORK_DIR"
 
@@ -61,20 +86,20 @@ fi
 chmod +x "$SCRIPT_DIR/configure-alpine-usb.sh"
 
 # Docker Desktop/macOS can be slow or unable to expose NBD partition nodes
-# (/dev/nbdXp1, /dev/nbdXp2). Patch alpine-make-vm-image to force a partition
-# re-read and fall back to kpartx mapper nodes (/dev/mapper/nbdXpN).
+# (/dev/nbdXp1, /dev/nbdXp2). Patch alpine-make-vm-image idempotently to force
+# a partition re-read and fall back to kpartx mapper nodes (/dev/mapper/nbdXpN).
 python3 - <<'PY'
 from pathlib import Path
 import re
 p = Path('.work/alpine-make-vm-image.uefi')
 s = p.read_text()
 
-# Remove kpartx mappings before disconnecting NBD; otherwise qemu-nbd can fail.
-s = s.replace('''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''', '''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tkpartx -d "$disk_dev" >/dev/null 2>&1 || true\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''')
+if 'kpartx -d "$disk_dev"' not in s:
+    s = s.replace('''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''', '''\tif [ "$disk_dev" ] && ! [ -b "$IMAGE_FILE" ]; then\n\t\tkpartx -d "$disk_dev" >/dev/null 2>&1 || true\n\t\tqemu-nbd --disconnect "$disk_dev" \\\n\t\t\t|| die "Failed to disconnect $disk_dev; disconnect it manually"\n\tfi''')
 
-old = r'''\t# This is needed when running in a container(?:.|
-)*?\tsettle_dev_node "\$root_dev" \|\| die "system didn't create \$root_dev node"'''
-new = '''\t# This is needed when running in a container. Docker Desktop can be slow
+if 'Docker Desktop can be slow' not in s:
+    old = r'''\t# This is needed when running in a container(?:.|\n)*?\tsettle_dev_node "\$root_dev" \|\| die "system didn't create \$root_dev node"'''
+    new = '''\t# This is needed when running in a container. Docker Desktop can be slow
 \t# or unable to expose NBD partition nodes, so force a partition re-read.
 \tpartprobe "$disk_dev" 2>/dev/null || true
 \tblockdev --rereadpt "$disk_dev" 2>/dev/null || true
@@ -99,23 +124,16 @@ new = '''\t# This is needed when running in a container. Docker Desktop can be s
 \t\tsleep 1
 \tdone
 \tsettle_dev_node "$root_dev" || die "system didn't create $root_dev node"'''
-s, n = re.subn(old, new, s, count=1)
-if n != 1:
-    raise SystemExit('Could not patch alpine-make-vm-image partition wait block')
+    s, n = re.subn(old, new, s, count=1)
+    if n != 1:
+        raise SystemExit('Could not patch alpine-make-vm-image partition wait block')
+
 p.write_text(s)
 PY
 
-install_uefi_removable_bootloader() {
-  # Many real PCs only list USB media as bootable when the removable-media
-  # fallback path exists. alpine-make-vm-image only creates startup.nsh plus
-  # /grub/grub.cfg, which works in some EFI shells/QEMU but is not enough for
-  # typical firmware boot menus.
+read_image_meta() {
   local image="$1"
-  local fallback="$SCRIPT_DIR/efi-fallback/BOOTX64.EFI"
-  local standalone_cfg="$SCRIPT_DIR/efi-fallback/grub-standalone.cfg"
-  local esp_offset root_uuid image_meta grub_cfg
-
-  image_meta="$(python3 - "$image" <<'PY'
+  python3 - "$image" <<'PY'
 import struct
 import sys
 import uuid
@@ -156,14 +174,24 @@ with open(image, "rb") as f:
 print(f"esp_offset={esp_offset}")
 print(f"root_uuid={root_uuid}")
 PY
-)"
-  eval "$image_meta"
+}
+
+install_grub_removable_bootloader() {
+  # Many real PCs only list USB media as bootable when the removable-media
+  # fallback path exists: /EFI/BOOT/BOOTX64.EFI.
+  local image="$1"
+  local fallback="$SCRIPT_DIR/efi-fallback/BOOTX64.EFI"
+  local standalone_cfg="$WORK_DIR/grub-standalone.cfg"
+  local esp_offset root_uuid grub_cfg modules_csv
+
+  eval "$(read_image_meta "$image")"
+  modules_csv="$(printf '%s' "$ALPINE_USB_INITFS_FEATURES" | tr ' ' ',')"
 
   grub_cfg="$WORK_DIR/grub-usb.cfg"
   mkdir -p "$SCRIPT_DIR/efi-fallback"
   cat > "$grub_cfg" <<EOF
 set default=0
-set timeout=3
+set timeout=$ALPINE_USB_BOOT_TIMEOUT
 set timeout_style=menu
 
 insmod part_gpt
@@ -171,16 +199,16 @@ insmod fat
 insmod gzio
 insmod linux
 insmod search_fs_file
-search --no-floppy --file --set=root /vmlinuz-lts
+search --no-floppy --file --set=root /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR
 
-menuentry 'Alpine Linux XFCE (LightDM)' {
-    linux /vmlinuz-lts root=UUID=$root_uuid ro rootfstype=ext4 rootwait rootdelay=5 modules=ata,base,ext4,kms,mmc,nvme,scsi,usb,virtio console=tty0
-    initrd /initramfs-lts
+menuentry 'Alpine Linux USB' {
+    linux /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$ALPINE_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0
+    initrd /initramfs-$ALPINE_USB_KERNEL_FLAVOR
 }
 
-menuentry 'Alpine Linux XFCE (safe graphics)' {
-    linux /vmlinuz-lts root=UUID=$root_uuid ro rootfstype=ext4 rootwait rootdelay=5 modules=ata,base,ext4,kms,mmc,nvme,scsi,usb,virtio console=tty0 nomodeset
-    initrd /initramfs-lts
+menuentry 'Alpine Linux USB (safe graphics)' {
+    linux /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$ALPINE_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0 nomodeset
+    initrd /initramfs-$ALPINE_USB_KERNEL_FLAVOR
 }
 EOF
 
@@ -191,7 +219,6 @@ insmod fat
 insmod search_fs_file
 search --no-floppy --file --set=esp /grub/grub.cfg
 # Keep prefix on the standalone memdisk so GRUB can load embedded modules.
-# If prefix points to the USB ESP, GRUB looks for /grub/x86_64-efi/*.mod there.
 set prefix=(memdisk)/boot/grub
 configfile (\$esp)/grub/grub.cfg
 
@@ -208,8 +235,26 @@ EOF
   mmd -i "${image}@@${esp_offset}" ::/grub >/dev/null 2>&1 || true
   mcopy -o -i "${image}@@${esp_offset}" "$fallback" ::/EFI/BOOT/BOOTX64.EFI
   mcopy -o -i "${image}@@${esp_offset}" "$grub_cfg" ::/grub/grub.cfg
-  echo "Installed removable UEFI bootloader: /EFI/BOOT/BOOTX64.EFI"
+  echo "Installed removable GRUB UEFI bootloader: /EFI/BOOT/BOOTX64.EFI"
   echo "Installed USB GRUB config: /grub/grub.cfg (root UUID $root_uuid)"
+}
+
+validate_systemd_bootloader() {
+  local image="$1"
+  local esp_offset root_uuid efi_name
+  eval "$(read_image_meta "$image")"
+  case "$ARCH" in
+    x86_64) efi_name="BOOTX64.EFI" ;;
+    x86) efi_name="BOOTIA32.EFI" ;;
+    aarch64) efi_name="BOOTAA64.EFI" ;;
+    armv7|armhf) efi_name="BOOTARM.EFI" ;;
+    *) efi_name="BOOTX64.EFI" ;;
+  esac
+  mdir -i "${image}@@${esp_offset}" ::/EFI/BOOT/"$efi_name" >/dev/null \
+    || { echo "systemd-boot fallback /EFI/BOOT/$efi_name was not created" >&2; exit 1; }
+  mdir -i "${image}@@${esp_offset}" ::/loader/entries/alpine.conf >/dev/null \
+    || { echo "systemd-boot loader entry was not created" >&2; exit 1; }
+  echo "Validated removable systemd-boot UEFI bootloader: /EFI/BOOT/$efi_name (root UUID $root_uuid)"
 }
 
 cat > "$SCRIPT_DIR/repositories" <<EOF
@@ -223,33 +268,68 @@ cd "$SCRIPT_DIR"
 # filesystem signatures and confuse NBD partition node creation.
 rm -f "$SCRIPT_DIR/$IMAGE_NAME"
 
-# raw image: easiest to dd to USB. serial console kept useful for debug; graphical boot still LightDM.
-sudo "$MAKE_VM_IMAGE" \
+# raw image: easiest to dd to USB.
+sudo env \
+  ALPINE_USB_USER="$ALPINE_USB_USER" \
+  ALPINE_USB_PASSWORD="${ALPINE_USB_PASSWORD:-}" \
+  ALPINE_USB_ROOT_PASSWORD="${ALPINE_USB_ROOT_PASSWORD:-}" \
+  ALPINE_USB_HOSTNAME="${ALPINE_USB_HOSTNAME:-}" \
+  ALPINE_USB_TIMEZONE="${ALPINE_USB_TIMEZONE:-}" \
+  ALPINE_USB_LOCALE="${ALPINE_USB_LOCALE:-}" \
+  ALPINE_USB_LANGUAGE="${ALPINE_USB_LANGUAGE:-}" \
+  ALPINE_USB_CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-}" \
+  ALPINE_USB_XKB_LAYOUT="${ALPINE_USB_XKB_LAYOUT:-}" \
+  ALPINE_USB_XKB_VARIANT="${ALPINE_USB_XKB_VARIANT:-}" \
+  ALPINE_USB_XKB_MODEL="${ALPINE_USB_XKB_MODEL:-}" \
+  ALPINE_USB_DESKTOP="${ALPINE_USB_DESKTOP:-}" \
+  ALPINE_USB_TILING_WMS="${ALPINE_USB_TILING_WMS:-}" \
+  ALPINE_USB_DEFAULT_SESSION="${ALPINE_USB_DEFAULT_SESSION:-}" \
+  ALPINE_USB_DISPLAY_MANAGER="${ALPINE_USB_DISPLAY_MANAGER:-}" \
+  ALPINE_USB_NETWORK="${ALPINE_USB_NETWORK:-}" \
+  ALPINE_USB_WIFI="${ALPINE_USB_WIFI:-}" \
+  ALPINE_USB_BLUETOOTH="${ALPINE_USB_BLUETOOTH:-}" \
+  ALPINE_USB_AUDIO="${ALPINE_USB_AUDIO:-}" \
+  ALPINE_USB_BROWSER="${ALPINE_USB_BROWSER:-}" \
+  ALPINE_USB_FIRMWARE="${ALPINE_USB_FIRMWARE:-}" \
+  ALPINE_USB_BOOTLOADER="$ALPINE_USB_BOOTLOADER" \
+  ALPINE_USB_KERNEL_FLAVOR="$ALPINE_USB_KERNEL_FLAVOR" \
+  ALPINE_USB_ROOTFS="$ALPINE_USB_ROOTFS" \
+  ALPINE_USB_BOOT_TIMEOUT="$ALPINE_USB_BOOT_TIMEOUT" \
+  ALPINE_USB_INITFS_FEATURES="$ALPINE_USB_INITFS_FEATURES" \
+  ALPINE_USB_EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}" \
+  "$MAKE_VM_IMAGE" \
   --image-format raw \
   --image-size "$IMAGE_SIZE" \
   --arch "$ARCH" \
   --boot-mode UEFI \
-  --initfs-features "ata base ext4 kms mmc nvme scsi usb virtio" \
+  --kernel-flavor "$ALPINE_USB_KERNEL_FLAVOR" \
+  --rootfs "$ALPINE_USB_ROOTFS" \
+  --initfs-features "$ALPINE_USB_INITFS_FEATURES" \
   --repositories-file "$SCRIPT_DIR/repositories" \
   --script-chroot \
   "$SCRIPT_DIR/$IMAGE_NAME" \
   "$SCRIPT_DIR/configure-alpine-usb.sh"
 
-install_uefi_removable_bootloader "$SCRIPT_DIR/$IMAGE_NAME"
+case "$ALPINE_USB_BOOTLOADER" in
+  grub) install_grub_removable_bootloader "$SCRIPT_DIR/$IMAGE_NAME" ;;
+  systemd-boot) validate_systemd_bootloader "$SCRIPT_DIR/$IMAGE_NAME" ;;
+esac
 
 cat <<EOF
 
 DONE: $SCRIPT_DIR/$IMAGE_NAME
+
+Image profile:
+  desktop: ${ALPINE_USB_DESKTOP:-xfce}
+  tiling WMs: ${ALPINE_USB_TILING_WMS:-none}
+  display manager: ${ALPINE_USB_DISPLAY_MANAGER:-auto}
+  bootloader: $ALPINE_USB_BOOTLOADER
+  kernel: linux-$ALPINE_USB_KERNEL_FLAVOR
+  user: $ALPINE_USB_USER
 
 Write to USB:
   lsblk
   sudo dd if="$SCRIPT_DIR/$IMAGE_NAME" of=/dev/sdX bs=4M status=progress conv=fsync
 
 Replace /dev/sdX with USB device, not partition. Example /dev/sdb, NOT /dev/sdb1.
-
-First boot:
-  graphical LightDM should start.
-  user: pablo
-  pass: pablo
-  run: passwd
 EOF
