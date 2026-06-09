@@ -314,8 +314,15 @@ class FlashWorker(QThread):
                     raise RuntimeError("Invalid administrator password or sudo was cancelled.")
                 with open(log_path, "a") as log:
                     subprocess.run(["diskutil", "unmountDisk", dev], stdout=log, stderr=subprocess.STDOUT, text=True)
+                    log.flush()
+                    inner = (
+                        f"/bin/dd if={sh_quote(tmp_image)} of={sh_quote(raw)} bs=4m & "
+                        "ddpid=$!; "
+                        "while kill -0 $ddpid 2>/dev/null; do kill -INFO $ddpid 2>/dev/null || true; sleep 2; done; "
+                        "wait $ddpid"
+                    )
                     proc = subprocess.Popen(
-                        ["sudo", "-S", "/bin/dd", f"if={tmp_image}", f"of={raw}", "bs=4m"],
+                        ["sudo", "-S", "/bin/sh", "-c", inner],
                         stdin=subprocess.PIPE,
                         stdout=log,
                         stderr=subprocess.STDOUT,
@@ -326,8 +333,8 @@ class FlashWorker(QThread):
                         proc.stdin.close()
                     pos = 0
                     last_percent = -1
+                    self.progress.emit("Flashing... 0%")
                     while proc.poll() is None:
-                        subprocess.run(["sudo", "-n", "kill", "-INFO", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         pos, last_percent = self.tail_progress(log_path, pos, total, last_percent)
                         self.msleep(500)
                     log.flush()
@@ -390,6 +397,8 @@ class Main(QWidget):
         self.build_status = QLabel("")
         self.build_status.setStyleSheet("color:#d1d5db;margin-top:8px;padding:0px;font-size:12px;")
         self.build_status.hide()
+        self.builder = None
+        self.worker = None
         self.console_title = QLabel("Console output")
         self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
         self.log = QTextEdit(); self.log.setReadOnly(True)
@@ -435,23 +444,23 @@ class Main(QWidget):
         choose_output.setIcon(make_button_icon("folder"))
         choose_output.clicked.connect(self.choose_output_path)
         choose_output.setFixedWidth(120)
-        build = QPushButton("Build image")
-        build.setIcon(make_button_icon("build"))
-        build.clicked.connect(self.build_image)
-        build.setFixedWidth(150)
-        build.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
+        self.build_button = QPushButton("Build image")
+        self.build_button.setIcon(make_button_icon("build"))
+        self.build_button.clicked.connect(self.build_image)
+        self.build_button.setFixedWidth(150)
+        self.build_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:22px;max-height:26px;")
         self.image_size.hide()
         img_grid.addWidget(QLabel("Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
         img_grid.addWidget(choose_output, 0, 2)
         img_buttons = QHBoxLayout()
         img_buttons.setContentsMargins(0, 6, 0, 0)
-        img_buttons.addWidget(build)
+        img_buttons.addWidget(self.build_button)
         img_buttons.addStretch()
         img_grid.addLayout(img_buttons, 1, 0, 1, 3)
         img_grid.addWidget(self.build_status, 2, 0, 1, 3)
-        self.progress = QProgressBar(); self.progress.setRange(0,0); self.progress.hide()
-        img_grid.addWidget(self.progress, 3, 0, 1, 3)
+        self.build_progress = QProgressBar(); self.build_progress.setRange(0,0); self.build_progress.hide()
+        img_grid.addWidget(self.build_progress, 3, 0, 1, 3)
         layout.addLayout(img_grid)
         layout.addSpacing(3)
 
@@ -464,10 +473,10 @@ class Main(QWidget):
         usb_row = QHBoxLayout()
         usb_row.setContentsMargins(0, 0, 0, 0)
         usb_row.setSpacing(4)
-        pick = QPushButton("Select USB")
-        pick.setIcon(make_button_icon("usb"))
-        pick.clicked.connect(self.pick)
-        pick.setFixedWidth(150)
+        self.pick_button = QPushButton("Select USB")
+        self.pick_button.setIcon(make_button_icon("usb"))
+        self.pick_button.clicked.connect(self.pick)
+        self.pick_button.setFixedWidth(150)
         self.flash_button = QPushButton("Flash USB")
         self.flash_button.setIcon(make_button_icon("flash"))
         self.flash_button.clicked.connect(self.flash)
@@ -481,7 +490,7 @@ class Main(QWidget):
         device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         usb_row.addWidget(device_label)
         usb_row.addWidget(self.device, 1)
-        usb_row.addWidget(pick)
+        usb_row.addWidget(self.pick_button)
         usb_box.addLayout(usb_row)
         flash_row = QHBoxLayout()
         flash_row.setContentsMargins(0, 6, 0, 0)
@@ -492,10 +501,13 @@ class Main(QWidget):
         warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;font-size:12px;")
         warn.setContentsMargins(0, 8, 0, 0)
         usb_box.addWidget(warn)
+        usb_box.addSpacing(8)
+        usb_box.addWidget(self.status)
+        self.flash_progress = QProgressBar(); self.flash_progress.setRange(0,100); self.flash_progress.setValue(0); self.flash_progress.hide()
+        usb_box.addWidget(self.flash_progress)
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
         layout.addSpacing(3)
-        layout.addWidget(self.status)
         layout.addWidget(self.console_title)
         layout.addWidget(self.log)
 
@@ -523,6 +535,8 @@ class Main(QWidget):
         self.status.hide()
         self.build_status.clear()
         self.build_status.hide()
+        self.build_progress.hide()
+        self.flash_progress.hide()
 
     def pick(self):
         dlg = DeviceDialog(self)
@@ -532,8 +546,26 @@ class Main(QWidget):
     def update_selected(self):
         val = self.device.text().strip() or "none"
         self.setWindowTitle(f"{APP_TITLE} — {val}" if val != "none" else APP_TITLE)
+        if not self.has_running_worker():
+            self.flash_button.setEnabled(bool(val != "none" and self.image.text().strip()))
+
+    def thread_running(self, thread):
+        return thread is not None and thread.isRunning()
+
+    def has_running_worker(self):
+        return self.thread_running(self.builder) or self.thread_running(self.worker)
+
+    def set_busy(self, busy: bool):
+        self.build_button.setEnabled(not busy)
+        self.pick_button.setEnabled(not busy)
+        self.device.setEnabled(not busy)
+        self.image.setEnabled(not busy)
+        self.flash_button.setEnabled(False if busy else bool(self.device.text().strip() and self.image.text().strip()))
 
     def build_image(self):
+        if self.has_running_worker():
+            modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
+            return
         size = self.image_size.text().strip() or "16G"
         output_path = self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img")
         if platform.system() == "Darwin" and not shutil.which("docker"):
@@ -541,18 +573,20 @@ class Main(QWidget):
             return
         if not modal(self, "question", APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}", question=True):
             return
-        self.progress.show()
+        self.build_progress.show()
+        self.flash_progress.hide()
         self.build_status.show()
         self.build_status.setText("Building image...")
         self.status.hide()
-        self.flash_button.setEnabled(False)
+        self.set_busy(True)
         self.builder = BuildWorker(size, output_path)
         self.builder.log.connect(self.append_log)
         self.builder.done.connect(self.build_done)
+        self.builder.finished.connect(self.build_thread_finished)
         self.builder.start()
 
     def build_done(self, ok, msg):
-        self.progress.hide()
+        self.build_progress.hide()
         self.build_status.show()
         self.build_status.setText(msg)
         self.status.hide()
@@ -561,10 +595,17 @@ class Main(QWidget):
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
                 self.image.setText(m.group(1))
-            self.flash_button.setEnabled(True)
+        self.set_busy(False)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
+    def build_thread_finished(self):
+        if self.sender() is self.builder:
+            self.builder = None
+
     def flash(self):
+        if self.has_running_worker():
+            modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
+            return
         img = self.image.text().strip()
         dev = self.device.text().strip()
         if not Path(img).exists():
@@ -583,13 +624,25 @@ class Main(QWidget):
             )
             if not ok or not sudo_password:
                 return
-        self.progress.show()
+        self.build_progress.hide()
+        self.flash_progress.setRange(0,100)
+        self.flash_progress.setValue(0)
+        self.flash_progress.show()
         self.status.show()
+        self.status.setText("Flashing... 0%")
+        self.set_busy(True)
         self.worker = FlashWorker(img, dev, sudo_password)
         self.worker.log.connect(self.append_log)
-        self.worker.progress.connect(self.status.setText)
+        self.worker.progress.connect(self.update_flash_progress)
         self.worker.done.connect(self.flash_done)
+        self.worker.finished.connect(self.flash_thread_finished)
         self.worker.start()
+
+    def update_flash_progress(self, text):
+        self.status.setText(text)
+        m = re.search(r"Flashing\.\.\.\s*(\d+)%", text)
+        if m:
+            self.flash_progress.setValue(int(m.group(1)))
 
     def append_log(self, line):
         self.log.append(line)
@@ -601,11 +654,25 @@ class Main(QWidget):
             cursor.deleteChar()
 
     def flash_done(self, ok, msg):
-        self.progress.hide()
+        if ok:
+            self.flash_progress.setValue(100)
+        self.flash_progress.hide()
         self.status.show()
         self.status.setText(msg)
         self.log.append(msg)
+        self.set_busy(False)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
+
+    def flash_thread_finished(self):
+        if self.sender() is self.worker:
+            self.worker = None
+
+    def closeEvent(self, event):
+        if self.has_running_worker():
+            modal(self, "error", APP_TITLE, "An operation is still running. Wait for it to finish before closing the app.")
+            event.ignore()
+            return
+        event.accept()
 
 
 if __name__ == "__main__":
