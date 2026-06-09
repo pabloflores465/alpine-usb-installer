@@ -64,9 +64,9 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     elif kind == "flash":
         p.drawPolyline(pts([(xy(11), xy(2)), (xy(5), xy(11)), (xy(10), xy(11)), (xy(8), xy(18)), (xy(15), xy(8)), (xy(10), xy(8)), (xy(11), xy(2))]))
     elif kind == "refresh":
-        p.drawArc(xy(4), xy(4), xy(12), xy(12), 35 * 16, 285 * 16)
-        p.drawLine(xy(15), xy(4), xy(15), xy(9))
-        p.drawLine(xy(15), xy(4), xy(10), xy(4))
+        p.drawArc(xy(5), xy(5), xy(10), xy(10), 35 * 16, 285 * 16)
+        p.drawLine(xy(14), xy(5), xy(14), xy(9))
+        p.drawLine(xy(14), xy(5), xy(10), xy(5))
     elif kind == "check":
         p.drawLine(xy(4), xy(10), xy(8), xy(15)); p.drawLine(xy(8), xy(15), xy(16), xy(5))
     elif kind == "warn":
