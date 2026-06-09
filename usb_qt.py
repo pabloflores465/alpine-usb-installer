@@ -8,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
+    QListWidget, QMessageBox, QPushButton, QProgressBar, QStackedLayout, QVBoxLayout, QWidget,
     QDialog, QInputDialog, QStyle, QTextEdit
 )
 
@@ -464,6 +464,15 @@ class Main(QWidget):
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(320)
         self.log.setMaximumHeight(520)
+        self.console_empty = QLabel("No console output")
+        self.console_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.console_empty.setMinimumHeight(320)
+        self.console_stack = QWidget()
+        self.console_stack_layout = QStackedLayout(self.console_stack)
+        self.console_stack_layout.setContentsMargins(0, 0, 0, 0)
+        self.console_stack_layout.addWidget(self.console_empty)
+        self.console_stack_layout.addWidget(self.log)
+        self.console_stack_layout.setCurrentWidget(self.console_empty)
         self.update_console_style(expanded=True)
         self.build()
         self.refresh()
@@ -573,7 +582,7 @@ class Main(QWidget):
         console_box.setContentsMargins(0, 0, 0, 0)
         console_box.setSpacing(0)
         console_box.addWidget(self.console_toggle)
-        console_box.addWidget(self.log)
+        console_box.addWidget(self.console_stack)
         layout.addLayout(console_box)
         layout.addStretch(1)
 
@@ -586,11 +595,14 @@ class Main(QWidget):
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
                 "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
             )
-            self.log.setStyleSheet(
+            panel_style = (
                 "background:#0b1220;color:#ffffff;border:1px solid #374151;"
                 "border-top:0;border-top-left-radius:0px;border-top-right-radius:0px;"
                 "border-bottom-left-radius:6px;border-bottom-right-radius:6px;"
             )
+            self.log.setStyleSheet(panel_style)
+            self.console_stack.setStyleSheet(panel_style)
+            self.console_empty.setStyleSheet("background:#0b1220;color:#ffffff;font-size:15pt;font-weight:bold;")
         else:
             self.console_toggle.setStyleSheet(
                 "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
@@ -599,9 +611,9 @@ class Main(QWidget):
             )
 
     def toggle_console(self):
-        visible = self.log.isVisible()
+        visible = self.console_stack.isVisible()
         expanded = not visible
-        self.log.setVisible(expanded)
+        self.console_stack.setVisible(expanded)
         self.console_toggle.setText("Console output  ▼" if expanded else "Console output  ▲")
         self.update_console_style(expanded)
 
@@ -682,7 +694,7 @@ class Main(QWidget):
         self.build_status.show()
         self.build_status.setText(msg)
         self.status.hide()
-        self.log.append(msg)
+        self.append_log(msg)
         if ok:
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
@@ -737,6 +749,8 @@ class Main(QWidget):
             self.flash_progress.setValue(int(m.group(1)))
 
     def append_log(self, line):
+        if self.console_stack_layout.currentWidget() is not self.log:
+            self.console_stack_layout.setCurrentWidget(self.log)
         self.log.append(line)
         if self.log.document().blockCount() > 300:
             cursor = self.log.textCursor()
@@ -751,7 +765,7 @@ class Main(QWidget):
         self.flash_progress.hide()
         self.status.show()
         self.status.setText(msg)
-        self.log.append(msg)
+        self.append_log(msg)
         self.set_busy(False)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
