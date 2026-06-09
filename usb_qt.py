@@ -290,21 +290,10 @@ class BuildWorker(QThread):
         try:
             env = os.environ.copy()
             env["IMAGE_SIZE"] = self.image_size
+            # On macOS the build script itself verifies Docker Desktop is
+            # installed/running, creates a fresh build-tools container, runs the
+            # build, and removes the container with --rm.
             cmd = ["./build-alpine-usb.sh"]
-            if platform.system() == "Darwin":
-                # Build script works inside Docker Desktop on macOS.
-                docker_cmd = (
-                    "apk add --no-cache bash curl sudo python3 e2fsprogs dosfstools util-linux sfdisk "
-                    "multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools "
-                    "xorriso rsync kmod >/dev/null && "
-                    "rm -f alpine-usb-xfce.img && "
-                    "chmod +x .work/alpine-make-vm-image.uefi build-alpine-usb.sh configure-alpine-usb.sh && "
-                    f"IMAGE_SIZE={self.image_size} ./build-alpine-usb.sh"
-                )
-                cmd = [
-                    "docker", "run", "--rm", "--platform", "linux/amd64", "--privileged",
-                    "-v", f"{os.getcwd()}:/work", "-w", "/work", "alpine:latest", "sh", "-c", docker_cmd
-                ]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
             for line in proc.stdout or []:
                 self.log.emit(line.rstrip())
@@ -672,9 +661,13 @@ class Main(QWidget):
             return
         size = self.image_size.text().strip() or "16G"
         output_path = self.image.text().strip() or str(Path.cwd() / "alpine-usb-xfce.img")
-        if platform.system() == "Darwin" and not shutil.which("docker"):
-            modal(self, "error", APP_TITLE, "Docker not found. Install/start Docker Desktop.")
-            return
+        if platform.system() == "Darwin":
+            if not shutil.which("docker"):
+                modal(self, "error", APP_TITLE, "Docker not found. Install Docker Desktop and try again.")
+                return
+            if subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+                modal(self, "error", APP_TITLE, "Docker is not running. Start Docker Desktop and try again.")
+                return
         if not modal(self, "question", APP_TITLE, f"Build Alpine image?\n\nOutput:\n{output_path}", question=True):
             return
         self.build_progress.show()

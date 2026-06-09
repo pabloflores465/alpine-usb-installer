@@ -12,6 +12,38 @@ MAKE_VM_IMAGE="$WORK_DIR/alpine-make-vm-image.uefi"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
 
+# macOS cannot run the Linux/NBD build natively. Always run it in a fresh
+# privileged Docker container with the required build tools, and remove the
+# container afterwards (--rm). This also makes the CLI behave like the GUI.
+if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker not found. Install Docker Desktop and try again." >&2
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker is not running. Start Docker Desktop and try again." >&2
+    exit 1
+  fi
+
+  echo "Starting fresh Docker build container with Alpine build tools..."
+  exec docker run --rm --platform linux/amd64 --privileged \
+    -e ALPINE_USB_BUILD_IN_DOCKER=1 \
+    -e IMAGE_NAME="$IMAGE_NAME" \
+    -e IMAGE_SIZE="$IMAGE_SIZE" \
+    -e ALPINE_BRANCH="$ALPINE_BRANCH" \
+    -e ARCH="$ARCH" \
+    -v "$SCRIPT_DIR:/work" \
+    -w /work \
+    alpine:latest \
+    sh -ceu '
+      apk add --no-cache bash curl sudo python3 e2fsprogs dosfstools util-linux sfdisk \
+        multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools \
+        xorriso rsync kmod >/dev/null
+      chmod +x build-alpine-usb.sh configure-alpine-usb.sh
+      exec ./build-alpine-usb.sh
+    '
+fi
+
 need curl
 need sudo
 need python3
