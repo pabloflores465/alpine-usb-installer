@@ -527,7 +527,7 @@ class Main(QWidget):
     def update_console_style(self, expanded: bool):
         if expanded:
             self.console_toggle.setStyleSheet(
-                "text-align:left;font-size:16px;font-weight:bold;color:#93c5fd;"
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
                 "margin:0px;padding:5px 10px;background:#1f2937;"
                 "border:1px solid #374151;border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
@@ -540,7 +540,7 @@ class Main(QWidget):
             )
         else:
             self.console_toggle.setStyleSheet(
-                "text-align:left;font-size:16px;font-weight:bold;color:#93c5fd;"
+                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
                 "margin:0px;padding:5px 10px;background:#1f2937;"
                 "border:1px solid #374151;border-radius:6px;"
             )
