@@ -84,6 +84,7 @@ KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-lts}")"
 ROOTFS="$(lower "${ALPINE_USB_ROOTFS:-ext4}")"
 BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
 INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-1}"
 EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}"
 DRY_RUN="${ALPINE_USB_DRY_RUN:-0}"
 
@@ -101,6 +102,7 @@ safe_token "XKB layout" "$XKB_LAYOUT"
 safe_optional_token "XKB variant" "$XKB_VARIANT"
 safe_token "XKB model" "$XKB_MODEL"
 case "$BOOT_TIMEOUT" in *[!0-9]*|"") die "Boot timeout must be a number" ;; esac
+case "$(lower "$AUTO_RESIZE")" in 1|yes|true|on|enabled|0|no|false|off|disabled) ;; *) die "Unsupported auto-resize value: $AUTO_RESIZE" ;; esac
 
 case "$DESKTOP" in xfce|gnome|plasma|mate|lxqt|none) ;; *) die "Unsupported desktop: $DESKTOP" ;; esac
 case "$DISPLAY_MANAGER" in auto|lightdm|sddm|gdm|lxdm|greetd|none) ;; *) die "Unsupported display manager: $DISPLAY_MANAGER" ;; esac
@@ -160,6 +162,10 @@ append_packages \
   doas sudo bash zsh curl wget git nano vim htop less \
   e2fsprogs dosfstools lsblk blkid util-linux \
   font-noto font-noto-emoji terminus-font
+
+if is_enabled "$AUTO_RESIZE"; then
+  append_packages cloud-utils-growpart
+fi
 
 if [ "$FIRMWARE" = "full" ]; then
   append_packages linux-firmware
@@ -259,7 +265,7 @@ DRY RUN OK
  default_session=$DEFAULT_SESSION
  display_manager=$DISPLAY_MANAGER
  network=$NETWORK_BACKEND wifi=$WIFI bluetooth=$BLUETOOTH audio=$AUDIO
- bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS
+ bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS auto_resize=$AUTO_RESIZE
  locale=$LOCALE keyboard=$XKB_LAYOUT console_keymap=$CONSOLE_KEYMAP
  packages:$PACKAGES
 EOF
@@ -615,6 +621,110 @@ KillUserProcesses=no
 IdleAction=ignore
 EOF
 
+# ---- Expand root filesystem to target USB size ---------------------------
+if is_enabled "$AUTO_RESIZE"; then
+  mkdir -p /usr/local/sbin /etc/init.d /var/lib
+  cat > /usr/local/sbin/alpine-usb-grow-root <<'EOF'
+#!/bin/sh
+set -eu
+
+marker=/var/lib/alpine-usb-grow-root.done
+[ -e "$marker" ] && exit 0
+
+resolve_root_device() {
+  src="$1"
+  if [ -n "$src" ] && [ "$src" != "/dev/root" ] && [ -b "$src" ]; then
+    readlink -f "$src"
+    return 0
+  fi
+
+  root_arg="$(tr ' ' '\n' < /proc/cmdline | sed -n 's/^root=//p' | tail -n 1)"
+  case "$root_arg" in
+    UUID=*) blkid -U "${root_arg#UUID=}" ;;
+    LABEL=*) blkid -L "${root_arg#LABEL=}" ;;
+    /dev/*) readlink -f "$root_arg" ;;
+    *) return 1 ;;
+  esac
+}
+
+root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+rootdev="$(resolve_root_device "$root_src" 2>/dev/null || true)"
+if [ -z "$rootdev" ] || [ ! -b "$rootdev" ]; then
+  echo "Could not resolve root block device from '$root_src'" >&2
+  exit 1
+fi
+
+pkname="$(lsblk -no PKNAME "$rootdev" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+partnum="$(lsblk -no PARTN "$rootdev" 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+
+if [ -z "$pkname" ] || [ -z "$partnum" ]; then
+  case "$rootdev" in
+    /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*)
+      disk="$(printf '%s\n' "$rootdev" | sed 's/p[0-9][0-9]*$//')"
+      partnum="$(printf '%s\n' "$rootdev" | sed 's/^.*p//')"
+      ;;
+    /dev/*[0-9])
+      disk="$(printf '%s\n' "$rootdev" | sed 's/[0-9][0-9]*$//')"
+      partnum="$(printf '%s\n' "$rootdev" | sed 's/^.*[^0-9]//')"
+      ;;
+    *)
+      echo "Root device '$rootdev' is not a partition; nothing to grow."
+      touch "$marker"
+      exit 0
+      ;;
+  esac
+else
+  disk="/dev/$pkname"
+fi
+
+if [ ! -b "$disk" ] || [ -z "$partnum" ]; then
+  echo "Could not resolve parent disk/partition for root device '$rootdev'" >&2
+  exit 1
+fi
+
+echo "Growing root partition $disk $partnum ($rootdev) to fill the target USB..."
+out="$(growpart "$disk" "$partnum" 2>&1)" && rc=0 || rc=$?
+printf '%s\n' "$out"
+if [ "$rc" -ne 0 ]; then
+  case "$out" in
+    *NOCHANGE*|*"cannot be grown"*|*"could only be grown"*) ;;
+    *) echo "growpart failed" >&2; exit "$rc" ;;
+  esac
+fi
+
+partx -u "$disk" 2>/dev/null || true
+blockdev --rereadpt "$disk" 2>/dev/null || true
+sleep 1
+resize2fs "$rootdev"
+touch "$marker"
+echo "Root filesystem expansion complete."
+EOF
+  chmod +x /usr/local/sbin/alpine-usb-grow-root
+
+  cat > /etc/init.d/alpine-usb-grow-root <<'EOF'
+#!/sbin/openrc-run
+description="Grow Alpine USB root partition/filesystem to fill the target USB drive"
+
+depend() {
+  need localmount
+  after modules udev-settle
+  before lightdm sddm gdm lxdm greetd
+}
+
+start() {
+  if [ -e /var/lib/alpine-usb-grow-root.done ]; then
+    ebegin "Alpine USB root filesystem already expanded"
+    eend 0
+    return 0
+  fi
+  ebegin "Expanding Alpine USB root filesystem"
+  /usr/local/sbin/alpine-usb-grow-root
+  eend $?
+}
+EOF
+  chmod +x /etc/init.d/alpine-usb-grow-root
+fi
+
 # ---- Services -------------------------------------------------------------
 rc-update add devfs sysinit || true
 rc-update add dmesg sysinit || true
@@ -629,6 +739,9 @@ rc-update add sysctl boot || true
 rc-update add hostname boot || true
 rc-update add bootmisc boot || true
 rc-update add syslog boot || true
+if is_enabled "$AUTO_RESIZE"; then
+  rc-update add alpine-usb-grow-root boot || true
+fi
 rc-update add networking boot || true
 rc-update add chronyd default || true
 rc-update add dbus default || true

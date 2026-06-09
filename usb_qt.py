@@ -532,6 +532,8 @@ class Main(QWidget):
     def make_config_widgets(self):
         self.image_size = QComboBox(); self.image_size.setEditable(True)
         add_combo_items(self.image_size, ["16G", "32G", "64G", "128G"])
+        self.auto_resize = QCheckBox("Use the full USB drive on first boot (auto-expand root filesystem)")
+        self.auto_resize.setChecked(True)
         self.alpine_branch = QComboBox(); self.alpine_branch.setEditable(True)
         add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
         self.arch = QComboBox(); add_combo_items(self.arch, ["x86_64"])
@@ -665,7 +667,7 @@ class Main(QWidget):
         system = CollapsibleSection("System, user, localization", collapsed=True)
         form = QFormLayout(); form.setLabelAlignment(Qt.AlignmentFlag.AlignRight); form.setHorizontalSpacing(12); form.setVerticalSpacing(8)
         for label, widget in [
-            ("Image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
+            ("Minimum image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
             ("Hostname:", self.hostname), ("User:", self.username), ("User password:", self.password),
             ("Root password:", self.root_password), ("Timezone:", self.timezone), ("Locale:", self.locale),
             ("Console keymap:", self.console_keymap), ("XKB layout:", self.xkb_layout), ("XKB variant:", self.xkb_variant),
@@ -693,7 +695,7 @@ class Main(QWidget):
 
         boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True)
         bform = QFormLayout(); bform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); bform.setHorizontalSpacing(12); bform.setVerticalSpacing(8)
-        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout)
+        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout); bform.addRow("USB space:", self.auto_resize)
         boot.body_layout.addLayout(bform); parent_layout.addWidget(boot)
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
@@ -776,7 +778,7 @@ class Main(QWidget):
             self.xkb_model, self.desktop, self.display_manager, self.default_session,
             self.browser, self.audio, self.network, self.wifi, self.bluetooth,
             self.bootloader, self.kernel, self.firmware, self.boot_timeout,
-            self.extra_packages,
+            self.auto_resize, self.extra_packages,
         ] + list(self.wm_checks.values())
         for widget in widgets:
             widget.setEnabled(not busy)
@@ -816,6 +818,7 @@ class Main(QWidget):
             "ALPINE_USB_BOOTLOADER": combo_value(self.bootloader),
             "ALPINE_USB_KERNEL_FLAVOR": combo_value(self.kernel),
             "ALPINE_USB_BOOT_TIMEOUT": self.boot_timeout.text().strip() or "3",
+            "ALPINE_USB_AUTO_RESIZE": "1" if self.auto_resize.isChecked() else "0",
             "ALPINE_USB_EXTRA_PACKAGES": self.extra_packages.text().strip(),
         }
 
@@ -845,7 +848,7 @@ class Main(QWidget):
             f"Size: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | "
             f"Desktop: {env['ALPINE_USB_DESKTOP']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'} | "
             f"DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Kernel: linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | "
-            f"Bootloader: {env['ALPINE_USB_BOOTLOADER']} | Wi‑Fi: {env['ALPINE_USB_WIFI']} | Bluetooth: {env['ALPINE_USB_BLUETOOTH']} | "
+            f"Bootloader: {env['ALPINE_USB_BOOTLOADER']} | Auto-resize USB: {env['ALPINE_USB_AUTO_RESIZE']} | Wi‑Fi: {env['ALPINE_USB_WIFI']} | Bluetooth: {env['ALPINE_USB_BLUETOOTH']} | "
             f"Keyboard: {env['ALPINE_USB_XKB_LAYOUT']}"
         )
 

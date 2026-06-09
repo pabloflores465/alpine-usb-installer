@@ -8,10 +8,12 @@ It started as an XFCE-only builder, but now the GUI and build scripts expose a f
 
 Defaults are safe and match the original experience: `linux-lts`, GRUB removable UEFI, XFCE, LightDM, NetworkManager + Wi‑Fi, Bluetooth, PipeWire, Firefox ESR, user `pablo` / password `pablo`, English locale and Latin American Spanish keyboard.
 
+`Image size` is the minimum build image size, not the final used space limit. By default the installed USB auto-expands the root partition/filesystem on first boot to use the full target USB drive.
+
 Configurable sections in the Qt app are collapsed by default:
 
 - System, user and localization:
-  - image size, Alpine branch, hostname, user/passwords
+  - minimum image size, Alpine branch, hostname, user/passwords
   - timezone, locale, console keymap, XKB keyboard layout/model/variant
 - Desktop/session:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt or no full desktop
@@ -25,6 +27,7 @@ Configurable sections in the Qt app are collapsed by default:
   - GRUB removable UEFI or systemd-boot removable UEFI
   - `linux-lts` or `linux-stable`
   - full firmware or `linux-firmware-none`
+  - first-boot root filesystem expansion to fill the USB drive
 - Extra packages:
   - arbitrary additional `apk add` package names
 
@@ -36,6 +39,7 @@ The generated image is meant to be written directly to a USB drive and booted as
 - Lightweight WMs: the generated system installs a duplicate-safe polkit agent launcher for sessions such as i3, Sway, bspwm, Openbox and labwc.
 - Bluetooth: the installer uses `obexd-enhanced` instead of `bluez-obexd`, avoiding the GNOME Bluetooth conflict while still providing the OBEX service.
 - Keyboard: Alpine's current OpenRC console keymap service is `loadkeys`; the generated system writes `/etc/conf.d/loadkeys` and keeps `/etc/conf.d/keymaps` for compatibility.
+- USB capacity: the root partition is expanded on first boot with `cloud-utils-growpart` + `resize2fs`, so a 16G image flashed to a 64G USB uses the full 64G after boot.
 
 ## Requirements
 
@@ -56,6 +60,7 @@ Python GUI dependencies are listed in `requirements.txt`. The helper script crea
 From the GUI you can:
 
 - choose the output image path
+- choose the minimum image size used during build
 - open collapsed configuration sections and customize the profile
 - build the image
 - select a target USB drive
@@ -111,6 +116,12 @@ Result by default:
 
 ```txt
 alpine-usb.img
+```
+
+By default, if you flash this image to a larger USB drive, Alpine grows the root partition/filesystem on first boot to fill the drive. Disable it with:
+
+```sh
+ALPINE_USB_AUTO_RESIZE=0 ./build-alpine-usb.sh
 ```
 
 ## Write to USB
