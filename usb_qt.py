@@ -8,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressBar, QVBoxLayout, QWidget,
     QDialog, QInputDialog, QStyle, QTextEdit
 )
 
@@ -206,8 +206,13 @@ class DeviceDialog(QDialog):
     def populate(self, show_empty_modal: bool = True):
         self.list.clear()
         self.devices = list_devices()
-        for _, label in self.devices:
-            self.list.addItem(label)
+        if self.devices:
+            for _, label in self.devices:
+                self.list.addItem(label)
+        else:
+            item = QListWidgetItem("No USB devices found. Please connect a drive and rescan.")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.list.addItem(item)
         self.list.clearSelection()
         self.update_use_button()
         if show_empty_modal and not self.devices:
