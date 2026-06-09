@@ -4,7 +4,7 @@ from __future__ import annotations
 import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QThread, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -215,7 +215,9 @@ class DeviceDialog(QDialog):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             font = QFont()
             font.setBold(True)
+            font.setPointSize(15)
             item.setFont(font)
+            item.setSizeHint(QSize(0, max(220, self.list.viewport().height())))
             self.list.addItem(item)
         self.list.clearSelection()
         self.update_use_button()
