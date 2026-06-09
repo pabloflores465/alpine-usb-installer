@@ -182,7 +182,8 @@ class DeviceDialog(QDialog):
         layout.addWidget(self.list, 1)
         row = QHBoxLayout()
         row.addWidget(QLabel("Manual device:"))
-        self.manual = QLineEdit("/dev/disk7" if platform.system() == "Darwin" else "/dev/sdX")
+        self.manual = QLineEdit()
+        self.manual.setPlaceholderText("/dev/disk7" if platform.system() == "Darwin" else "/dev/sdX")
         row.addWidget(self.manual, 1)
         layout.addLayout(row)
         btns = QHBoxLayout()
@@ -196,24 +197,34 @@ class DeviceDialog(QDialog):
         btns.addWidget(self.use); btns.addWidget(self.refresh); btns.addStretch(); btns.addWidget(self.cancel)
         layout.addLayout(btns)
         self.use.clicked.connect(self.accept_selection)
-        self.refresh.clicked.connect(self.populate)
+        self.refresh.clicked.connect(lambda: self.populate(show_empty_modal=True))
         self.cancel.clicked.connect(self.reject)
-        self.populate()
+        self.list.itemSelectionChanged.connect(self.update_use_button)
+        self.manual.textChanged.connect(self.update_use_button)
+        self.populate(show_empty_modal=True)
 
-    def populate(self):
+    def populate(self, show_empty_modal: bool = True):
         self.list.clear()
         self.devices = list_devices()
         for _, label in self.devices:
             self.list.addItem(label)
-        if self.devices:
-            self.list.setCurrentRow(0)
+        self.list.clearSelection()
+        self.update_use_button()
+        if show_empty_modal and not self.devices:
+            modal(self, "info", APP_TITLE, "No USB devices were found. Connect a USB drive and click Refresh to scan again.")
+
+    def update_use_button(self):
+        self.use.setEnabled(bool(self.list.currentItem() or self.manual.text().strip()))
 
     def accept_selection(self):
         item = self.list.currentItem()
+        manual = self.manual.text().strip()
         if item:
             self.selected = item.text()
+        elif manual:
+            self.selected = manual
         else:
-            self.selected = self.manual.text().strip()
+            return
         self.accept()
 
 
@@ -399,8 +410,9 @@ class Main(QWidget):
         self.build_status.hide()
         self.builder = None
         self.worker = None
-        self.console_title = QLabel("Console output")
-        self.console_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:0px;")
+        self.console_toggle = QPushButton("Console output ▾")
+        self.console_toggle.setStyleSheet("text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;margin:0px;padding:3px 8px;background:#1f2937;")
+        self.console_toggle.clicked.connect(self.toggle_console)
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(320)
         self.log.setMaximumHeight(520)
@@ -508,8 +520,13 @@ class Main(QWidget):
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
         layout.addSpacing(3)
-        layout.addWidget(self.console_title)
+        layout.addWidget(self.console_toggle)
         layout.addWidget(self.log)
+
+    def toggle_console(self):
+        visible = self.log.isVisible()
+        self.log.setVisible(not visible)
+        self.console_toggle.setText("Console output ▸" if visible else "Console output ▾")
 
     def browse(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.img *.raw *.iso);;All files (*)")
@@ -528,9 +545,7 @@ class Main(QWidget):
             self.image.setText(path)
 
     def refresh(self):
-        devs = list_devices()
-        if devs and not self.device.text().strip():
-            self.device.setText(devs[0][1])
+        self.device.clear()
         self.status.clear()
         self.status.hide()
         self.build_status.clear()
