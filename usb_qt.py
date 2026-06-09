@@ -322,7 +322,7 @@ class CollapsibleSection(QWidget):
     def update_state(self):
         expanded = self.toggle.isChecked()
         self.body.setVisible(expanded)
-        self.toggle.setText(f"{self.title}  {'▼' if expanded else '▶'}")
+        self.toggle.setText(f"{self.title}  {'▼' if expanded else '▲'}")
         if expanded:
             self.toggle.setStyleSheet(
                 "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
@@ -509,7 +509,7 @@ class Main(QWidget):
 
         self.make_config_widgets()
 
-        self.console_toggle = QPushButton("Console output  ▶")
+        self.console_toggle = QPushButton("Console output  ▲")
         self.console_toggle.clicked.connect(self.toggle_console)
         self.log = QTextEdit(); self.log.setReadOnly(True)
         self.log.setMinimumHeight(260)
@@ -722,7 +722,7 @@ class Main(QWidget):
             self.console_stack.setStyleSheet(panel_style)
             self.console_empty.setStyleSheet("background:#0b1220;color:#ffffff;font-size:15pt;font-weight:bold;")
         else:
-            self.console_toggle.setText("Console output  ▶")
+            self.console_toggle.setText("Console output  ▲")
             self.console_toggle.setStyleSheet(
                 "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
                 "margin:0px;padding:5px 10px;background:#1f2937;"
