@@ -520,8 +520,12 @@ class Main(QWidget):
         layout.addLayout(usb_box)
         self.device.textChanged.connect(self.update_selected)
         layout.addSpacing(14)
-        layout.addWidget(self.console_toggle)
-        layout.addWidget(self.log)
+        console_box = QVBoxLayout()
+        console_box.setContentsMargins(0, 0, 0, 0)
+        console_box.setSpacing(0)
+        console_box.addWidget(self.console_toggle)
+        console_box.addWidget(self.log)
+        layout.addLayout(console_box)
         layout.addStretch(1)
 
     def update_console_style(self, expanded: bool):
