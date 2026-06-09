@@ -211,7 +211,7 @@ class DeviceDialog(QDialog):
         self.list.clearSelection()
         self.update_use_button()
         if show_empty_modal and not self.devices:
-            modal(self, "info", APP_TITLE, "No USB devices were found. Connect a USB drive and click Refresh to scan again.")
+            modal(self, "info", "No USB devices found", "Please connect a drive and rescan.")
 
     def update_use_button(self):
         self.use.setEnabled(bool(self.list.currentItem() or self.manual.text().strip()))
