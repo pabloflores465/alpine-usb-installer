@@ -143,7 +143,7 @@ def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
             if name:
                 packages.append({
                     "name": name,
-                    "description": current.get("D", ""),
+                    "description": current.get("T", ""),
                     "version": current.get("V", ""),
                     "repo": repo,
                 })

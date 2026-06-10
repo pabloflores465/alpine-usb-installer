@@ -78,12 +78,48 @@ Supported flashing helpers:
 - Linux: `lsblk`, `dd`, `sudo`/`pkexec`
 - Windows: raw flashing is not implemented; use Rufus/balenaEtcher with the generated image
 
+## CLI
+
+The project also includes a fast dependency-free CLI with the same build options as the GUI:
+
+```sh
+./run_cli.sh --help
+./run_cli.sh build --help
+```
+
+Useful commands:
+
+```sh
+# Search official Alpine packages and show the top 10 suggestions
+./run_cli.sh search firefox
+
+# Validate a profile without building the image
+./run_cli.sh build --dry-run --desktop xfce --bootloader systemd-boot
+
+# Build without interactive confirmation
+./run_cli.sh build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+
+# List removable USB devices
+./run_cli.sh devices
+
+# Flash an image to USB; requires typing ERASE unless -y is passed
+./run_cli.sh flash alpine-usb.img /dev/sdX
+```
+
+The `build` subcommand exposes the same profile controls as the GUI: desktop, display manager, WMs, Wi‑Fi, Bluetooth, bootloader, kernel, firmware, keyboard/language, user/passwords, image size, auto-resize, browser/audio and extra APK packages. Extra packages can be repeated:
+
+```sh
+./run_cli.sh build --extra-package neovim --extra-package "tmux htop" --extra-package docker
+```
+
 ## CLI build examples
 
 Default profile:
 
 ```sh
 IMAGE_SIZE=16G ./build-alpine-usb.sh
+# or:
+./run_cli.sh build -y
 ```
 
 KDE Plasma + SDDM + systemd-boot + stable kernel:
