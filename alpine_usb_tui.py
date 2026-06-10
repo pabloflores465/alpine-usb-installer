@@ -107,18 +107,38 @@ class TuiApp:
     def clear(self):
         self.stdscr.erase()
 
-    def draw_header(self, title: str):
+    def safe_addnstr(self, y: int, x: int, text: str, width: int, attr: int = 0):
         h, w = self.stdscr.getmaxyx()
+        if y < 0 or y >= h or x < 0 or x >= w or width <= 0:
+            return
+        # Some curses implementations (notably macOS ncurses through Python)
+        # return ERR when writing into the bottom-right cell. Keep one column
+        # free on the last line to avoid crashing the TUI.
+        max_width = min(width, w - x)
+        if y == h - 1:
+            max_width = max(0, max_width - 1)
+        if max_width <= 0:
+            return
+        try:
+            self.stdscr.addnstr(y, x, text, max_width, attr)
+        except curses.error:
+            # Best-effort drawing: never let a terminal paint quirk kill the UI.
+            pass
+
+    def draw_header(self, title: str):
+        _h, w = self.stdscr.getmaxyx()
         header = f" Alpine USB Installer TUI  ›  {title} "
-        self.stdscr.addnstr(0, 0, header.ljust(w), w, self.color(5, True))
+        self.safe_addnstr(0, 0, header.ljust(w), w, self.color(5, True))
         subtitle = "Complete terminal UI: build, package search, USB devices and flashing"
-        self.stdscr.addnstr(1, 2, subtitle, max(0, w - 4), self.color(1))
+        self.safe_addnstr(1, 2, subtitle, max(0, w - 4), self.color(1))
 
     def draw_footer(self):
         h, w = self.stdscr.getmaxyx()
+        if h < 3 or w < 20:
+            return
         help_text = " ↑/↓ move  Enter edit/select  Space toggle  b back  q quit "
-        self.stdscr.addnstr(h - 2, 0, help_text.ljust(w), w, self.color(6))
-        self.stdscr.addnstr(h - 1, 0, (" " + self.status).ljust(w), w, self.color(3))
+        self.safe_addnstr(h - 2, 0, help_text.ljust(w), w, self.color(6))
+        self.safe_addnstr(h - 1, 0, (" " + self.status).ljust(w), w, self.color(3))
 
     def truncate(self, text: str, width: int) -> str:
         if width <= 0:
