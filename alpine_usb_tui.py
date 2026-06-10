@@ -93,7 +93,8 @@ class TuiApp:
             curses.init_pair(2, curses.COLOR_GREEN, -1)
             curses.init_pair(3, curses.COLOR_YELLOW, -1)
             curses.init_pair(4, curses.COLOR_RED, -1)
-            curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)
+            # Header: high-contrast title bar for dark and translucent terminals.
+            curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_WHITE)
             curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
             curses.init_pair(7, curses.COLOR_MAGENTA, -1)
         self.stdscr.keypad(True)
