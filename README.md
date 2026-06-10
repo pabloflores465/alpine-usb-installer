@@ -30,6 +30,8 @@ Configurable sections in the Qt app are collapsed by default:
   - first-boot root filesystem expansion to fill the USB drive
 - Extra packages:
   - arbitrary additional `apk add` package names
+  - package search against Alpine's official `main` + `community` APK indexes
+  - top 10 package suggestions with one-click/double-click add; multiple packages can still be typed manually separated by spaces
 
 The generated image is meant to be written directly to a USB drive and booted as an installed Alpine system.
 
@@ -63,6 +65,7 @@ From the GUI you can:
 - choose the output image path
 - choose the minimum image size used during build
 - open collapsed configuration sections and customize the profile
+- search official Alpine packages in the Extra APK packages section and add one or several suggestions
 - build the image
 - select a target USB drive
 - flash the image

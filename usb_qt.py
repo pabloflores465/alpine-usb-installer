@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os, platform, plistlib, re, shutil, subprocess, sys, tempfile
+import io, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
-    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QMessageBox, QPushButton, QProgressBar, QScrollArea, QStackedLayout,
-    QTextEdit, QVBoxLayout, QWidget
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog,
+    QFormLayout, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressBar,
+    QScrollArea, QStackedLayout, QTextEdit, QVBoxLayout, QWidget
 )
 
 APP_TITLE = "Alpine USB Installer"
@@ -129,6 +129,83 @@ def add_combo_items(combo: QComboBox, items):
             combo.addItem(item)
 
 
+APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
+APK_SEARCH_REPOS = ("main", "community")
+APK_INDEX_CACHE: dict[tuple[str, str], list[dict[str, str]]] = {}
+
+
+def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
+    packages = []
+    current: dict[str, str] = {}
+    for line in text.splitlines() + [""]:
+        if not line:
+            name = current.get("P")
+            if name:
+                packages.append({
+                    "name": name,
+                    "description": current.get("D", ""),
+                    "version": current.get("V", ""),
+                    "repo": repo,
+                })
+            current = {}
+            continue
+        if len(line) > 2 and line[1] == ":":
+            current[line[0]] = line[2:]
+    return packages
+
+
+def fetch_official_apk_packages(branch: str, arch: str) -> list[dict[str, str]]:
+    key = (branch, arch)
+    if key in APK_INDEX_CACHE:
+        return APK_INDEX_CACHE[key]
+
+    merged: dict[str, dict[str, str]] = {}
+    for repo in APK_SEARCH_REPOS:
+        url = f"{APK_MIRROR}/{branch}/{repo}/{arch}/APKINDEX.tar.gz"
+        with urllib.request.urlopen(url, timeout=20) as response:
+            data = response.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            member = next((m for m in tar.getmembers() if m.name.endswith("APKINDEX")), None)
+            if member is None:
+                continue
+            fh = tar.extractfile(member)
+            if fh is None:
+                continue
+            text = fh.read().decode("utf-8", errors="replace")
+        for package in parse_apkindex(text, repo):
+            # Keep main over community if a name ever appears in both repos.
+            merged.setdefault(package["name"], package)
+
+    packages = sorted(merged.values(), key=lambda item: item["name"])
+    APK_INDEX_CACHE[key] = packages
+    return packages
+
+
+def search_official_apk_packages(branch: str, arch: str, query: str, limit: int = 10) -> list[dict[str, str]]:
+    query = query.strip().lower()
+    if len(query) < 2:
+        return []
+    terms = [term for term in re.split(r"\s+", query) if term]
+    results = []
+    for package in fetch_official_apk_packages(branch, arch):
+        name = package["name"].lower()
+        desc = package.get("description", "").lower()
+        haystack = f"{name} {desc}"
+        if not all(term in haystack for term in terms):
+            continue
+        if name == query:
+            score = 0
+        elif name.startswith(query):
+            score = 1
+        elif all(term in name for term in terms):
+            score = 2
+        else:
+            score = 3
+        results.append((score, len(name), package["name"], package))
+    results.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [item[3] for item in results[:limit]]
+
+
 def list_devices():
     sysname = platform.system()
     devices = []
@@ -192,6 +269,23 @@ class DeviceScanWorker(QThread):
 
     def run(self):
         self.done.emit(list_devices())
+
+
+class ApkSearchWorker(QThread):
+    done = Signal(str, list)
+    failed = Signal(str, str)
+
+    def __init__(self, branch: str, arch: str, query: str):
+        super().__init__()
+        self.branch = branch
+        self.arch = arch
+        self.query = query
+
+    def run(self):
+        try:
+            self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
+        except Exception as exc:
+            self.failed.emit(self.query, str(exc))
 
 
 class DeviceDialog(QDialog):
@@ -589,6 +683,22 @@ class Main(QWidget):
         self.boot_timeout = QLineEdit("3")
         self.extra_packages = QLineEdit("")
         self.extra_packages.setPlaceholderText("Space-separated apk packages, e.g. neovim tmux docker")
+        self.package_search_worker = None
+        self.package_search = QLineEdit("")
+        self.package_search.setPlaceholderText("Search Alpine packages, e.g. firefox, docker, neovim")
+        self.package_search_button = QPushButton("Search")
+        self.package_search_button.setIcon(make_button_icon("refresh"))
+        self.package_search_results = QListWidget()
+        self.package_search_results.setMaximumHeight(150)
+        self.package_search_results.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.package_add_button = QPushButton("Add selected package(s)")
+        self.package_add_button.setIcon(make_button_icon("check"))
+        self.package_search_status = QLabel("Top 10 suggestions from Alpine main/community.")
+        self.package_search_status.setStyleSheet("color:#cbd5e1;font-size:12px;")
+        self.package_search.returnPressed.connect(self.search_packages)
+        self.package_search_button.clicked.connect(self.search_packages)
+        self.package_add_button.clicked.connect(self.add_selected_packages)
+        self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
 
     def build(self):
         layout = QVBoxLayout(self)
@@ -699,9 +809,80 @@ class Main(QWidget):
         boot.body_layout.addLayout(bform); parent_layout.addWidget(boot)
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
-        extra.body_layout.addWidget(QLabel("Optional package names are passed directly to apk add."))
+        extra.body_layout.addWidget(QLabel("Optional package names are passed directly to apk add. You can type several packages separated by spaces."))
         extra.body_layout.addWidget(self.extra_packages)
+        extra.body_layout.addWidget(QLabel("Search official Alpine packages (enabled repos: main + community):"))
+        search_row = QHBoxLayout(); search_row.setSpacing(8)
+        search_row.addWidget(self.package_search, 1); search_row.addWidget(self.package_search_button)
+        extra.body_layout.addLayout(search_row)
+        extra.body_layout.addWidget(self.package_search_results)
+        add_row = QHBoxLayout(); add_row.setSpacing(8)
+        add_row.addWidget(self.package_add_button); add_row.addWidget(self.package_search_status, 1)
+        extra.body_layout.addLayout(add_row)
         parent_layout.addWidget(extra)
+
+    def search_packages(self):
+        query = self.package_search.text().strip()
+        if len(query) < 2:
+            self.package_search_status.setText("Type at least 2 characters to search.")
+            self.package_search_results.clear()
+            return
+        if self.thread_running(self.package_search_worker):
+            self.package_search_status.setText("Search already running…")
+            return
+        branch = self.alpine_branch.currentText().strip() or "latest-stable"
+        arch = combo_value(self.arch) or "x86_64"
+        self.package_search_results.clear()
+        self.package_search_status.setText(f"Searching {branch}/{arch} main + community…")
+        self.package_search_button.setEnabled(False)
+        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        self.package_search_worker.done.connect(self.package_search_done)
+        self.package_search_worker.failed.connect(self.package_search_failed)
+        self.package_search_worker.finished.connect(self.package_search_finished)
+        self.package_search_worker.start()
+
+    def package_search_done(self, query: str, results: list):
+        self.package_search_results.clear()
+        if not results:
+            self.package_search_status.setText(f"No official packages found for '{query}'.")
+            return
+        for package in results:
+            desc = package.get("description") or "No description"
+            text = f"{package['name']} — {desc} [{package.get('repo', '?')}]"
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, package["name"])
+            self.package_search_results.addItem(item)
+        self.package_search_status.setText(f"Top {len(results)} suggestions. Double-click or select and add.")
+
+    def package_search_failed(self, query: str, message: str):
+        self.package_search_results.clear()
+        self.package_search_status.setText(f"Search failed for '{query}': {message}")
+
+    def package_search_finished(self):
+        self.package_search_button.setEnabled(True)
+        if self.sender() is self.package_search_worker:
+            self.package_search_worker = None
+        self.update_selected()
+
+    def add_selected_packages(self):
+        items = self.package_search_results.selectedItems()
+        if not items and self.package_search_results.currentItem():
+            items = [self.package_search_results.currentItem()]
+        names = [item.data(Qt.ItemDataRole.UserRole) for item in items]
+        names = [str(name) for name in names if name]
+        if not names:
+            self.package_search_status.setText("Select one or more suggestions first.")
+            return
+        existing = [pkg for pkg in re.split(r"\s+", self.extra_packages.text().strip()) if pkg]
+        existing_set = set(existing)
+        added = []
+        for name in names:
+            if name not in existing_set:
+                existing.append(name)
+                existing_set.add(name)
+                added.append(name)
+        self.extra_packages.setText(" ".join(existing))
+        self.package_search_status.setText("Added: " + ", ".join(added) if added else "Selected package(s) already added.")
 
     def update_console_style(self, expanded: bool):
         if expanded:
@@ -767,7 +948,7 @@ class Main(QWidget):
         return thread is not None and thread.isRunning()
 
     def has_running_worker(self):
-        return self.thread_running(self.builder) or self.thread_running(self.worker)
+        return self.thread_running(self.builder) or self.thread_running(self.worker) or self.thread_running(self.package_search_worker)
 
     def set_busy(self, busy: bool):
         widgets = [
@@ -778,7 +959,8 @@ class Main(QWidget):
             self.xkb_model, self.desktop, self.display_manager, self.default_session,
             self.browser, self.audio, self.network, self.wifi, self.bluetooth,
             self.bootloader, self.kernel, self.firmware, self.boot_timeout,
-            self.auto_resize, self.extra_packages,
+            self.auto_resize, self.extra_packages, self.package_search,
+            self.package_search_button, self.package_search_results, self.package_add_button,
         ] + list(self.wm_checks.values())
         for widget in widgets:
             widget.setEnabled(not busy)
