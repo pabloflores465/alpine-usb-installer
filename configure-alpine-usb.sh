@@ -84,6 +84,7 @@ KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-lts}")"
 ROOTFS="$(lower "${ALPINE_USB_ROOTFS:-ext4}")"
 BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
 INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+SYSTEMD_BOOT_CONSOLE_MODE="${ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE:-max}"
 AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-1}"
 EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}"
 DRY_RUN="${ALPINE_USB_DRY_RUN:-0}"
@@ -102,6 +103,7 @@ safe_token "XKB layout" "$XKB_LAYOUT"
 safe_optional_token "XKB variant" "$XKB_VARIANT"
 safe_token "XKB model" "$XKB_MODEL"
 case "$BOOT_TIMEOUT" in *[!0-9]*|"") die "Boot timeout must be a number" ;; esac
+case "$SYSTEMD_BOOT_CONSOLE_MODE" in keep|auto|max|[0-9]|[0-9][0-9]) ;; *) die "Unsupported systemd-boot console mode: $SYSTEMD_BOOT_CONSOLE_MODE" ;; esac
 case "$(lower "$AUTO_RESIZE")" in 1|yes|true|on|enabled|0|no|false|off|disabled) ;; *) die "Unsupported auto-resize value: $AUTO_RESIZE" ;; esac
 
 case "$DESKTOP" in xfce|gnome|plasma|mate|lxqt|none) ;; *) die "Unsupported desktop: $DESKTOP" ;; esac
@@ -265,7 +267,7 @@ DRY RUN OK
  default_session=$DEFAULT_SESSION
  display_manager=$DISPLAY_MANAGER
  network=$NETWORK_BACKEND wifi=$WIFI bluetooth=$BLUETOOTH audio=$AUDIO
- bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS auto_resize=$AUTO_RESIZE
+ bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS auto_resize=$AUTO_RESIZE systemd_boot_console_mode=$SYSTEMD_BOOT_CONSOLE_MODE
  locale=$LOCALE keyboard=$XKB_LAYOUT console_keymap=$CONSOLE_KEYMAP
  packages:$PACKAGES
 EOF
@@ -922,9 +924,10 @@ if [ "$BOOTLOADER" = "systemd-boot" ]; then
   [ -n "$root_uuid" ] || die "Could not determine root UUID for systemd-boot"
   modules="$(printf '%s' "$INITFS_FEATURES" | tr ' ' ',')"
   cat > /boot/loader/loader.conf <<EOF
- default alpine.conf
- timeout $BOOT_TIMEOUT
- editor no
+default alpine.conf
+timeout $BOOT_TIMEOUT
+editor no
+console-mode $SYSTEMD_BOOT_CONSOLE_MODE
 EOF
   cat > /boot/loader/entries/alpine.conf <<EOF
 title Alpine Linux USB

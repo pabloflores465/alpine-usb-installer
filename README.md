@@ -40,6 +40,7 @@ The generated image is meant to be written directly to a USB drive and booted as
 - Bluetooth: the installer uses `obexd-enhanced` instead of `bluez-obexd`, avoiding the GNOME Bluetooth conflict while still providing the OBEX service.
 - Keyboard: Alpine's current OpenRC console keymap service is `loadkeys`; the generated system writes `/etc/conf.d/loadkeys` and keeps `/etc/conf.d/keymaps` for compatibility.
 - USB capacity: the root partition is expanded on first boot with `cloud-utils-growpart` + `resize2fs`, so a 16G image flashed to a 64G USB uses the full 64G after boot.
+- systemd-boot display mode: generated `loader.conf` sets `console-mode max` by default. This makes systemd-boot switch the UEFI framebuffer to the highest available mode before Linux starts, matching the initial resolution behavior seen with GRUB on systems that rely on EFI/simpledrm framebuffer.
 
 ## Requirements
 
@@ -123,6 +124,14 @@ By default, if you flash this image to a larger USB drive, Alpine grows the root
 ```sh
 ALPINE_USB_AUTO_RESIZE=0 ./build-alpine-usb.sh
 ```
+
+For systemd-boot, the installer defaults to the highest UEFI console mode so the initial framebuffer resolution is not stuck at a low firmware mode:
+
+```sh
+ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE=max ./build-alpine-usb.sh
+```
+
+Valid values are `max`, `auto`, `keep` or a numeric UEFI console mode.
 
 ## Write to USB
 
