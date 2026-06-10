@@ -717,6 +717,19 @@ class Main(QWidget):
             QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
             QProgressBar { color:#ffffff; }
             QScrollArea { border:0; }
+            QAbstractScrollArea { background:#111827; }
+            QScrollBar:vertical { background:#0f172a; width:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }
+            QScrollBar::handle:vertical { background:#475569; min-height:30px; border-radius:5px; }
+            QScrollBar::handle:vertical:hover { background:#64748b; }
+            QScrollBar::handle:vertical:pressed { background:#93c5fd; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0px; border:0; background:transparent; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }
+            QScrollBar:horizontal { background:#0f172a; height:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }
+            QScrollBar::handle:horizontal { background:#475569; min-width:30px; border-radius:5px; }
+            QScrollBar::handle:horizontal:hover { background:#64748b; }
+            QScrollBar::handle:horizontal:pressed { background:#93c5fd; }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0px; border:0; background:transparent; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background:transparent; }
         """)
         title = QLabel("Alpine USB Installer")
         title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;margin:0px;padding:0px;")
