@@ -78,7 +78,17 @@ Supported flashing helpers:
 - Linux: `lsblk`, `dd`, `sudo`/`pkexec`
 - Windows: raw flashing is not implemented; use Rufus/balenaEtcher with the generated image
 
-## CLI
+## TUI and CLI
+
+For a complete interactive terminal experience, use the curses TUI:
+
+```sh
+./run_tui.sh
+# or:
+./run_cli.sh tui
+```
+
+The TUI includes full-screen menus for all installer options, package search, build/dry-run, USB device selection, flashing, and host diagnostics. It always allows manual USB device entry if automatic detection finds nothing.
 
 The project also includes a fast dependency-free CLI with the same build options as the GUI:
 
@@ -87,9 +97,12 @@ The project also includes a fast dependency-free CLI with the same build options
 ./run_cli.sh build --help
 ```
 
-Useful commands:
+Useful CLI commands:
 
 ```sh
+# Open the full TUI
+./run_cli.sh tui
+
 # Search official Alpine packages and show the top 10 suggestions
 ./run_cli.sh search firefox
 

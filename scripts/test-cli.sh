@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile alpine_usb_cli.py
+python3 -m py_compile alpine_usb_cli.py alpine_usb_tui.py
+./run_tui.sh --self-test >/dev/null
 ./run_cli.sh --help >/dev/null
 ./run_cli.sh build --help >/dev/null
 ./run_cli.sh build --dry-run --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/alpine-usb-cli-dry-run.out

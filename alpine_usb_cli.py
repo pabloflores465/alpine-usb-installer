@@ -442,6 +442,11 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_tui(_args: argparse.Namespace) -> int:
+    from alpine_usb_tui import main as tui_main
+    return tui_main([])
+
+
 def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument("-o", "--output", default=str(repo_root() / DEFAULT_IMAGE_NAME), help="Final output image path")
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
@@ -514,6 +519,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="Check host tools needed for build/flash")
     doctor.set_defaults(func=cmd_doctor)
+
+    tui = sub.add_parser("tui", help="Open the complete interactive terminal UI")
+    tui.set_defaults(func=cmd_tui)
     return parser
 
 
