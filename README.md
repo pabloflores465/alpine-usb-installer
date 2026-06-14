@@ -244,6 +244,59 @@ Common vendor boot-menu keys:
 | Intel NUC | `F10` | `F2` |
 | Apple Intel Mac | hold `Option` | N/A |
 
+### Intel Macs
+
+Intel Macs can boot the generated `x86_64` image. Apple Silicon Macs can build and flash the image, but cannot boot this x86_64 Alpine image natively.
+
+Recommended profile for Intel Macs:
+
+- `Arch`: `x86_64`
+- `Bootloader`: `GRUB`
+- `Kernel`: `linux-lts`
+- `Firmware`: full firmware enabled
+- `Desktop`: `XFCE`
+- `Display manager`: `LightDM`
+- `Network`: `NetworkManager`
+- `Wi-Fi`: enabled
+- `Bluetooth`: enabled
+- `Auto-resize USB`: enabled
+
+Flash from macOS with the GUI or manually:
+
+```sh
+diskutil list
+diskutil unmountDisk /dev/diskX
+sudo dd if=alpine-usb.img of=/dev/rdiskX bs=4m status=progress
+sync
+diskutil eject /dev/diskX
+```
+
+Use the whole raw disk (`/dev/rdiskX`), not a partition such as `/dev/diskXs1`.
+
+Boot steps:
+
+1. Shut down the Mac.
+2. Insert the flashed USB drive.
+3. Power on while holding `Option` / `Alt`.
+4. In the Apple boot picker, choose `EFI Boot` or the orange USB icon.
+5. Press Enter.
+
+If the USB does not appear:
+
+- Try another USB port.
+- Try a simple USB 2.0 hub on older Macs.
+- Reflash the image raw to the whole disk.
+- Use `GRUB` instead of `systemd-boot`.
+- For Macs with the Apple T2 security chip, allow external boot in Recovery.
+
+T2 Intel Mac external boot setup:
+
+1. Boot macOS Recovery with `Cmd` + `R`.
+2. Open `Utilities` → `Startup Security Utility`.
+3. Set `Secure Boot` to `No Security` if needed.
+4. Set `External Boot` to `Allow booting from external media`.
+5. Reboot while holding `Option` / `Alt` and choose the USB.
+
 ### HP ProBook 4440s / older HP laptops
 
 The HP ProBook 4440s is an older BIOS/UEFI hybrid laptop. If the USB does not boot:
