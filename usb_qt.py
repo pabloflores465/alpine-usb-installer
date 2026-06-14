@@ -4,7 +4,7 @@ from __future__ import annotations
 import io, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QThread, Signal
+from PySide6.QtCore import QPoint, Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog,
@@ -83,6 +83,45 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     return QIcon(pix)
 
 
+def ensure_widget_visible(widget: QWidget, parent: QWidget | None = None):
+    screen = (parent.screen() if parent and parent.screen() else None) or widget.screen() or QApplication.primaryScreen()
+    if not screen:
+        return
+    available = screen.availableGeometry()
+    frame = widget.frameGeometry()
+    if frame.width() <= 0 or frame.height() <= 0:
+        widget.adjustSize()
+        frame = widget.frameGeometry()
+    if parent and parent.isVisible():
+        frame.moveCenter(parent.frameGeometry().center())
+    else:
+        frame.moveCenter(available.center())
+    x = max(available.left(), min(frame.left(), available.right() - frame.width() + 1))
+    y = max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1))
+    widget.move(x, y)
+
+
+def exec_centered_dialog(box: QMessageBox, parent: QWidget | None = None):
+    # Force a real Qt dialog (not macOS sheet/native panel), show it once so
+    # geometry exists, then center/clamp it. This avoids AeroSpace/macOS placing
+    # completion modals in a corner or another workspace.
+    try:
+        box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+    except AttributeError:
+        pass
+    box.setWindowModality(Qt.WindowModality.ApplicationModal)
+    box.setWindowFlag(Qt.WindowType.Dialog, True)
+    box.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+    box.adjustSize()
+    box.show()
+    QApplication.processEvents()
+    ensure_widget_visible(box, parent)
+    box.raise_()
+    box.activateWindow()
+    QTimer.singleShot(0, lambda: ensure_widget_visible(box, parent))
+    return box.exec()
+
+
 def modal(parent, kind: str, title: str, text: str, question: bool = False) -> bool:
     box = QMessageBox(parent)
     box.setWindowTitle(title)
@@ -97,14 +136,14 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
         cancel.setIcon(make_button_icon("error"))
         cancel.setStyleSheet("background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
         ok.setStyleSheet("background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
-        box.exec()
+        exec_centered_dialog(box, parent)
         return box.clickedButton() == ok
     box.setStandardButtons(QMessageBox.StandardButton.Ok)
     ok = box.button(QMessageBox.StandardButton.Ok)
     if ok:
         ok.setIcon(make_button_icon("check"))
         ok.setStyleSheet("background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;")
-    box.exec()
+    exec_centered_dialog(box, parent)
     return True
 
 
@@ -1162,4 +1201,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setWindowIcon(make_app_icon())
     w = Main(); w.show()
+    QTimer.singleShot(0, lambda: ensure_widget_visible(w))
     sys.exit(app.exec())

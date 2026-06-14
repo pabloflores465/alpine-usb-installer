@@ -205,7 +205,63 @@ lsblk
 sudo dd if=alpine-usb.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`).
+Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`). Do not copy `alpine-usb.img` as a file onto a FAT/exFAT USB; it must be written raw to the whole device.
+
+## Booting the USB
+
+General boot steps:
+
+1. Shut down the target computer.
+2. Insert the flashed USB drive.
+3. Open the one-time boot menu during power-on. Common keys are `F12`, `F9`, `F8`, `F11`, `Esc` or `Del` depending on vendor.
+4. Choose the USB drive entry.
+5. If the machine shows both `UEFI: <usb name>` and a non-UEFI/legacy USB entry, try the one matching your firmware setup:
+   - Modern machines: usually `UEFI: <usb name>`.
+   - Older BIOS/CSM machines: usually the non-UEFI `USB Hard Drive` entry.
+
+Recommended firmware settings when a USB does not boot:
+
+- Enable `USB Boot`.
+- Disable `Secure Boot` unless you know your firmware accepts this image.
+- Disable `Fast Boot` if the USB is skipped.
+- For older laptops/desktops, enable `Legacy Support`, `CSM` or `Legacy Boot` and try the non-UEFI USB entry.
+- Put `USB Hard Drive` or `Removable USB` above the internal disk in boot order if using permanent boot order instead of a one-time menu.
+- Try another USB port. Older machines often boot more reliably from USB 2.0 ports than USB 3.0 ports.
+- Reflash the image to the whole disk if the USB only shows files or does not appear in the boot menu.
+
+Common vendor boot-menu keys:
+
+| Vendor | Boot menu | BIOS/Setup |
+| --- | --- | --- |
+| HP | `Esc` then `F9` | `Esc` then `F10` |
+| Dell | `F12` | `F2` |
+| Lenovo ThinkPad | `F12` | `F1` |
+| Lenovo IdeaPad | `F12` or Novo button | `F2` or Novo button |
+| Acer | `F12` | `F2` |
+| ASUS | `Esc` | `F2` or `Del` |
+| MSI | `F11` | `Del` |
+| Gigabyte | `F12` | `Del` |
+| Intel NUC | `F10` | `F2` |
+| Apple Intel Mac | hold `Option` | N/A |
+
+### HP ProBook 4440s / older HP laptops
+
+The HP ProBook 4440s is an older BIOS/UEFI hybrid laptop. If the USB does not boot:
+
+1. Power on and press `Esc` repeatedly.
+2. Press `F10` for BIOS Setup.
+3. Open `System Configuration` → `Boot Options`.
+4. Set:
+   - `USB Boot`: enabled
+   - `Secure Boot`: disabled
+   - `Legacy Support`: enabled
+   - `Fast Boot`: disabled, if present
+5. Move `USB Hard Drive` / `USB Diskette on Key` above the internal disk, or use one-time boot.
+6. Save with `F10`.
+7. Reboot, press `Esc`, then `F9`.
+8. Pick the non-UEFI `USB Hard Drive` entry first. If it fails, try the `UEFI: USB` entry.
+
+For this class of hardware, the most reliable profile is usually `XFCE`, `LightDM`, `GRUB`, `linux-lts`, firmware enabled, NetworkManager enabled, Wi-Fi enabled, and auto-resize enabled.
 
 ## Initial login
 
