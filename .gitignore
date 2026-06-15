@@ -1,9 +1,14 @@
-# Generated images and large build artifacts
+# Generated images and large build/release artifacts
 *.img
 *.qcow2
 *.raw
 *.iso
 .work/
+build/
+dist/
+standalone-release/
+Alpine USB Installer.spec
+alpine-usb.spec
 aports/
 
 # macOS

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -607,16 +606,17 @@ def self_test() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Complete curses TUI for Alpine USB Installer")
+    parser = argparse.ArgumentParser(description="Curses TUI for Alpine USB Installer (launched by alpine-usb)")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("The TUI needs an interactive terminal. Use ./cli.py for non-interactive mode.", file=sys.stderr)
+        print("The TUI needs an interactive terminal. Use CLI subcommands for non-interactive mode.", file=sys.stderr)
         return 1
     return curses.wrapper(run_tui)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print("tui.py is import-only. Run ./alpine-usb (or ./alpine-usb tui).", file=sys.stderr)
+    raise SystemExit(2)

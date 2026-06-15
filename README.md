@@ -1,6 +1,6 @@
 # Alpine USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI, terminal TUI, or CLI.
+Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -20,6 +20,7 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
   - [Intel Macs](#intel-macs)
   - [HP ProBook 4440s / older HP laptops](#hp-probook-4440s--older-hp-laptops)
 - [Initial login](#initial-login)
+- [macOS DMG packaging](#macos-dmg-packaging)
 - [Validation and tests](#validation-and-tests)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -55,11 +56,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # GUI
 ./gui.py
 
-# TUI
-./tui.py
+# Unified terminal binary: TUI by default
+./alpine-usb
+# or explicit TUI
+./alpine-usb tui
 
-# CLI help
-./cli.py --help
+# CLI help/subcommands
+./alpine-usb --help
 ```
 
 Default output path:
@@ -92,46 +95,46 @@ If USB auto-detection fails, type the device manually, for example `/dev/disk7` 
 ### TUI
 
 ```sh
-./tui.py
-# or through CLI:
-./cli.py tui
+./alpine-usb
+# or explicit:
+./alpine-usb tui
 ```
 
-The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics.
+The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics. There is one terminal entrypoint, `alpine-usb`; `cli.py` and `tui.py` are import-only support modules.
 
 ### CLI
 
 ```sh
-./cli.py --help
-./cli.py build --help
+./alpine-usb --help
+./alpine-usb build --help
 ```
 
 Common commands:
 
 ```sh
 # Search packages
-./cli.py search firefox
+./alpine-usb search firefox
 
 # Validate a profile without building
-./cli.py build --dry-run --desktop xfce --bootloader systemd-boot
+./alpine-usb build --dry-run --desktop xfce --bootloader systemd-boot
 
 # Build default profile without prompts
-./cli.py build -y
+./alpine-usb build -y
 
 # Build Plasma profile
-./cli.py build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+./alpine-usb build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
 
 # List removable devices
-./cli.py devices
+./alpine-usb devices
 
 # Flash image to USB
-./cli.py flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
+./alpine-usb flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
 ```
 
 Extra packages can be repeated or space-separated:
 
 ```sh
-./cli.py build \
+./alpine-usb build \
   --extra-package neovim \
   --extra-package "tmux htop" \
   --extra-package docker
@@ -346,6 +349,22 @@ passwd
 sudo passwd root
 ```
 
+## macOS DMG packaging
+
+Build a DMG on macOS with:
+
+```sh
+scripts/build-macos-dmg.sh
+```
+
+The DMG includes:
+
+- `Alpine USB Installer.app` for the Qt GUI.
+- `Terminal/alpine-usb`, a standalone terminal binary for the unified TUI/CLI.
+- `Open Terminal Utility.command` to launch the terminal utility from Finder.
+
+The terminal binary carries the build resources it needs and copies them to `/tmp/alpine-usb-installer/terminal-runtime` before invoking build scripts.
+
 ## Validation and tests
 
 Dry-run option matrix:
@@ -360,7 +379,7 @@ Check representative profiles with Alpine APK dependency solver inside Docker:
 scripts/check-apk-solver.sh
 ```
 
-CLI/TUI smoke tests:
+Unified terminal smoke tests:
 
 ```sh
 scripts/test-cli.sh

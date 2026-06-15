@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -16,11 +15,22 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-APP_TITLE = "Alpine USB Installer CLI"
+APP_TITLE = "Alpine USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
 APK_SEARCH_REPOS = ("main", "community")
 VALID_WMS = ("i3", "sway", "hyprland", "awesome", "bspwm", "openbox", "labwc")
+
+TERMINAL_ENTRYPOINT = "alpine-usb"
+SOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+_TERMINAL_RUNTIME_DIR: Path | None = None
+TERMINAL_RUNTIME_RESOURCES = (
+    "build-alpine-usb.sh",
+    "configure-alpine-usb.sh",
+    "README.md",
+    "LICENSE",
+    "efi-fallback",
+)
 
 
 class Colors:
@@ -64,8 +74,53 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, text=True, **kwargs)
 
 
+def can_write_to_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".write-test-{os.getpid()}"
+        probe.write_text("ok")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def prepare_terminal_runtime(source_dir: Path) -> Path:
+    runtime = Path(tempfile.gettempdir()) / "alpine-usb-installer" / "terminal-runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    for name in TERMINAL_RUNTIME_RESOURCES:
+        src = source_dir / name
+        dst = runtime / name
+        if not src.exists():
+            continue
+        if src.is_dir():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+            if name.endswith(".sh"):
+                dst.chmod(0o755)
+    (runtime / ".work").mkdir(exist_ok=True)
+    return runtime
+
+
 def repo_root() -> Path:
-    return Path(__file__).resolve().parent
+    global _TERMINAL_RUNTIME_DIR
+    if _TERMINAL_RUNTIME_DIR is not None:
+        return _TERMINAL_RUNTIME_DIR
+    if getattr(sys, "frozen", False):
+        _TERMINAL_RUNTIME_DIR = prepare_terminal_runtime(SOURCE_DIR)
+        return _TERMINAL_RUNTIME_DIR
+    if can_write_to_dir(SOURCE_DIR):
+        return SOURCE_DIR
+    _TERMINAL_RUNTIME_DIR = prepare_terminal_runtime(SOURCE_DIR)
+    return _TERMINAL_RUNTIME_DIR
+
+
+def terminal_entrypoint_name() -> str:
+    name = Path(sys.argv[0]).name
+    return name if name != "cli.py" else TERMINAL_ENTRYPOINT
 
 
 def print_panel(title: str, rows: list[tuple[str, str] | str]):
@@ -353,7 +408,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         rows.append((f"{idx:>2}. {name}", f"{version}  [{repo}]  {desc}"))
     print_panel(f"Top {len(results)} suggestions for '{args.query}'", rows)
     print("Add packages with:")
-    print(c(f"  ./cli.py build --extra-package {results[0]['name']}", C.dim))
+    print(c(f"  {terminal_entrypoint_name()} build --extra-package {results[0]['name']}", C.dim))
     return 0
 
 
@@ -442,9 +497,13 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
-def cmd_tui(_args: argparse.Namespace) -> int:
+def cmd_tui(args: argparse.Namespace) -> int:
     from tui import main as tui_main
-    return tui_main([])
+
+    tui_args = []
+    if getattr(args, "self_test", False):
+        tui_args.append("--self-test")
+    return tui_main(tui_args)
 
 
 def add_common_build_options(parser: argparse.ArgumentParser):
@@ -491,8 +550,8 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cli.py",
-        description="Build, customize, search packages for, and flash Alpine USB images.",
+        prog=Path(sys.argv[0]).name,
+        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -520,16 +579,26 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Check host tools needed for build/flash")
     doctor.set_defaults(func=cmd_doctor)
 
-    tui = sub.add_parser("tui", help="Open the complete interactive terminal UI")
+    tui = sub.add_parser("tui", help="Open the complete interactive terminal UI (default when run without arguments)")
+    tui.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     tui.set_defaults(func=cmd_tui)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
     parser = build_parser()
+    if not argv:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            argv = ["tui"]
+        else:
+            parser.print_help()
+            return 0
     args = parser.parse_args(argv)
-    print(c(f"\n{APP_TITLE}", C.bold + C.cyan))
-    print(c("─" * len(APP_TITLE), C.cyan), flush=True)
+    if args.command != "tui":
+        print(c(f"\n{APP_TITLE}", C.bold + C.cyan))
+        print(c("─" * len(APP_TITLE), C.cyan), flush=True)
     try:
         return args.func(args)
     except KeyboardInterrupt:
@@ -538,4 +607,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print(f"cli.py is import-only. Run ./{TERMINAL_ENTRYPOINT} (or ./{TERMINAL_ENTRYPOINT} tui).", file=sys.stderr)
+    raise SystemExit(2)
