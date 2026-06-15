@@ -1,235 +1,251 @@
 # Alpine USB Installer
 
-Tool for building and flashing a bootable, preinstalled Alpine Linux x86_64 USB image.
+Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI, terminal TUI, or CLI.
 
-It started as an XFCE-only builder, but now the GUI and build scripts expose a full configurable Alpine profile: desktop environment, tiling/window managers, Wi‑Fi, Bluetooth, display manager, bootloader, kernel flavor, keyboard/language, users, firmware, audio and extra APK packages.
+> License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
-## What it can configure
+## Contents
 
-Defaults are distro-like and generic: `linux-lts`, GRUB removable UEFI, XFCE, LightDM, NetworkManager + Wi‑Fi, Bluetooth, PipeWire, Firefox ESR, user `alpine` / password `alpine`, English locale and US keyboard. GUI/TUI/CLI output defaults to `/tmp/alpine-usb-installer/alpine-usb.img`.
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Interfaces](#interfaces)
+  - [GUI](#gui)
+  - [TUI](#tui)
+  - [CLI](#cli)
+- [Default profile](#default-profile)
+- [Configuration guide](#configuration-guide)
+- [Write to USB](#write-to-usb)
+- [Booting the USB](#booting-the-usb)
+  - [Intel Macs](#intel-macs)
+  - [HP ProBook 4440s / older HP laptops](#hp-probook-4440s--older-hp-laptops)
+- [Initial login](#initial-login)
+- [Validation and tests](#validation-and-tests)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
-`Image size` is the minimum build image size, not the final used space limit. By default the installed USB auto-expands the root partition/filesystem on first boot to use the full target USB drive.
+## Features
 
-Configurable sections in the Qt app are collapsed by default:
-
-- System, user and localization:
-  - minimum image size, Alpine branch, hostname, user/passwords
-  - timezone, locale, console keymap, XKB keyboard layout/model/variant
-- Desktop/session:
-  - XFCE, GNOME, KDE Plasma, MATE, LXQt or no full desktop
-  - optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc
-  - default session, browser, PipeWire/ALSA/no audio
-- Network:
-  - NetworkManager or no desktop network stack
-  - Wi‑Fi support toggle
-  - Bluetooth support toggle
-- Boot:
-  - GRUB removable UEFI or systemd-boot removable UEFI
-  - `linux-lts` or `linux-stable`
-  - full firmware or `linux-firmware-none`
-  - first-boot root filesystem expansion to fill the USB drive
-- Extra packages:
-  - arbitrary additional `apk add` package names
-  - package search against Alpine's official `main` + `community` APK indexes
-  - top 10 package suggestions with one-click/double-click add; multiple packages can still be typed manually separated by spaces
-
-The generated image is meant to be written directly to a USB drive and booted as an installed Alpine system.
-
-## Compatibility fixes
-
-- Polkit: desktop packages are installed after `polkit-elogind` is explicitly installed, so APK does not accidentally choose the non-elogind `polkit` provider when packages such as `xfce-polkit`, GNOME, Plasma, MATE or LXQt pull a polkit agent.
-- Lightweight WMs: the generated system installs a duplicate-safe polkit agent launcher for sessions such as i3, Sway, bspwm, Openbox and labwc.
-- Bluetooth: the installer uses `obexd-enhanced` instead of `bluez-obexd`, avoiding the GNOME Bluetooth conflict while still providing the OBEX service.
-- Keyboard: Alpine's current OpenRC console keymap service is `loadkeys`; the generated system writes `/etc/conf.d/loadkeys` and keeps `/etc/conf.d/keymaps` for compatibility.
-- USB capacity: the root partition is expanded on first boot with `cloud-utils-growpart` + `resize2fs`, so a 16G image flashed to a 64G USB uses the full 64G after boot.
-- systemd-boot display mode: generated `loader.conf` sets `console-mode max` by default. This makes systemd-boot switch the UEFI framebuffer to the highest available mode before Linux starts, matching the initial resolution behavior seen with GRUB on systems that rely on EFI/simpledrm framebuffer.
+- Build a bootable, installed Alpine Linux USB image.
+- Configure desktop/session options:
+  - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
+  - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
+- Configure boot, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
+- Search Alpine `main` + `community` packages from the GUI/TUI/CLI.
+- Flash the generated image to USB from macOS/Linux.
+- Auto-expand the root filesystem on first boot to use the full USB drive.
 
 ## Requirements
 
-Building is recommended on Linux or Docker Desktop with NBD support.
+### Build host
 
-On macOS, Docker Desktop is used automatically because the build requires Linux/NBD.
+- Python 3.
+- Docker Desktop on macOS. The build needs Linux/NBD support.
+- On native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
 
-On native Linux you also need `mtools`, `grub-efi`/`grub-mkstandalone`, `qemu-nbd`, `parted`, `rsync`, `dosfstools` and related image build tools.
+### Runtime tools
 
-Python GUI dependencies are listed in `requirements.txt`. `./gui.py` creates and uses its own `.qtvenv` automatically if needed.
+- macOS flashing: `diskutil`, `dd`, administrator password.
+- Linux flashing: `lsblk`, `dd`, `sudo` or `pkexec`.
+- Windows raw flashing is not implemented here. Use Rufus or balenaEtcher with the generated image.
 
-## Qt GUI
+## Quick start
+
+```sh
+# GUI
+./gui.py
+
+# TUI
+./tui.py
+
+# CLI help
+./cli.py --help
+```
+
+Default output path:
+
+```txt
+/tmp/alpine-usb-installer/alpine-usb.img
+```
+
+## Interfaces
+
+### GUI
 
 ```sh
 ./gui.py
 ```
 
-From the GUI you can:
+`./gui.py` creates and uses its own `.qtvenv` automatically if PySide6 is missing.
 
-- choose the output image path
-- choose the minimum image size used during build
-- open collapsed configuration sections and customize the profile
-- search official Alpine packages in the Extra APK packages section and add one or several suggestions
-- build the image
-- select a target USB drive
-- flash the image
+GUI flow:
 
-If the selector does not detect your USB drive, you can type the device manually, for example `/dev/disk7` on macOS or `/dev/sdb` on Linux.
+1. Set image output path.
+2. Open only the configuration sections you want to change.
+3. Review the live configuration summary.
+4. Build the image.
+5. Select USB target.
+6. Flash USB.
 
-Supported flashing helpers:
+If USB auto-detection fails, type the device manually, for example `/dev/disk7` on macOS or `/dev/sdb` on Linux.
 
-- macOS: `diskutil`, `dd`, administrator password prompt
-- Linux: `lsblk`, `dd`, `sudo`/`pkexec`
-- Windows: raw flashing is not implemented; use Rufus/balenaEtcher with the generated image
-
-## TUI and CLI
-
-For a complete interactive terminal experience, use the curses TUI:
+### TUI
 
 ```sh
 ./tui.py
-# or:
+# or through CLI:
 ./cli.py tui
 ```
 
-The TUI includes full-screen menus for all installer options, package search, build/dry-run, USB device selection, flashing, and host diagnostics. It always allows manual USB device entry if automatic detection finds nothing.
+The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics.
 
-The project also includes a fast dependency-free CLI with the same build options as the GUI:
+### CLI
 
 ```sh
 ./cli.py --help
 ./cli.py build --help
 ```
 
-Useful CLI commands:
+Common commands:
 
 ```sh
-# Open the full TUI
-./cli.py tui
-
-# Search official Alpine packages and show the top 10 suggestions
+# Search packages
 ./cli.py search firefox
 
-# Validate a profile without building the image
+# Validate a profile without building
 ./cli.py build --dry-run --desktop xfce --bootloader systemd-boot
 
-# Build without interactive confirmation
+# Build default profile without prompts
+./cli.py build -y
+
+# Build Plasma profile
 ./cli.py build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
 
-# List removable USB devices
+# List removable devices
 ./cli.py devices
 
-# Flash an image to USB; requires typing ERASE unless -y is passed
-./cli.py flash alpine-usb.img /dev/sdX
+# Flash image to USB
+./cli.py flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
 ```
 
-The `build` subcommand exposes the same profile controls as the GUI: desktop, display manager, WMs, Wi‑Fi, Bluetooth, bootloader, kernel, firmware, keyboard/language, user/passwords, image size, auto-resize, browser/audio and extra APK packages. Extra packages can be repeated:
+Extra packages can be repeated or space-separated:
 
 ```sh
-./cli.py build --extra-package neovim --extra-package "tmux htop" --extra-package docker
+./cli.py build \
+  --extra-package neovim \
+  --extra-package "tmux htop" \
+  --extra-package docker
 ```
 
-## CLI build examples
+## Default profile
 
-Default profile:
+Defaults are generic and distro-like:
 
-```sh
-IMAGE_SIZE=16G ./build-alpine-usb.sh
-# or:
-./cli.py build -y
-```
+| Option | Default |
+| --- | --- |
+| Image size | `16G` |
+| Output | `/tmp/alpine-usb-installer/alpine-usb.img` |
+| Alpine branch | `latest-stable` |
+| Architecture | `x86_64` |
+| User/password | `alpine` / `alpine` |
+| Root password | `alpine` |
+| Locale/timezone | `en_US.UTF-8` / `UTC` |
+| Keyboard | US console + XKB |
+| Desktop | XFCE |
+| Display manager | auto recommended, usually LightDM for XFCE/MATE |
+| Bootloader | GRUB removable UEFI |
+| Kernel | `linux-lts` |
+| Firmware | full firmware |
+| Network | NetworkManager + Wi‑Fi |
+| Bluetooth | enabled |
+| Audio | PipeWire + WirePlumber + pipewire-pulse |
+| Browser | Firefox ESR |
+| USB auto-resize | enabled |
 
-KDE Plasma + SDDM + systemd-boot + stable kernel:
+## Configuration guide
 
-```sh
-ALPINE_USB_DESKTOP=plasma \
-ALPINE_USB_DISPLAY_MANAGER=sddm \
-ALPINE_USB_BOOTLOADER=systemd-boot \
-ALPINE_USB_KERNEL_FLAVOR=stable \
-IMAGE_SIZE=32G \
-./build-alpine-usb.sh
-```
+### System, user, localization
 
-WM-only image with Sway and i3 through greetd:
+Configure image size, Alpine branch, hostname, username/passwords, timezone, locale, console keymap, and XKB layout.
 
-```sh
-ALPINE_USB_DESKTOP=none \
-ALPINE_USB_TILING_WMS="sway i3" \
-ALPINE_USB_DISPLAY_MANAGER=greetd \
-./build-alpine-usb.sh
-```
+### Desktop/session
 
-Spanish locale/keymap example:
+Choose a desktop, display manager, default session, browser, audio backend, and optional window managers.
 
-```sh
-ALPINE_USB_LOCALE=es_ES.UTF-8 \
-ALPINE_USB_TIMEZONE=Europe/Madrid \
-ALPINE_USB_CONSOLE_KEYMAP=es \
-ALPINE_USB_XKB_LAYOUT=es \
-./build-alpine-usb.sh
-```
+Recommended compatibility:
 
-Result by default:
+- Older hardware: XFCE + LightDM + GRUB + `linux-lts`.
+- Modern KDE setup: Plasma + SDDM.
+- GNOME setup: GNOME + GDM.
+- WM-only setup: no desktop + greetd or no display manager.
+- Wayland sessions such as Sway/Hyprland/labwc: use Auto, greetd, SDDM, GDM, or no display manager. LightDM/LXDM are treated as X11-only here.
 
-```txt
-alpine-usb.img
-```
+### Network, Wi‑Fi, Bluetooth
 
-By default, if you flash this image to a larger USB drive, Alpine grows the root partition/filesystem on first boot to fill the drive. Disable it with:
+NetworkManager is recommended for desktop usage. Bluetooth uses `obexd-enhanced` to avoid conflicts with GNOME Bluetooth while still providing OBEX support.
 
-```sh
-ALPINE_USB_AUTO_RESIZE=0 ./build-alpine-usb.sh
-```
+### Audio
 
-For systemd-boot, the installer defaults to the highest UEFI console mode so the initial framebuffer resolution is not stuck at a low firmware mode:
+PipeWire is the recommended default. On Alpine/OpenRC there is no `systemd --user` manager, so the generated desktop image starts `pipewire`, `wireplumber`, and `pipewire-pulse` from XDG autostart.
 
-```sh
-ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE=max ./build-alpine-usb.sh
-```
+### Bootloader, kernel, firmware
 
-Valid values are `max`, `auto`, `keep` or a numeric UEFI console mode.
+- GRUB removable UEFI is the safest default across many PCs and Intel Macs.
+- systemd-boot removable UEFI is available for UEFI-focused systems.
+- `linux-lts` is recommended for stability.
+- Full firmware is recommended for laptops and Wi‑Fi/Bluetooth hardware.
+
+### Extra APK packages
+
+Use official Alpine package names. Package search queries Alpine `main` and `community` indexes.
 
 ## Write to USB
 
-⚠️ This completely erases the target device.
+> Warning: flashing completely erases the selected device.
 
-On macOS:
+Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`, `/dev/diskXs1`). Do not copy `alpine-usb.img` as a file onto a FAT/exFAT USB; write it raw to the whole device.
+
+### macOS
 
 ```sh
+diskutil list
 diskutil unmountDisk /dev/diskX
-sudo dd if=alpine-usb.img of=/dev/rdiskX bs=4M status=progress
+sudo dd if=/tmp/alpine-usb-installer/alpine-usb.img of=/dev/rdiskX bs=4m status=progress
 sync
 diskutil eject /dev/diskX
 ```
 
-On Linux:
+### Linux
 
 ```sh
 lsblk
-sudo dd if=alpine-usb.img of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=/tmp/alpine-usb-installer/alpine-usb.img of=/dev/sdX bs=4M status=progress conv=fsync
+sync
 ```
-
-Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`). Do not copy `alpine-usb.img` as a file onto a FAT/exFAT USB; it must be written raw to the whole device.
 
 ## Booting the USB
 
-General boot steps:
+General flow:
 
-1. Shut down the target computer.
-2. Insert the flashed USB drive.
-3. Open the one-time boot menu during power-on. Common keys are `F12`, `F9`, `F8`, `F11`, `Esc` or `Del` depending on vendor.
-4. Choose the USB drive entry.
-5. If the machine shows both `UEFI: <usb name>` and a non-UEFI/legacy USB entry, try the one matching your firmware setup:
-   - Modern machines: usually `UEFI: <usb name>`.
-   - Older BIOS/CSM machines: usually the non-UEFI `USB Hard Drive` entry.
+1. Shut down target computer.
+2. Insert flashed USB drive.
+3. Open one-time boot menu during power-on.
+4. Choose USB drive.
+5. If both `UEFI: <usb>` and non-UEFI USB entries exist:
+   - Modern machines: try `UEFI: <usb>` first.
+   - Older BIOS/CSM machines: try non-UEFI `USB Hard Drive` first.
 
-Recommended firmware settings when a USB does not boot:
+Firmware settings if boot fails:
 
-- Enable `USB Boot`.
-- Disable `Secure Boot` unless you know your firmware accepts this image.
-- Disable `Fast Boot` if the USB is skipped.
-- For older laptops/desktops, enable `Legacy Support`, `CSM` or `Legacy Boot` and try the non-UEFI USB entry.
-- Put `USB Hard Drive` or `Removable USB` above the internal disk in boot order if using permanent boot order instead of a one-time menu.
-- Try another USB port. Older machines often boot more reliably from USB 2.0 ports than USB 3.0 ports.
-- Reflash the image to the whole disk if the USB only shows files or does not appear in the boot menu.
+- Enable USB boot.
+- Disable Secure Boot unless your firmware accepts this image.
+- Disable Fast Boot if USB is skipped.
+- For older systems, enable Legacy Support / CSM / Legacy Boot.
+- Move USB above internal disk in boot order, or use one-time boot menu.
+- Try another USB port, especially USB 2.0 on older machines.
+- Reflash raw to whole disk if USB does not appear.
 
-Common vendor boot-menu keys:
+Common keys:
 
 | Vendor | Boot menu | BIOS/Setup |
 | --- | --- | --- |
@@ -242,13 +258,13 @@ Common vendor boot-menu keys:
 | MSI | `F11` | `Del` |
 | Gigabyte | `F12` | `Del` |
 | Intel NUC | `F10` | `F2` |
-| Apple Intel Mac | hold `Option` | N/A |
+| Apple Intel Mac | hold `Option` / `Alt` | Recovery / Startup Security Utility for T2 |
 
 ### Intel Macs
 
-Intel Macs can boot the generated `x86_64` image. Apple Silicon Macs can build and flash the image, but cannot boot this x86_64 Alpine image natively.
+Intel Macs can boot the generated `x86_64` image. Apple Silicon Macs can build and flash it, but cannot boot this x86_64 Alpine image natively.
 
-Recommended profile for Intel Macs:
+Recommended Intel Mac profile:
 
 - `Arch`: `x86_64`
 - `Bootloader`: `GRUB`
@@ -257,49 +273,48 @@ Recommended profile for Intel Macs:
 - `Desktop`: `XFCE`
 - `Display manager`: `LightDM`
 - `Network`: `NetworkManager`
-- `Wi-Fi`: enabled
+- `Wi‑Fi`: enabled
 - `Bluetooth`: enabled
 - `Auto-resize USB`: enabled
 
-Flash from macOS with the GUI or manually:
+Boot:
 
-```sh
-diskutil list
-diskutil unmountDisk /dev/diskX
-sudo dd if=alpine-usb.img of=/dev/rdiskX bs=4m status=progress
-sync
-diskutil eject /dev/diskX
-```
-
-Use the whole raw disk (`/dev/rdiskX`), not a partition such as `/dev/diskXs1`.
-
-Boot steps:
-
-1. Shut down the Mac.
-2. Insert the flashed USB drive.
+1. Shut down Mac.
+2. Insert flashed USB drive.
 3. Power on while holding `Option` / `Alt`.
-4. In the Apple boot picker, choose `EFI Boot` or the orange USB icon.
-5. Press Enter.
+4. Choose `EFI Boot` or orange USB icon.
 
-If the USB does not appear:
+If USB does not appear:
 
 - Try another USB port.
 - Try a simple USB 2.0 hub on older Macs.
-- Reflash the image raw to the whole disk.
-- Use `GRUB` instead of `systemd-boot`.
-- For Macs with the Apple T2 security chip, allow external boot in Recovery.
+- Reflash raw to whole disk.
+- Use GRUB instead of systemd-boot.
+- On T2 Intel Macs, allow external boot.
 
-T2 Intel Mac external boot setup:
+T2 setup:
 
 1. Boot macOS Recovery with `Cmd` + `R`.
 2. Open `Utilities` → `Startup Security Utility`.
 3. Set `Secure Boot` to `No Security` if needed.
 4. Set `External Boot` to `Allow booting from external media`.
-5. Reboot while holding `Option` / `Alt` and choose the USB.
+5. Reboot while holding `Option` / `Alt`.
 
 ### HP ProBook 4440s / older HP laptops
 
-The HP ProBook 4440s is an older BIOS/UEFI hybrid laptop. If the USB does not boot:
+The HP ProBook 4440s is an older BIOS/UEFI hybrid laptop.
+
+Recommended profile:
+
+- XFCE
+- LightDM
+- GRUB
+- `linux-lts`
+- Full firmware
+- NetworkManager + Wi‑Fi
+- Auto-resize enabled
+
+BIOS setup:
 
 1. Power on and press `Esc` repeatedly.
 2. Press `F10` for BIOS Setup.
@@ -309,16 +324,14 @@ The HP ProBook 4440s is an older BIOS/UEFI hybrid laptop. If the USB does not bo
    - `Secure Boot`: disabled
    - `Legacy Support`: enabled
    - `Fast Boot`: disabled, if present
-5. Move `USB Hard Drive` / `USB Diskette on Key` above the internal disk, or use one-time boot.
+5. Move `USB Hard Drive` / `USB Diskette on Key` above internal disk, or use one-time boot.
 6. Save with `F10`.
 7. Reboot, press `Esc`, then `F9`.
-8. Pick the non-UEFI `USB Hard Drive` entry first. If it fails, try the `UEFI: USB` entry.
-
-For this class of hardware, the most reliable profile is usually `XFCE`, `LightDM`, `GRUB`, `linux-lts`, firmware enabled, NetworkManager enabled, Wi-Fi enabled, and auto-resize enabled.
+8. Pick non-UEFI `USB Hard Drive` first. If it fails, try `UEFI: USB`.
 
 ## Initial login
 
-Default credentials unless changed in the GUI/CLI:
+Defaults unless changed:
 
 ```txt
 user: alpine
@@ -326,31 +339,65 @@ password: alpine
 root password: alpine
 ```
 
-Change passwords after the first boot:
+Change passwords after first boot:
 
 ```sh
 passwd
 sudo passwd root
 ```
 
-## Validation
+## Validation and tests
 
-Dry-run all supported option combinations without installing packages:
+Dry-run option matrix:
 
 ```sh
 scripts/validate-config-matrix.sh
 ```
 
-Check representative profiles with Alpine's real APK dependency solver inside Docker:
+Check representative profiles with Alpine APK dependency solver inside Docker:
 
 ```sh
 scripts/check-apk-solver.sh
 ```
 
-These validate the shell configuration logic, package-list generation, display-manager/session compatibility, bootloader/kernel option handling, and real package conflicts.
+CLI/TUI smoke tests:
 
-A real Docker/macOS build was also tested with GNOME + Bluetooth + GRUB UEFI to verify the previous `bluez-obexd`/`obexd-enhanced` conflict is fixed.
+```sh
+scripts/test-cli.sh
+```
+
+## Troubleshooting
+
+### USB does not boot
+
+- Confirm image was flashed raw to whole disk.
+- Try GRUB bootloader.
+- Disable Secure Boot.
+- Try UEFI and legacy entries.
+- Try another USB port.
+- Rebuild with full firmware.
+
+### No Wi‑Fi or Bluetooth
+
+- Use full firmware.
+- Enable Wi‑Fi/Bluetooth toggles.
+- Prefer NetworkManager for desktops.
+- Check device support in Alpine for that chipset.
+
+### No desktop audio control
+
+- Use PipeWire audio.
+- Rebuild with current image: generated desktops autostart PipeWire session components under OpenRC/elogind.
+- Check logs after boot:
+
+```sh
+ls /tmp/alpine-usb-*pipewire*.log /tmp/alpine-usb-wireplumber.log 2>/dev/null
+```
+
+### GUI modal appears in wrong place on macOS tiling WMs
+
+The Qt GUI forces dialogs visible and centered. If using a tiling window manager such as AeroSpace, keep Python/PySide windows floating if your WM moves modal dialogs away from their parent window.
 
 ## License
 
-MIT
+This project is licensed under **GNU General Public License v2.0 only**. See [`LICENSE`](LICENSE).

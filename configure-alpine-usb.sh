@@ -235,7 +235,7 @@ if [ "$NETWORK_BACKEND" = "networkmanager" ]; then
 fi
 
 case "$AUDIO" in
-  pipewire) append_packages pipewire wireplumber pipewire-pulse alsa-utils pavucontrol ;;
+  pipewire) append_packages pipewire wireplumber pipewire-pulse alsa-utils alsa-plugins-pulse pavucontrol ;;
   alsa) append_packages alsa-utils ;;
   none) ;;
 esac
@@ -562,6 +562,41 @@ EOF
 Type=Application
 Name=Network Manager Applet
 Exec=/usr/local/bin/alpine-usb-nm-applet
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
+if [ "$AUDIO" = "pipewire" ] && [ "$GRAPHICAL" = "1" ]; then
+  cat > /usr/local/bin/alpine-usb-pipewire-session <<'EOF'
+#!/bin/sh
+# Start the desktop audio session explicitly. On Alpine/OpenRC there is no
+# systemd --user manager, so do not rely on systemd user units for PipeWire.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+start_once() {
+  name="$1"; shift
+  if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -x "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  command -v "$name" >/dev/null 2>&1 || return 0
+  "$@" >/tmp/alpine-usb-"$name".log 2>&1 &
+}
+
+start_once pipewire pipewire
+sleep 1
+start_once wireplumber wireplumber
+sleep 1
+start_once pipewire-pulse pipewire-pulse
+EOF
+  chmod +x /usr/local/bin/alpine-usb-pipewire-session
+  cat > /etc/xdg/autostart/alpine-usb-pipewire-session.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=PipeWire audio session
+Exec=/usr/local/bin/alpine-usb-pipewire-session
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
