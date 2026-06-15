@@ -971,7 +971,7 @@ class Main(QWidget):
                 ("color:#fbbf24;" if any_dirty else "color:#93c5fd;")
             )
         if hasattr(self, "save_config_button"):
-            self.save_config_button.setText(("● " if any_dirty else "") + "Save image configuration")
+            self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
 
     def load_saved_config_if_available(self):
         try:
@@ -988,7 +988,7 @@ class Main(QWidget):
         SAVED_CONFIG_PATH.write_text(json.dumps(self.saved_config_snapshot, indent=2, sort_keys=True))
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(self, "info", APP_TITLE, f"Image configuration saved:\n{SAVED_CONFIG_PATH}")
+        modal(self, "info", APP_TITLE, f"Configuration saved:\n{SAVED_CONFIG_PATH}")
 
     def restore_defaults(self):
         self.saved_config_snapshot = dict(self.default_config)
@@ -1104,7 +1104,7 @@ class Main(QWidget):
         self.add_config_sections(content_layout)
 
         config_actions = QHBoxLayout(); config_actions.setSpacing(8)
-        self.save_config_button = QPushButton("Save image configuration")
+        self.save_config_button = QPushButton("Save configuration")
         self.save_config_button.setIcon(make_button_icon("check"))
         self.save_config_button.clicked.connect(self.save_config)
         self.restore_defaults_button = QPushButton("Restore defaults")
