@@ -4,8 +4,36 @@ from __future__ import annotations
 import io, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
+def prepare_frozen_runtime(bundle_dir: Path) -> Path:
+    """Copy bundled build resources to a writable, stable directory.
+
+    PyInstaller app bundles keep data files inside the .app internals. Docker
+    Desktop can fail to mount those paths reliably, and the build scripts also
+    create work files next to themselves. Use /tmp/alpine-usb-installer/app-runtime
+    instead and make sure required files/directories exist there.
+    """
+    runtime = Path(tempfile.gettempdir()) / "alpine-usb-installer" / "app-runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
+        src = bundle_dir / name
+        if src.exists():
+            dst = runtime / name
+            shutil.copy2(src, dst)
+            if name.endswith(".sh"):
+                dst.chmod(0o755)
+    src_efi = bundle_dir / "efi-fallback"
+    dst_efi = runtime / "efi-fallback"
+    if src_efi.exists():
+        if dst_efi.exists():
+            shutil.rmtree(dst_efi)
+        shutil.copytree(src_efi, dst_efi)
+    (runtime / ".work").mkdir(exist_ok=True)
+    return runtime
+
+
 if getattr(sys, "frozen", False):
-    SCRIPT_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    SCRIPT_DIR = prepare_frozen_runtime(BUNDLE_DIR)
 else:
     SCRIPT_DIR = Path(__file__).resolve().parent
     QT_VENV_PYTHON = SCRIPT_DIR / ".qtvenv" / "bin" / "python"
@@ -526,8 +554,15 @@ class BuildWorker(QThread):
             env = os.environ.copy()
             env.update({k: str(v) for k, v in self.config_env.items()})
             env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
-            cmd = ["./build-alpine-usb.sh"]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            if not script.exists():
+                raise RuntimeError(f"Build script not found: {script}")
+            script.chmod(0o755)
+            configure = SCRIPT_DIR / "configure-alpine-usb.sh"
+            if configure.exists():
+                configure.chmod(0o755)
+            cmd = [str(script)]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(SCRIPT_DIR))
             for line in proc.stdout or []:
                 self.log.emit(line.rstrip())
             code = proc.wait()
@@ -1185,6 +1220,7 @@ class Main(QWidget):
             modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
             return
         output_path = self.image.text().strip() or str(DEFAULT_OUTPUT_PATH)
+        Path(output_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self.refresh_build_summary()
         env = self.collect_build_env()
         validation_error = self.validate_build_config(env)
