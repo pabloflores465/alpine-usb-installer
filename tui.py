@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "display_manager": "auto",
     "default_session": "auto",
     "wms": [],
-    "browser": "firefox-esr",
+    "browser": "firefox",
     "audio": "pipewire",
     "network": "networkmanager",
     "wifi": True,

@@ -817,7 +817,7 @@ class Main(QWidget):
             self.wm_checks[key] = QCheckBox()
             self.wm_checks[key].setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.wm_checks[key].setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
-        self.browser = QComboBox(); add_combo_items(self.browser, [("Firefox ESR", "firefox-esr"), ("Firefox", "firefox"), ("Chromium", "chromium"), ("None", "none")])
+        self.browser = QComboBox(); add_combo_items(self.browser, [("Firefox", "firefox"), ("Firefox ESR", "firefox-esr"), ("Chromium", "chromium"), ("None", "none")])
         self.audio = QComboBox(); add_combo_items(self.audio, [("PipeWire", "pipewire"), ("ALSA only", "alsa"), ("None", "none")])
 
         self.network = QComboBox(); add_combo_items(self.network, [("NetworkManager", "networkmanager"), ("Classic / none", "none")])

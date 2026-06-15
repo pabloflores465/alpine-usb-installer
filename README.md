@@ -159,7 +159,7 @@ Defaults are generic and distro-like:
 | Network | NetworkManager + Wi‑Fi |
 | Bluetooth | enabled |
 | Audio | PipeWire + WirePlumber + pipewire-pulse |
-| Browser | Firefox ESR |
+| Browser | Firefox |
 | USB auto-resize | enabled |
 
 ## Configuration guide

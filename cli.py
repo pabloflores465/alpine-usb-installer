@@ -469,7 +469,7 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument("--default-session", default="auto", choices=["auto", "xfce", "gnome", "plasma", "mate", "lxqt", *VALID_WMS, "shell"])
     parser.add_argument("--wm", action="append", choices=VALID_WMS, help="Add optional window manager; can be repeated")
     parser.add_argument("--tiling-wms", default="", help="Optional comma/space separated WM list")
-    parser.add_argument("--browser", default="firefox-esr", choices=["firefox-esr", "firefox", "chromium", "none"])
+    parser.add_argument("--browser", default="firefox", choices=["firefox-esr", "firefox", "chromium", "none"])
     parser.add_argument("--audio", default="pipewire", choices=["pipewire", "alsa", "none"])
     parser.add_argument("--network", default="networkmanager", choices=["networkmanager", "none"])
     parser.add_argument("--wifi", dest="wifi", action="store_true", default=True)
