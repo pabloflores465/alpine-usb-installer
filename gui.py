@@ -512,7 +512,12 @@ class CollapsibleSection(QWidget):
         )
         root.addWidget(self.toggle)
         self.body = QWidget()
-        self.body.setStyleSheet("background:#111827;border:1px solid #374151;border-top:0;border-bottom-left-radius:6px;border-bottom-right-radius:6px;")
+        self.body.setObjectName("sectionBody")
+        self.body.setStyleSheet(
+            "QWidget#sectionBody { background:#0b1220;border:1px solid #374151;border-top:0;"
+            "border-top-left-radius:0px;border-top-right-radius:0px;"
+            "border-bottom-left-radius:6px;border-bottom-right-radius:6px; }"
+        )
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(10, 10, 10, 10)
         self.body_layout.setSpacing(8)
@@ -530,7 +535,7 @@ class CollapsibleSection(QWidget):
                 "margin:0px;padding:6px 10px;background:#1f2937;"
                 "border:1px solid #374151;border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
-                "border-bottom-left-radius:0;border-bottom-right-radius:0;"
+                "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
             )
         else:
             self.toggle.setStyleSheet(
@@ -741,7 +746,10 @@ class Main(QWidget):
     def make_config_widgets(self):
         self.image_size = QComboBox(); self.image_size.setEditable(True)
         add_combo_items(self.image_size, ["16G", "32G", "64G", "128G"])
-        self.auto_resize = QCheckBox("Use the full USB drive on first boot (auto-expand root filesystem)")
+        self.auto_resize_label = "Use the full USB drive on first boot (auto-expand root filesystem)"
+        self.auto_resize = QCheckBox()
+        self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
         self.alpine_branch = QComboBox(); self.alpine_branch.setEditable(True)
         add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
@@ -750,7 +758,10 @@ class Main(QWidget):
         self.username = QLineEdit("alpine")
         self.password = QLineEdit("alpine"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.root_password = QLineEdit("alpine"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.show_passwords = QCheckBox("Show passwords")
+        self.show_passwords_label = "Show passwords"
+        self.show_passwords = QCheckBox()
+        self.show_passwords.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.show_passwords.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.show_passwords.stateChanged.connect(self.toggle_password_visibility)
         self.timezone = QComboBox(); self.timezone.setEditable(True)
         add_combo_items(self.timezone, ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"])
@@ -781,18 +792,24 @@ class Main(QWidget):
             ("Openbox", "openbox"), ("labwc", "labwc"), ("Shell only", "shell"),
         ])
         self.wm_checks: dict[str, QCheckBox] = {}
+        self.wm_labels: dict[str, str] = {}
         for key, label in [
             ("i3", "i3 (X11 tiling)"), ("sway", "Sway (Wayland tiling)"),
             ("hyprland", "Hyprland (Wayland tiling)"), ("awesome", "AwesomeWM"),
             ("bspwm", "bspwm"), ("openbox", "Openbox"), ("labwc", "labwc (Wayland)"),
         ]:
-            self.wm_checks[key] = QCheckBox(label)
+            self.wm_labels[key] = label
+            self.wm_checks[key] = QCheckBox()
+            self.wm_checks[key].setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.wm_checks[key].setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.browser = QComboBox(); add_combo_items(self.browser, [("Firefox ESR", "firefox-esr"), ("Firefox", "firefox"), ("Chromium", "chromium"), ("None", "none")])
         self.audio = QComboBox(); add_combo_items(self.audio, [("PipeWire", "pipewire"), ("ALSA only", "alsa"), ("None", "none")])
 
         self.network = QComboBox(); add_combo_items(self.network, [("NetworkManager", "networkmanager"), ("Classic / none", "none")])
-        self.wifi = QCheckBox("Wi-Fi support (wpa_supplicant, wireless-regdb, NM Wi-Fi)"); self.wifi.setChecked(True)
-        self.bluetooth = QCheckBox("Bluetooth support (bluez, blueman, firmware)"); self.bluetooth.setChecked(True)
+        self.wifi_label = "Wi-Fi support (wpa_supplicant, wireless-regdb, NM Wi-Fi)"
+        self.wifi = QCheckBox(); self.wifi.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.wifi.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False); self.wifi.setChecked(True)
+        self.bluetooth_label = "Bluetooth support (bluez, blueman, firmware)"
+        self.bluetooth = QCheckBox(); self.bluetooth.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.bluetooth.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False); self.bluetooth.setChecked(True)
 
         self.bootloader = QComboBox(); add_combo_items(self.bootloader, [("GRUB removable UEFI", "grub"), ("systemd-boot removable UEFI", "systemd-boot")])
         self.kernel = QComboBox(); add_combo_items(self.kernel, [("linux-lts", "lts"), ("linux-stable", "stable")])
@@ -836,6 +853,21 @@ class Main(QWidget):
         for widget in [self.auto_resize, self.wifi, self.bluetooth, *self.wm_checks.values()]:
             widget.stateChanged.connect(changed)
 
+    def checkbox_row(self, checkbox: QCheckBox, text: str) -> QWidget:
+        row = QWidget()
+        row.setStyleSheet("background:transparent;border:0;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        label = QLabel(text)
+        label.setStyleSheet("background:transparent;border:0;color:#ffffff;")
+        label.mousePressEvent = lambda _event: checkbox.toggle()
+        row.mousePressEvent = lambda _event: checkbox.toggle()
+        layout.addWidget(checkbox)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return row
+
     def toggle_password_visibility(self):
         mode = QLineEdit.EchoMode.Normal if self.show_passwords.isChecked() else QLineEdit.EchoMode.Password
         self.password.setEchoMode(mode)
@@ -847,10 +879,11 @@ class Main(QWidget):
         layout.setSpacing(8)
         self.setStyleSheet("""
             QWidget { background:#111827; color:#ffffff; }
-            QLabel { color:#ffffff; margin:0px; padding:0px; }
-            QLineEdit, QComboBox { background:#1f2937; color:#ffffff; border:1px solid #4b5563; border-radius:4px; padding:2px 5px; min-height:24px; }
+            QLabel { color:#ffffff; margin:0px; padding:0px; border:0; background:transparent; }
+            QFormLayout QLabel { border:0; background:transparent; }
+            QLineEdit, QComboBox { background:#1f2937; color:#ffffff; border:0; border-radius:4px; padding:2px 5px; min-height:24px; }
             QComboBox QAbstractItemView { background:#1f2937; color:#ffffff; selection-background-color:#2563eb; }
-            QCheckBox { color:#ffffff; spacing:8px; min-height:22px; }
+            QCheckBox { color:#ffffff; spacing:8px; min-height:22px; border:0; background:transparent; padding:0px; }
             QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
             QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:3px 8px; min-height:24px; }
             QPushButton:hover { background:#1d4ed8; }
@@ -945,7 +978,7 @@ class Main(QWidget):
         for label, widget in [
             ("Minimum image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
             ("Hostname:", self.hostname), ("User:", self.username), ("User password:", self.password),
-            ("Root password:", self.root_password), ("", self.show_passwords), ("Timezone:", self.timezone), ("Locale:", self.locale),
+            ("Root password:", self.root_password), ("", self.checkbox_row(self.show_passwords, self.show_passwords_label)), ("Timezone:", self.timezone), ("Locale:", self.locale),
             ("Console keymap:", self.console_keymap), ("XKB layout:", self.xkb_layout), ("XKB variant:", self.xkb_variant),
             ("XKB model:", self.xkb_model),
         ]:
@@ -957,21 +990,21 @@ class Main(QWidget):
         dform.addRow("Desktop:", self.desktop); dform.addRow("Display manager:", self.display_manager); dform.addRow("Default session:", self.default_session)
         dform.addRow("Browser:", self.browser); dform.addRow("Audio:", self.audio)
         desktop.body_layout.addLayout(dform)
-        wm_label = QLabel("Optional tiling/window managers:"); wm_label.setStyleSheet("color:#cbd5e1;font-weight:bold;")
+        wm_label = QLabel("Optional tiling/window managers:"); wm_label.setStyleSheet("color:#cbd5e1;font-weight:bold;border:0;background:transparent;")
         desktop.body_layout.addWidget(wm_label)
         wm_grid = QGridLayout(); wm_grid.setHorizontalSpacing(18); wm_grid.setVerticalSpacing(6)
-        for i, cb in enumerate(self.wm_checks.values()):
-            wm_grid.addWidget(cb, i // 2, i % 2)
+        for i, (key, cb) in enumerate(self.wm_checks.items()):
+            wm_grid.addWidget(self.checkbox_row(cb, self.wm_labels[key]), i // 2, i % 2)
         desktop.body_layout.addLayout(wm_grid); parent_layout.addWidget(desktop)
 
         network = CollapsibleSection("Network, Wi‑Fi and Bluetooth", collapsed=True)
         nform = QFormLayout(); nform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); nform.setHorizontalSpacing(12); nform.setVerticalSpacing(8)
-        nform.addRow("Network backend:", self.network); nform.addRow("Wi‑Fi:", self.wifi); nform.addRow("Bluetooth:", self.bluetooth)
+        nform.addRow("Network backend:", self.network); nform.addRow("Wi‑Fi:", self.checkbox_row(self.wifi, self.wifi_label)); nform.addRow("Bluetooth:", self.checkbox_row(self.bluetooth, self.bluetooth_label))
         network.body_layout.addLayout(nform); parent_layout.addWidget(network)
 
         boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True)
         bform = QFormLayout(); bform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); bform.setHorizontalSpacing(12); bform.setVerticalSpacing(8)
-        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout); bform.addRow("USB space:", self.auto_resize)
+        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout); bform.addRow("USB space:", self.checkbox_row(self.auto_resize, self.auto_resize_label))
         boot.body_layout.addLayout(bform); parent_layout.addWidget(boot)
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
