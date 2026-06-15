@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import io, json, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
+import html, io, json, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
 def prepare_frozen_runtime(bundle_dir: Path) -> Path:
@@ -59,7 +59,7 @@ HOST_PATHS = [
 ]
 os.environ["PATH"] = os.pathsep.join([p for p in HOST_PATHS if Path(p).exists()] + [os.environ.get("PATH", "")])
 
-from PySide6.QtCore import QPoint, Qt, QThread, Signal, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog,
@@ -572,6 +572,16 @@ class CollapsibleSection(QWidget):
         self.update_state()
 
 
+class PackageSuggestionList(QListWidget):
+    accept_suggestion = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Right, Qt.Key.Key_Tab):
+            self.accept_suggestion.emit()
+            return
+        super().keyPressEvent(event)
+
+
 class BuildWorker(QThread):
     log = Signal(str)
     done = Signal(bool, str)
@@ -843,22 +853,22 @@ class Main(QWidget):
         self.firmware = QComboBox(); add_combo_items(self.firmware, [("Full linux-firmware (recommended)", "full"), ("linux-firmware-none", "none")])
         self.boot_timeout = QLineEdit("3")
         self.extra_packages = QLineEdit("")
-        self.extra_packages.setPlaceholderText("Space-separated apk packages, e.g. neovim tmux docker")
+        self.extra_packages.setPlaceholderText("Type package names separated by spaces; suggestions search as you type")
         self.package_search_worker = None
-        self.package_search = QLineEdit("")
-        self.package_search.setPlaceholderText("Search Alpine packages, e.g. firefox, docker, neovim")
-        self.package_search_button = QPushButton("Search")
-        self.package_search_button.setIcon(make_button_icon("refresh"))
-        self.package_search_results = QListWidget()
+        self.package_search_timer = QTimer(self)
+        self.package_search_timer.setSingleShot(True)
+        self.package_search_timer.setInterval(500)
+        self.package_search_timer.timeout.connect(self.search_packages)
+        self.package_search_active_query = ""
+        self.package_search_pending = False
+        self.package_search_results = PackageSuggestionList()
         self.package_search_results.setMaximumHeight(150)
-        self.package_search_results.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.package_add_button = QPushButton("Add selected package(s)")
-        self.package_add_button.setIcon(make_button_icon("check"))
-        self.package_search_status = QLabel("Top 10 suggestions from Alpine main/community.")
+        self.package_search_results.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.package_search_results.accept_suggestion.connect(self.add_selected_packages)
+        self.package_search_status = QLabel("Type a package name for suggestions. ↓ selects, →/Enter accepts.")
         self.package_search_status.setStyleSheet("color:#cbd5e1;font-size:12px;")
-        self.package_search.returnPressed.connect(self.search_packages)
-        self.package_search_button.clicked.connect(self.search_packages)
-        self.package_add_button.clicked.connect(self.add_selected_packages)
+        self.extra_packages.installEventFilter(self)
+        self.extra_packages.textChanged.connect(self.schedule_package_search)
         self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
         self.default_config = self.snapshot_config()
         self.saved_config_snapshot = dict(self.default_config)
@@ -1228,33 +1238,58 @@ class Main(QWidget):
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
         self.sections["extra"] = extra
-        extra.body_layout.addWidget(QLabel("Optional package names are passed directly to apk add. You can type several packages separated by spaces."))
-        extra.body_layout.addWidget(self.config_label("extra_packages", "Extra packages:"))
+        extra.body_layout.addWidget(QLabel("Type package names separated by spaces. Suggestions search Alpine main/community after a short delay."))
+        extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
-        extra.body_layout.addWidget(QLabel("Search official Alpine packages (enabled repos: main + community):"))
-        search_row = QHBoxLayout(); search_row.setSpacing(8)
-        search_row.addWidget(self.package_search, 1); search_row.addWidget(self.package_search_button)
-        extra.body_layout.addLayout(search_row)
         extra.body_layout.addWidget(self.package_search_results)
-        add_row = QHBoxLayout(); add_row.setSpacing(8)
-        add_row.addWidget(self.package_add_button); add_row.addWidget(self.package_search_status, 1)
-        extra.body_layout.addLayout(add_row)
+        extra.body_layout.addWidget(self.package_search_status)
         parent_layout.addWidget(extra)
 
-    def search_packages(self):
-        query = self.package_search.text().strip()
+    def current_package_query(self) -> str:
+        text = self.extra_packages.text()
+        if not text or text[-1].isspace():
+            return ""
+        return re.split(r"\s+", text.strip())[-1]
+
+    def schedule_package_search(self):
+        query = self.current_package_query()
         if len(query) < 2:
-            self.package_search_status.setText("Type at least 2 characters to search.")
+            self.package_search_timer.stop()
+            self.package_search_results.clear()
+            self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
+            return
+        self.package_search_status.setText(f"Will search suggestions for '{query}'…")
+        self.package_search_timer.start()
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "extra_packages", None) and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Down and self.package_search_results.count():
+                if self.package_search_results.currentRow() < 0:
+                    self.package_search_results.setCurrentRow(0)
+                self.package_search_results.setFocus()
+                return True
+            if event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab):
+                at_end = self.extra_packages.cursorPosition() == len(self.extra_packages.text())
+                if at_end and self.package_search_results.count():
+                    self.add_selected_packages()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def search_packages(self):
+        query = self.current_package_query()
+        if len(query) < 2:
+            self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
             self.package_search_results.clear()
             return
         if self.thread_running(self.package_search_worker):
-            self.package_search_status.setText("Search already running…")
+            self.package_search_pending = True
+            self.package_search_status.setText("Search running; queued latest text…")
             return
         branch = self.alpine_branch.currentText().strip() or "latest-stable"
         arch = combo_value(self.arch) or "x86_64"
+        self.package_search_active_query = query
         self.package_search_results.clear()
         self.package_search_status.setText(f"Searching {branch}/{arch} main + community…")
-        self.package_search_button.setEnabled(False)
         self.package_search_worker = ApkSearchWorker(branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
@@ -1262,6 +1297,9 @@ class Main(QWidget):
         self.package_search_worker.start()
 
     def package_search_done(self, query: str, results: list):
+        if query != self.current_package_query():
+            self.package_search_pending = True
+            return
         self.package_search_results.clear()
         if not results:
             self.package_search_status.setText(f"No official packages found for '{query}'.")
@@ -1272,16 +1310,23 @@ class Main(QWidget):
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, package["name"])
             self.package_search_results.addItem(item)
-        self.package_search_status.setText(f"Top {len(results)} suggestions. Double-click or select and add.")
+        self.package_search_results.setCurrentRow(0)
+        first = self.package_search_results.item(0)
+        if first:
+            first.setSelected(True)
+        self.package_search_status.setText(f"Top {len(results)} suggestions. ↓/↑ moves, →/Enter or double-click accepts.")
 
     def package_search_failed(self, query: str, message: str):
         self.package_search_results.clear()
         self.package_search_status.setText(f"Search failed for '{query}': {message}")
 
     def package_search_finished(self):
-        self.package_search_button.setEnabled(True)
         if self.sender() is self.package_search_worker:
             self.package_search_worker = None
+        if self.package_search_pending:
+            self.package_search_pending = False
+            if len(self.current_package_query()) >= 2:
+                self.package_search_timer.start(100)
         self.update_selected()
 
     def add_selected_packages(self):
@@ -1293,15 +1338,22 @@ class Main(QWidget):
         if not names:
             self.package_search_status.setText("Select one or more suggestions first.")
             return
-        existing = [pkg for pkg in re.split(r"\s+", self.extra_packages.text().strip()) if pkg]
-        existing_set = set(existing)
+        text = self.extra_packages.text()
+        trailing_space = bool(text and text[-1].isspace())
+        tokens = [pkg for pkg in re.split(r"\s+", text.strip()) if pkg]
+        query = self.current_package_query()
+        if query and tokens and tokens[-1] == query and not trailing_space:
+            tokens = tokens[:-1]
+        existing_set = set(tokens)
         added = []
         for name in names:
             if name not in existing_set:
-                existing.append(name)
+                tokens.append(name)
                 existing_set.add(name)
                 added.append(name)
-        self.extra_packages.setText(" ".join(existing))
+        self.extra_packages.setText(" ".join(tokens) + (" " if tokens else ""))
+        self.extra_packages.setCursorPosition(len(self.extra_packages.text()))
+        self.package_search_results.clear()
         self.package_search_status.setText("Added: " + ", ".join(added) if added else "Selected package(s) already added.")
 
     def update_console_style(self, expanded: bool):
@@ -1381,8 +1433,8 @@ class Main(QWidget):
             self.xkb_model, self.desktop, self.display_manager, self.default_session,
             self.browser, self.audio, self.network, self.wifi, self.bluetooth,
             self.bootloader, self.kernel, self.firmware, self.boot_timeout,
-            self.auto_resize, self.extra_packages, self.package_search,
-            self.package_search_button, self.package_search_results, self.package_add_button,
+            self.auto_resize, self.extra_packages,
+            self.package_search_results,
             self.save_config_button, self.restore_defaults_button,
         ] + list(self.wm_checks.values())
         for widget in widgets:
@@ -1450,48 +1502,64 @@ class Main(QWidget):
 
     def config_summary_text(self, env: dict[str, str]) -> str:
         return (
-            f"Size: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | "
-            f"Desktop: {env['ALPINE_USB_DESKTOP']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'} | "
-            f"DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Kernel: linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | "
-            f"Bootloader: {env['ALPINE_USB_BOOTLOADER']} | Auto-resize USB: {env['ALPINE_USB_AUTO_RESIZE']} | Wi‑Fi: {env['ALPINE_USB_WIFI']} | Bluetooth: {env['ALPINE_USB_BLUETOOTH']} | "
-            f"Keyboard: {env['ALPINE_USB_XKB_LAYOUT']}"
+            f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
+            f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
+            f"Locale: {env['ALPINE_USB_LOCALE']} | TZ: {env['ALPINE_USB_TIMEZONE']} | console={env['ALPINE_USB_CONSOLE_KEYMAP']} | xkb={env['ALPINE_USB_XKB_LAYOUT']} {env['ALPINE_USB_XKB_VARIANT'] or ''} model={env['ALPINE_USB_XKB_MODEL']}\n"
+            f"Desktop: {env['ALPINE_USB_DESKTOP']} | DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Session: {env['ALPINE_USB_DEFAULT_SESSION']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'}\n"
+            f"Apps: browser={env['ALPINE_USB_BROWSER']} | audio={env['ALPINE_USB_AUDIO']}\n"
+            f"Hardware/network: network={env['ALPINE_USB_NETWORK']} | Wi‑Fi={env['ALPINE_USB_WIFI']} | Bluetooth={env['ALPINE_USB_BLUETOOTH']}\n"
+            f"Boot: {env['ALPINE_USB_BOOTLOADER']} | linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | firmware={env['ALPINE_USB_FIRMWARE']} | timeout={env['ALPINE_USB_BOOT_TIMEOUT']} | auto-resize={env['ALPINE_USB_AUTO_RESIZE']}\n"
+            f"Extra packages: {env['ALPINE_USB_EXTRA_PACKAGES'] or 'none'}"
         )
 
     def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
         return {
-            "IMAGE_SIZE": str(cfg.get("image_size", "16G")),
-            "ALPINE_BRANCH": str(cfg.get("alpine_branch", "latest-stable")),
-            "ARCH": str(cfg.get("arch", "x86_64")),
-            "ALPINE_USB_DESKTOP": str(cfg.get("desktop", "xfce")),
-            "ALPINE_USB_DISPLAY_MANAGER": str(cfg.get("display_manager", "auto")),
-            "ALPINE_USB_DEFAULT_SESSION": str(cfg.get("default_session", "auto")),
-            "ALPINE_USB_TILING_WMS": " ".join(cfg.get("wms", [])),
-            "ALPINE_USB_BOOTLOADER": str(cfg.get("bootloader", "grub")),
-            "ALPINE_USB_KERNEL_FLAVOR": str(cfg.get("kernel", "lts")),
-            "ALPINE_USB_FIRMWARE": str(cfg.get("firmware", "full")),
-            "ALPINE_USB_AUTO_RESIZE": "1" if cfg.get("auto_resize", True) else "0",
-            "ALPINE_USB_WIFI": "1" if cfg.get("wifi", True) else "0",
-            "ALPINE_USB_BLUETOOTH": "1" if cfg.get("bluetooth", True) else "0",
-            "ALPINE_USB_AUDIO": str(cfg.get("audio", "pipewire")),
-            "ALPINE_USB_NETWORK": str(cfg.get("network", "networkmanager")),
-            "ALPINE_USB_LOCALE": str(cfg.get("locale", "en_US.UTF-8")),
-            "ALPINE_USB_TIMEZONE": str(cfg.get("timezone", "UTC")),
-            "ALPINE_USB_XKB_LAYOUT": str(cfg.get("xkb_layout", "us")),
-            "ALPINE_USB_EXTRA_PACKAGES": str(cfg.get("extra_packages", "")),
+            "image": str(cfg.get("image", DEFAULT_OUTPUT_PATH)),
+            "image_size": str(cfg.get("image_size", "16G")),
+            "alpine_branch": str(cfg.get("alpine_branch", "latest-stable")),
+            "arch": str(cfg.get("arch", "x86_64")),
+            "hostname": str(cfg.get("hostname", "alpine-usb")),
+            "username": str(cfg.get("username", "alpine")),
+            "timezone": str(cfg.get("timezone", "UTC")),
+            "locale": str(cfg.get("locale", "en_US.UTF-8")),
+            "console_keymap": str(cfg.get("console_keymap", "us")),
+            "xkb_layout": str(cfg.get("xkb_layout", "us")),
+            "xkb_variant": str(cfg.get("xkb_variant", "")),
+            "xkb_model": str(cfg.get("xkb_model", "pc105")),
+            "desktop": str(cfg.get("desktop", "xfce")),
+            "display_manager": str(cfg.get("display_manager", "auto")),
+            "default_session": str(cfg.get("default_session", "auto")),
+            "wms": " ".join(cfg.get("wms", [])),
+            "browser": str(cfg.get("browser", "firefox")),
+            "audio": str(cfg.get("audio", "pipewire")),
+            "network": str(cfg.get("network", "networkmanager")),
+            "wifi": "1" if cfg.get("wifi", True) else "0",
+            "bluetooth": "1" if cfg.get("bluetooth", True) else "0",
+            "bootloader": str(cfg.get("bootloader", "grub")),
+            "kernel": str(cfg.get("kernel", "lts")),
+            "firmware": str(cfg.get("firmware", "full")),
+            "boot_timeout": str(cfg.get("boot_timeout", "3")),
+            "auto_resize": "1" if cfg.get("auto_resize", True) else "0",
+            "extra_packages": str(cfg.get("extra_packages", "")),
         }
 
     def refresh_build_summary(self):
         if not hasattr(self, "build_summary"):
             return
         env = self.summary_env_from_config(getattr(self, "saved_config_snapshot", self.snapshot_config()))
-        extra = env.get("ALPINE_USB_EXTRA_PACKAGES", "").strip() or "none"
+        e = {key: html.escape(str(value)) for key, value in env.items()}
+        extra = e.get("extra_packages", "").strip() or "none"
+        wms = e.get("wms", "").strip() or "none"
         self.build_summary.setText(
             "<b>Saved image configuration</b><br>"
-            f"<b>Image:</b> {env['IMAGE_SIZE']} · Alpine {env['ALPINE_BRANCH']} · {env['ARCH']}<br>"
-            f"<b>Desktop:</b> {env['ALPINE_USB_DESKTOP']} · DM {env['ALPINE_USB_DISPLAY_MANAGER']} · Session {env['ALPINE_USB_DEFAULT_SESSION']} · WMs {env['ALPINE_USB_TILING_WMS'] or 'none'}<br>"
-            f"<b>Boot:</b> {env['ALPINE_USB_BOOTLOADER']} · linux-{env['ALPINE_USB_KERNEL_FLAVOR']} · firmware {env['ALPINE_USB_FIRMWARE']} · auto-resize {env['ALPINE_USB_AUTO_RESIZE']}<br>"
-            f"<b>Hardware:</b> Wi‑Fi {env['ALPINE_USB_WIFI']} · Bluetooth {env['ALPINE_USB_BLUETOOTH']} · Audio {env['ALPINE_USB_AUDIO']} · Network {env['ALPINE_USB_NETWORK']}<br>"
-            f"<b>Locale:</b> {env['ALPINE_USB_LOCALE']} · TZ {env['ALPINE_USB_TIMEZONE']} · Keyboard {env['ALPINE_USB_XKB_LAYOUT']}<br>"
+            f"<b>Output:</b> {e['image']}<br>"
+            f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
+            f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
+            f"<b>Locale:</b> {e['locale']} · timezone {e['timezone']} · console keymap {e['console_keymap']} · XKB {e['xkb_layout']} · variant {e['xkb_variant'] or 'none'} · model {e['xkb_model']}<br>"
+            f"<b>Desktop:</b> {e['desktop']} · display manager {e['display_manager']} · session {e['default_session']} · WMs {wms}<br>"
+            f"<b>Apps/audio:</b> browser {e['browser']} · audio {e['audio']}<br>"
+            f"<b>Network/hardware:</b> backend {e['network']} · Wi‑Fi {e['wifi']} · Bluetooth {e['bluetooth']}<br>"
+            f"<b>Boot:</b> {e['bootloader']} · linux-{e['kernel']} · firmware {e['firmware']} · timeout {e['boot_timeout']} · auto-resize {e['auto_resize']}<br>"
             f"<b>Extra packages:</b> {extra}"
         )
 
@@ -1594,7 +1662,11 @@ class Main(QWidget):
         if ok:
             self.flash_progress.setValue(100)
         self.flash_progress.hide(); self.status.show(); self.status.setText(msg)
-        self.append_log(msg); self.set_busy(False)
+        self.append_log(msg)
+        if ok:
+            # USB is ejected; require explicit re-selection before another flash.
+            self.device.clear()
+        self.set_busy(False)
         # Let progress/status layout settle, then center completion modal over main window.
         QTimer.singleShot(0, lambda: modal(self, "info" if ok else "error", APP_TITLE, msg))
 
