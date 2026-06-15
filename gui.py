@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import io, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
+import io, json, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
 def prepare_frozen_runtime(bundle_dir: Path) -> Path:
@@ -72,6 +72,7 @@ APP_TITLE = "Alpine USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
+SAVED_CONFIG_PATH = Path.home() / ".config" / "alpine-usb-installer" / "gui-config.json"
 
 
 def make_app_icon() -> QIcon:
@@ -141,16 +142,18 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
 
 
 def ensure_widget_visible(widget: QWidget, parent: QWidget | None = None):
-    screen = (parent.screen() if parent and parent.screen() else None) or widget.screen() or QApplication.primaryScreen()
+    anchor = parent.window() if parent and parent.window() else parent
+    screen = (anchor.screen() if anchor and anchor.screen() else None) or widget.screen() or QApplication.primaryScreen()
     if not screen:
         return
     available = screen.availableGeometry()
+    widget.adjustSize()
     frame = widget.frameGeometry()
-    if frame.width() <= 0 or frame.height() <= 0:
-        widget.adjustSize()
-        frame = widget.frameGeometry()
-    if parent and parent.isVisible():
-        frame.moveCenter(parent.frameGeometry().center())
+    if anchor and anchor.isVisible():
+        # Use the top-level parent frame in global coordinates. This keeps
+        # completion dialogs centered over the main app even after progress/status
+        # widgets changed layout right before the modal opens.
+        frame.moveCenter(anchor.frameGeometry().center())
     else:
         frame.moveCenter(available.center())
     x = max(available.left(), min(frame.left(), available.right() - frame.width() + 1))
@@ -175,7 +178,11 @@ def exec_centered_dialog(box: QMessageBox, parent: QWidget | None = None):
     ensure_widget_visible(box, parent)
     box.raise_()
     box.activateWindow()
+    # Some macOS/tiling-WM combinations move transient dialogs after show().
+    # Re-center a few times during dialog startup.
     QTimer.singleShot(0, lambda: ensure_widget_visible(box, parent))
+    QTimer.singleShot(50, lambda: ensure_widget_visible(box, parent))
+    QTimer.singleShot(150, lambda: ensure_widget_visible(box, parent))
     return box.exec()
 
 
@@ -498,6 +505,7 @@ class CollapsibleSection(QWidget):
     def __init__(self, title: str, collapsed: bool = True, parent=None):
         super().__init__(parent)
         self.title = title
+        self.dirty = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -528,7 +536,8 @@ class CollapsibleSection(QWidget):
     def update_state(self):
         expanded = self.toggle.isChecked()
         self.body.setVisible(expanded)
-        self.toggle.setText(f"{self.title}  {'▼' if expanded else '▲'}")
+        dot = "  ●" if self.dirty else ""
+        self.toggle.setText(f"{self.title}{dot}  {'▼' if expanded else '▲'}")
         if expanded:
             self.toggle.setStyleSheet(
                 "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
@@ -543,6 +552,12 @@ class CollapsibleSection(QWidget):
                 "margin:0px;padding:6px 10px;background:#1f2937;"
                 "border:1px solid #374151;border-radius:6px;"
             )
+
+    def set_dirty(self, dirty: bool):
+        if self.dirty == dirty:
+            return
+        self.dirty = dirty
+        self.update_state()
 
 
 class BuildWorker(QThread):
@@ -833,11 +848,162 @@ class Main(QWidget):
         self.package_search_button.clicked.connect(self.search_packages)
         self.package_add_button.clicked.connect(self.add_selected_packages)
         self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
+        self.default_config = self.snapshot_config()
+        self.saved_config_snapshot = dict(self.default_config)
         self.connect_config_change_signals()
+        self.load_saved_config_if_available()
+
+    def set_combo_value(self, combo: QComboBox, value: str):
+        for i in range(combo.count()):
+            data = combo.itemData(i)
+            if str(data) == value or combo.itemText(i) == value:
+                combo.setCurrentIndex(i)
+                return
+        if combo.isEditable():
+            combo.setCurrentText(value)
+
+    def snapshot_config(self) -> dict:
+        return {
+            "image": self.image.text(),
+            "image_size": self.image_size.currentText(),
+            "alpine_branch": self.alpine_branch.currentText(),
+            "arch": combo_value(self.arch),
+            "hostname": self.hostname.text(),
+            "username": self.username.text(),
+            "password": self.password.text(),
+            "root_password": self.root_password.text(),
+            "timezone": self.timezone.currentText(),
+            "locale": self.locale.currentText(),
+            "console_keymap": self.console_keymap.currentText(),
+            "xkb_layout": combo_value(self.xkb_layout),
+            "xkb_variant": self.xkb_variant.text(),
+            "xkb_model": self.xkb_model.text(),
+            "desktop": combo_value(self.desktop),
+            "display_manager": combo_value(self.display_manager),
+            "default_session": combo_value(self.default_session),
+            "browser": combo_value(self.browser),
+            "audio": combo_value(self.audio),
+            "network": combo_value(self.network),
+            "wifi": self.wifi.isChecked(),
+            "bluetooth": self.bluetooth.isChecked(),
+            "bootloader": combo_value(self.bootloader),
+            "kernel": combo_value(self.kernel),
+            "firmware": combo_value(self.firmware),
+            "boot_timeout": self.boot_timeout.text(),
+            "auto_resize": self.auto_resize.isChecked(),
+            "extra_packages": self.extra_packages.text(),
+            "wms": self.selected_wms(),
+        }
+
+    def apply_config(self, cfg: dict):
+        self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
+        self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
+        self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
+        self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
+        self.username.setText(str(cfg.get("username", "alpine")))
+        self.password.setText(str(cfg.get("password", "alpine")))
+        self.root_password.setText(str(cfg.get("root_password", "alpine")))
+        self.timezone.setCurrentText(str(cfg.get("timezone", "UTC")))
+        self.locale.setCurrentText(str(cfg.get("locale", "en_US.UTF-8")))
+        self.console_keymap.setCurrentText(str(cfg.get("console_keymap", "us")))
+        self.set_combo_value(self.xkb_layout, str(cfg.get("xkb_layout", "us")))
+        self.xkb_variant.setText(str(cfg.get("xkb_variant", "")))
+        self.xkb_model.setText(str(cfg.get("xkb_model", "pc105")))
+        for key in ["desktop", "display_manager", "default_session", "browser", "audio", "network", "bootloader", "kernel", "firmware"]:
+            self.set_combo_value(getattr(self, key), str(cfg.get(key, combo_value(getattr(self, key)))))
+        self.wifi.setChecked(bool(cfg.get("wifi", True)))
+        self.bluetooth.setChecked(bool(cfg.get("bluetooth", True)))
+        self.boot_timeout.setText(str(cfg.get("boot_timeout", "3")))
+        self.auto_resize.setChecked(bool(cfg.get("auto_resize", True)))
+        self.extra_packages.setText(str(cfg.get("extra_packages", "")))
+        selected = set(cfg.get("wms", []))
+        for key, cb in self.wm_checks.items():
+            cb.setChecked(key in selected)
+        self.update_selected()
+        self.update_dirty_indicators()
+
+    def config_label(self, key: str, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet("color:#ffffff;border:0;background:transparent;")
+        self.field_labels[key] = label
+        self.field_label_text[key] = text
+        return label
+
+    def normalized_config_value(self, cfg: dict, key: str):
+        if key.startswith("wm:"):
+            wm = key.split(":", 1)[1]
+            return wm in set(cfg.get("wms", []))
+        if key == "wms":
+            return sorted(cfg.get("wms", []))
+        return cfg.get(key, self.default_config.get(key))
+
+    def config_dirty(self, key: str, current: dict | None = None) -> bool:
+        current = current or self.snapshot_config()
+        saved = getattr(self, "saved_config_snapshot", self.default_config)
+        return self.normalized_config_value(current, key) != self.normalized_config_value(saved, key)
+
+    def section_dirty(self, keys: list[str], current: dict | None = None) -> bool:
+        current = current or self.snapshot_config()
+        return any(self.config_dirty(key, current) for key in keys)
+
+    def update_dirty_indicators(self):
+        if not hasattr(self, "field_labels"):
+            return
+        current = self.snapshot_config()
+        for key, label in self.field_labels.items():
+            dirty = self.config_dirty(key, current)
+            base = self.field_label_text[key]
+            label.setText(("● " if dirty else "") + base)
+            label.setStyleSheet(
+                ("color:#fbbf24;" if dirty else "color:#ffffff;") +
+                "border:0;background:transparent;"
+            )
+        for name, keys in getattr(self, "section_fields", {}).items():
+            section = self.sections.get(name)
+            if section:
+                section.set_dirty(self.section_dirty(keys, current))
+        any_dirty = self.section_dirty(list(current.keys()), current)
+        if hasattr(self, "img_title"):
+            self.img_title.setText(self.image_title_base + ("  ●" if any_dirty else ""))
+            self.img_title.setStyleSheet(
+                "font-size:15px;font-weight:bold;margin:6px 0px 2px 0px;padding:0px;" +
+                ("color:#fbbf24;" if any_dirty else "color:#93c5fd;")
+            )
+        if hasattr(self, "save_config_button"):
+            self.save_config_button.setText(("● " if any_dirty else "") + "Save image configuration")
+
+    def load_saved_config_if_available(self):
+        try:
+            if SAVED_CONFIG_PATH.exists():
+                cfg = json.loads(SAVED_CONFIG_PATH.read_text())
+                self.saved_config_snapshot = dict(cfg)
+                self.apply_config(cfg)
+        except Exception:
+            pass
+
+    def save_config(self):
+        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.saved_config_snapshot = self.snapshot_config()
+        SAVED_CONFIG_PATH.write_text(json.dumps(self.saved_config_snapshot, indent=2, sort_keys=True))
+        self.refresh_build_summary()
+        self.update_dirty_indicators()
+        modal(self, "info", APP_TITLE, f"Image configuration saved:\n{SAVED_CONFIG_PATH}")
+
+    def restore_defaults(self):
+        self.saved_config_snapshot = dict(self.default_config)
+        self.apply_config(dict(self.default_config))
+        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SAVED_CONFIG_PATH.write_text(json.dumps(self.saved_config_snapshot, indent=2, sort_keys=True))
+        self.refresh_build_summary()
+        self.update_dirty_indicators()
+        modal(self, "info", APP_TITLE, "Default image configuration restored.")
 
     def connect_config_change_signals(self):
         def changed(*_args):
-            self.refresh_build_summary()
+            # The summary shows saved image config; dirty dots show unsaved changes.
+            self.update_selected()
+            self.update_dirty_indicators()
         for widget in [
             self.image_size, self.alpine_branch, self.arch, self.timezone, self.locale,
             self.console_keymap, self.xkb_layout, self.desktop, self.display_manager,
@@ -853,13 +1019,13 @@ class Main(QWidget):
         for widget in [self.auto_resize, self.wifi, self.bluetooth, *self.wm_checks.values()]:
             widget.stateChanged.connect(changed)
 
-    def checkbox_row(self, checkbox: QCheckBox, text: str) -> QWidget:
+    def checkbox_row(self, checkbox: QCheckBox, text: str, key: str | None = None) -> QWidget:
         row = QWidget()
         row.setStyleSheet("background:transparent;border:0;")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        label = QLabel(text)
+        label = self.config_label(key, text) if key else QLabel(text)
         label.setStyleSheet("background:transparent;border:0;color:#ffffff;")
         label.mousePressEvent = lambda _event: checkbox.toggle()
         row.mousePressEvent = lambda _event: checkbox.toggle()
@@ -917,20 +1083,39 @@ class Main(QWidget):
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
-        img_title = QLabel("1. Image configuration")
-        img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;")
-        content_layout.addWidget(img_title)
+        self.field_labels = {}
+        self.field_label_text = {}
+        self.sections = {}
+        self.section_fields = {}
+        self.image_title_base = "1. Image configuration"
+        self.img_title = QLabel(self.image_title_base)
+        self.img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;")
+        content_layout.addWidget(self.img_title)
         img_grid = QGridLayout(); img_grid.setColumnStretch(1, 1); img_grid.setHorizontalSpacing(10); img_grid.setVerticalSpacing(8)
         choose_output = QPushButton("Select path"); choose_output.setIcon(make_button_icon("folder")); choose_output.clicked.connect(self.choose_output_path); choose_output.setFixedWidth(120)
         self.build_button = QPushButton("Build image"); self.build_button.setIcon(make_button_icon("build")); self.build_button.clicked.connect(self.build_image); self.build_button.setFixedWidth(150)
         self.build_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;")
-        img_grid.addWidget(QLabel("Output path:"), 0, 0); img_grid.addWidget(self.image, 0, 1); img_grid.addWidget(choose_output, 0, 2)
+        img_grid.addWidget(self.config_label("image", "Output path:"), 0, 0); img_grid.addWidget(self.image, 0, 1); img_grid.addWidget(choose_output, 0, 2)
         content_layout.addLayout(img_grid)
 
         config_note = QLabel("Configuration sections are collapsed by default; open only what you want to customize.")
         config_note.setStyleSheet("color:#cbd5e1;font-size:12px;margin-top:6px;")
         content_layout.addWidget(config_note)
         self.add_config_sections(content_layout)
+
+        config_actions = QHBoxLayout(); config_actions.setSpacing(8)
+        self.save_config_button = QPushButton("Save image configuration")
+        self.save_config_button.setIcon(make_button_icon("check"))
+        self.save_config_button.clicked.connect(self.save_config)
+        self.restore_defaults_button = QPushButton("Restore defaults")
+        self.restore_defaults_button.setIcon(make_button_icon("refresh"))
+        self.restore_defaults_button.clicked.connect(self.restore_defaults)
+        self.restore_defaults_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;")
+        config_actions.addWidget(self.save_config_button)
+        config_actions.addWidget(self.restore_defaults_button)
+        config_actions.addStretch(1)
+        content_layout.addLayout(config_actions)
+        self.update_dirty_indicators()
 
         build_title = QLabel("2. Image build")
         build_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
@@ -973,42 +1158,66 @@ class Main(QWidget):
         console_box.addWidget(self.console_toggle); console_box.addWidget(self.console_stack); layout.addLayout(console_box)
 
     def add_config_sections(self, parent_layout: QVBoxLayout):
+        self.section_fields = {
+            "system": ["image_size", "alpine_branch", "arch", "hostname", "username", "password", "root_password", "timezone", "locale", "console_keymap", "xkb_layout", "xkb_variant", "xkb_model"],
+            "desktop": ["desktop", "display_manager", "default_session", "browser", "audio", "wms"],
+            "network": ["network", "wifi", "bluetooth"],
+            "boot": ["bootloader", "kernel", "firmware", "boot_timeout", "auto_resize"],
+            "extra": ["extra_packages"],
+        }
+
         system = CollapsibleSection("System, user, localization", collapsed=True)
+        self.sections["system"] = system
         form = QFormLayout(); form.setLabelAlignment(Qt.AlignmentFlag.AlignRight); form.setHorizontalSpacing(12); form.setVerticalSpacing(8)
-        for label, widget in [
-            ("Minimum image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
-            ("Hostname:", self.hostname), ("User:", self.username), ("User password:", self.password),
-            ("Root password:", self.root_password), ("", self.checkbox_row(self.show_passwords, self.show_passwords_label)), ("Timezone:", self.timezone), ("Locale:", self.locale),
-            ("Console keymap:", self.console_keymap), ("XKB layout:", self.xkb_layout), ("XKB variant:", self.xkb_variant),
-            ("XKB model:", self.xkb_model),
+        for key, label, widget in [
+            ("image_size", "Minimum image size:", self.image_size), ("alpine_branch", "Alpine branch:", self.alpine_branch), ("arch", "Architecture:", self.arch),
+            ("hostname", "Hostname:", self.hostname), ("username", "User:", self.username), ("password", "User password:", self.password),
+            ("root_password", "Root password:", self.root_password), ("show_passwords", "", self.checkbox_row(self.show_passwords, self.show_passwords_label)),
+            ("timezone", "Timezone:", self.timezone), ("locale", "Locale:", self.locale),
+            ("console_keymap", "Console keymap:", self.console_keymap), ("xkb_layout", "XKB layout:", self.xkb_layout),
+            ("xkb_variant", "XKB variant:", self.xkb_variant), ("xkb_model", "XKB model:", self.xkb_model),
         ]:
-            form.addRow(label, widget)
+            form.addRow(self.config_label(key, label) if label else QLabel(""), widget)
         system.body_layout.addLayout(form); parent_layout.addWidget(system)
 
         desktop = CollapsibleSection("Desktop environments, display manager and window managers", collapsed=True)
+        self.sections["desktop"] = desktop
         dform = QFormLayout(); dform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); dform.setHorizontalSpacing(12); dform.setVerticalSpacing(8)
-        dform.addRow("Desktop:", self.desktop); dform.addRow("Display manager:", self.display_manager); dform.addRow("Default session:", self.default_session)
-        dform.addRow("Browser:", self.browser); dform.addRow("Audio:", self.audio)
+        for key, label, widget in [
+            ("desktop", "Desktop:", self.desktop), ("display_manager", "Display manager:", self.display_manager),
+            ("default_session", "Default session:", self.default_session), ("browser", "Browser:", self.browser), ("audio", "Audio:", self.audio),
+        ]:
+            dform.addRow(self.config_label(key, label), widget)
         desktop.body_layout.addLayout(dform)
         wm_label = QLabel("Optional tiling/window managers:"); wm_label.setStyleSheet("color:#cbd5e1;font-weight:bold;border:0;background:transparent;")
         desktop.body_layout.addWidget(wm_label)
         wm_grid = QGridLayout(); wm_grid.setHorizontalSpacing(18); wm_grid.setVerticalSpacing(6)
         for i, (key, cb) in enumerate(self.wm_checks.items()):
-            wm_grid.addWidget(self.checkbox_row(cb, self.wm_labels[key]), i // 2, i % 2)
+            wm_grid.addWidget(self.checkbox_row(cb, self.wm_labels[key], f"wm:{key}"), i // 2, i % 2)
         desktop.body_layout.addLayout(wm_grid); parent_layout.addWidget(desktop)
 
         network = CollapsibleSection("Network, Wi‑Fi and Bluetooth", collapsed=True)
+        self.sections["network"] = network
         nform = QFormLayout(); nform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); nform.setHorizontalSpacing(12); nform.setVerticalSpacing(8)
-        nform.addRow("Network backend:", self.network); nform.addRow("Wi‑Fi:", self.checkbox_row(self.wifi, self.wifi_label)); nform.addRow("Bluetooth:", self.checkbox_row(self.bluetooth, self.bluetooth_label))
+        nform.addRow(self.config_label("network", "Network backend:"), self.network)
+        nform.addRow(self.config_label("wifi", "Wi‑Fi:"), self.checkbox_row(self.wifi, self.wifi_label, "wifi"))
+        nform.addRow(self.config_label("bluetooth", "Bluetooth:"), self.checkbox_row(self.bluetooth, self.bluetooth_label, "bluetooth"))
         network.body_layout.addLayout(nform); parent_layout.addWidget(network)
 
         boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True)
+        self.sections["boot"] = boot
         bform = QFormLayout(); bform.setLabelAlignment(Qt.AlignmentFlag.AlignRight); bform.setHorizontalSpacing(12); bform.setVerticalSpacing(8)
-        bform.addRow("Bootloader:", self.bootloader); bform.addRow("Kernel:", self.kernel); bform.addRow("Firmware:", self.firmware); bform.addRow("Boot menu timeout:", self.boot_timeout); bform.addRow("USB space:", self.checkbox_row(self.auto_resize, self.auto_resize_label))
+        for key, label, widget in [
+            ("bootloader", "Bootloader:", self.bootloader), ("kernel", "Kernel:", self.kernel), ("firmware", "Firmware:", self.firmware),
+            ("boot_timeout", "Boot menu timeout:", self.boot_timeout), ("auto_resize", "USB space:", self.checkbox_row(self.auto_resize, self.auto_resize_label, "auto_resize")),
+        ]:
+            bform.addRow(self.config_label(key, label), widget)
         boot.body_layout.addLayout(bform); parent_layout.addWidget(boot)
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
+        self.sections["extra"] = extra
         extra.body_layout.addWidget(QLabel("Optional package names are passed directly to apk add. You can type several packages separated by spaces."))
+        extra.body_layout.addWidget(self.config_label("extra_packages", "Extra packages:"))
         extra.body_layout.addWidget(self.extra_packages)
         extra.body_layout.addWidget(QLabel("Search official Alpine packages (enabled repos: main + community):"))
         search_row = QHBoxLayout(); search_row.setSpacing(8)
@@ -1140,6 +1349,8 @@ class Main(QWidget):
     def update_selected(self):
         val = self.device.text().strip() or "none"
         self.setWindowTitle(f"{APP_TITLE} — {val}" if val != "none" else APP_TITLE)
+        if not hasattr(self, "flash_button"):
+            return
         if not self.has_running_worker():
             self.flash_button.setEnabled(bool(val != "none" and self.image.text().strip()))
 
@@ -1160,6 +1371,7 @@ class Main(QWidget):
             self.bootloader, self.kernel, self.firmware, self.boot_timeout,
             self.auto_resize, self.extra_packages, self.package_search,
             self.package_search_button, self.package_search_results, self.package_add_button,
+            self.save_config_button, self.restore_defaults_button,
         ] + list(self.wm_checks.values())
         for widget in widgets:
             widget.setEnabled(not busy)
@@ -1233,13 +1445,36 @@ class Main(QWidget):
             f"Keyboard: {env['ALPINE_USB_XKB_LAYOUT']}"
         )
 
+    def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
+        return {
+            "IMAGE_SIZE": str(cfg.get("image_size", "16G")),
+            "ALPINE_BRANCH": str(cfg.get("alpine_branch", "latest-stable")),
+            "ARCH": str(cfg.get("arch", "x86_64")),
+            "ALPINE_USB_DESKTOP": str(cfg.get("desktop", "xfce")),
+            "ALPINE_USB_DISPLAY_MANAGER": str(cfg.get("display_manager", "auto")),
+            "ALPINE_USB_DEFAULT_SESSION": str(cfg.get("default_session", "auto")),
+            "ALPINE_USB_TILING_WMS": " ".join(cfg.get("wms", [])),
+            "ALPINE_USB_BOOTLOADER": str(cfg.get("bootloader", "grub")),
+            "ALPINE_USB_KERNEL_FLAVOR": str(cfg.get("kernel", "lts")),
+            "ALPINE_USB_FIRMWARE": str(cfg.get("firmware", "full")),
+            "ALPINE_USB_AUTO_RESIZE": "1" if cfg.get("auto_resize", True) else "0",
+            "ALPINE_USB_WIFI": "1" if cfg.get("wifi", True) else "0",
+            "ALPINE_USB_BLUETOOTH": "1" if cfg.get("bluetooth", True) else "0",
+            "ALPINE_USB_AUDIO": str(cfg.get("audio", "pipewire")),
+            "ALPINE_USB_NETWORK": str(cfg.get("network", "networkmanager")),
+            "ALPINE_USB_LOCALE": str(cfg.get("locale", "en_US.UTF-8")),
+            "ALPINE_USB_TIMEZONE": str(cfg.get("timezone", "UTC")),
+            "ALPINE_USB_XKB_LAYOUT": str(cfg.get("xkb_layout", "us")),
+            "ALPINE_USB_EXTRA_PACKAGES": str(cfg.get("extra_packages", "")),
+        }
+
     def refresh_build_summary(self):
         if not hasattr(self, "build_summary"):
             return
-        env = self.collect_build_env()
+        env = self.summary_env_from_config(getattr(self, "saved_config_snapshot", self.snapshot_config()))
         extra = env.get("ALPINE_USB_EXTRA_PACKAGES", "").strip() or "none"
         self.build_summary.setText(
-            "<b>Current configuration</b><br>"
+            "<b>Saved image configuration</b><br>"
             f"<b>Image:</b> {env['IMAGE_SIZE']} · Alpine {env['ALPINE_BRANCH']} · {env['ARCH']}<br>"
             f"<b>Desktop:</b> {env['ALPINE_USB_DESKTOP']} · DM {env['ALPINE_USB_DISPLAY_MANAGER']} · Session {env['ALPINE_USB_DEFAULT_SESSION']} · WMs {env['ALPINE_USB_TILING_WMS'] or 'none'}<br>"
             f"<b>Boot:</b> {env['ALPINE_USB_BOOTLOADER']} · linux-{env['ALPINE_USB_KERNEL_FLAVOR']} · firmware {env['ALPINE_USB_FIRMWARE']} · auto-resize {env['ALPINE_USB_AUTO_RESIZE']}<br>"
@@ -1254,7 +1489,6 @@ class Main(QWidget):
             return
         output_path = self.image.text().strip() or str(DEFAULT_OUTPUT_PATH)
         Path(output_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-        self.refresh_build_summary()
         env = self.collect_build_env()
         validation_error = self.validate_build_config(env)
         if validation_error:
@@ -1349,7 +1583,8 @@ class Main(QWidget):
             self.flash_progress.setValue(100)
         self.flash_progress.hide(); self.status.show(); self.status.setText(msg)
         self.append_log(msg); self.set_busy(False)
-        modal(self, "info" if ok else "error", APP_TITLE, msg)
+        # Let progress/status layout settle, then center completion modal over main window.
+        QTimer.singleShot(0, lambda: modal(self, "info" if ok else "error", APP_TITLE, msg))
 
     def flash_thread_finished(self):
         if self.sender() is self.worker:
