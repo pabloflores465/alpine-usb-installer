@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-import alpine_usb_cli as cli
+import cli as cli
 
 CHOICES = {
     "image_size": ["8G", "16G", "24G", "32G", "64G", "128G"],
@@ -613,7 +613,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return self_test()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("The TUI needs an interactive terminal. Use ./run_cli.sh for non-interactive mode.", file=sys.stderr)
+        print("The TUI needs an interactive terminal. Use ./cli.py for non-interactive mode.", file=sys.stderr)
         return 1
     return curses.wrapper(run_tui)
 

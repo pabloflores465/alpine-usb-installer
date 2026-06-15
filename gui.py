@@ -4,6 +4,15 @@ from __future__ import annotations
 import io, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+QT_VENV_PYTHON = SCRIPT_DIR / ".qtvenv" / "bin" / "python"
+if Path(sys.executable).resolve() != QT_VENV_PYTHON.resolve():
+    if not QT_VENV_PYTHON.exists():
+        subprocess.check_call([sys.executable, "-m", "venv", str(SCRIPT_DIR / ".qtvenv")])
+        subprocess.check_call([str(QT_VENV_PYTHON), "-m", "pip", "install", "--upgrade", "pip"])
+        subprocess.check_call([str(QT_VENV_PYTHON), "-m", "pip", "install", "PySide6"])
+    os.execv(str(QT_VENV_PYTHON), [str(QT_VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
+
 from PySide6.QtCore import QPoint, Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (

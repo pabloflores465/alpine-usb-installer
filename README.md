@@ -52,12 +52,12 @@ On macOS, Docker Desktop is used automatically because the build requires Linux/
 
 On native Linux you also need `mtools`, `grub-efi`/`grub-mkstandalone`, `qemu-nbd`, `parted`, `rsync`, `dosfstools` and related image build tools.
 
-Python GUI dependencies are listed in `requirements.txt`. The helper script creates its own `.qtvenv` automatically if needed.
+Python GUI dependencies are listed in `requirements.txt`. `./gui.py` creates and uses its own `.qtvenv` automatically if needed.
 
 ## Qt GUI
 
 ```sh
-./run_qt_gui.sh
+./gui.py
 ```
 
 From the GUI you can:
@@ -83,9 +83,9 @@ Supported flashing helpers:
 For a complete interactive terminal experience, use the curses TUI:
 
 ```sh
-./run_tui.sh
+./tui.py
 # or:
-./run_cli.sh tui
+./cli.py tui
 ```
 
 The TUI includes full-screen menus for all installer options, package search, build/dry-run, USB device selection, flashing, and host diagnostics. It always allows manual USB device entry if automatic detection finds nothing.
@@ -93,36 +93,36 @@ The TUI includes full-screen menus for all installer options, package search, bu
 The project also includes a fast dependency-free CLI with the same build options as the GUI:
 
 ```sh
-./run_cli.sh --help
-./run_cli.sh build --help
+./cli.py --help
+./cli.py build --help
 ```
 
 Useful CLI commands:
 
 ```sh
 # Open the full TUI
-./run_cli.sh tui
+./cli.py tui
 
 # Search official Alpine packages and show the top 10 suggestions
-./run_cli.sh search firefox
+./cli.py search firefox
 
 # Validate a profile without building the image
-./run_cli.sh build --dry-run --desktop xfce --bootloader systemd-boot
+./cli.py build --dry-run --desktop xfce --bootloader systemd-boot
 
 # Build without interactive confirmation
-./run_cli.sh build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+./cli.py build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
 
 # List removable USB devices
-./run_cli.sh devices
+./cli.py devices
 
 # Flash an image to USB; requires typing ERASE unless -y is passed
-./run_cli.sh flash alpine-usb.img /dev/sdX
+./cli.py flash alpine-usb.img /dev/sdX
 ```
 
 The `build` subcommand exposes the same profile controls as the GUI: desktop, display manager, WMs, Wi‑Fi, Bluetooth, bootloader, kernel, firmware, keyboard/language, user/passwords, image size, auto-resize, browser/audio and extra APK packages. Extra packages can be repeated:
 
 ```sh
-./run_cli.sh build --extra-package neovim --extra-package "tmux htop" --extra-package docker
+./cli.py build --extra-package neovim --extra-package "tmux htop" --extra-package docker
 ```
 
 ## CLI build examples
@@ -132,7 +132,7 @@ Default profile:
 ```sh
 IMAGE_SIZE=16G ./build-alpine-usb.sh
 # or:
-./run_cli.sh build -y
+./cli.py build -y
 ```
 
 KDE Plasma + SDDM + systemd-boot + stable kernel:

@@ -353,7 +353,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         rows.append((f"{idx:>2}. {name}", f"{version}  [{repo}]  {desc}"))
     print_panel(f"Top {len(results)} suggestions for '{args.query}'", rows)
     print("Add packages with:")
-    print(c(f"  ./alpine_usb_cli.py build --extra-package {results[0]['name']}", C.dim))
+    print(c(f"  ./cli.py build --extra-package {results[0]['name']}", C.dim))
     return 0
 
 
@@ -443,7 +443,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
 
 def cmd_tui(_args: argparse.Namespace) -> int:
-    from alpine_usb_tui import main as tui_main
+    from tui import main as tui_main
     return tui_main([])
 
 
@@ -491,7 +491,7 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="alpine_usb_cli.py",
+        prog="cli.py",
         description="Build, customize, search packages for, and flash Alpine USB images.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
