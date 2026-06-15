@@ -6,4 +6,4 @@
 - Do not commit generated release artifacts such as `build/`, `dist/`, `standalone-release/`, or `Alpine USB Installer.spec`.
 - Before pushing, run at least:
   - `python3 -m py_compile alpine-usb gui.py cli.py tui.py`
-  - `bash -n build-alpine-usb.sh configure-alpine-usb.sh scripts/build-macos-dmg.sh`
+  - `bash -n build-alpine-usb.sh configure-alpine-usb.sh scripts/build-macos-dmg.sh scripts/package-release-assets.sh`

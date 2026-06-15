@@ -357,10 +357,18 @@ Build a DMG on macOS with:
 scripts/build-macos-dmg.sh
 ```
 
+Build all release assets with:
+
+```sh
+scripts/package-release-assets.sh 0.1.7
+```
+
+The release packager ships the standalone terminal binary as a `.tar.gz` archive because raw GitHub asset downloads do not preserve Unix executable bits.
+
 The DMG includes:
 
 - `Alpine USB Installer.app` for the Qt GUI.
-- `Terminal/alpine-usb`, a standalone terminal binary for the unified TUI/CLI.
+- `Terminal/alpine-usb`, a standalone executable terminal binary for the unified TUI/CLI.
 - `Open Terminal Utility.command` to launch the terminal utility from Finder.
 
 The terminal binary carries the build resources it needs and copies them to `/tmp/alpine-usb-installer/terminal-runtime` before invoking build scripts.
