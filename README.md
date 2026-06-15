@@ -363,15 +363,12 @@ Build all release assets with:
 scripts/package-release-assets.sh 0.1.7
 ```
 
-The release packager ships the standalone terminal binary as a `.tar.gz` archive because raw GitHub asset downloads do not preserve Unix executable bits.
+The release packager creates separate GUI and terminal assets:
 
-The DMG includes:
+- `alpine-usb-installer-<version>-macos-arm64-gui.dmg` contains only `Alpine USB Installer.app`.
+- `alpine-usb-installer-<version>-macos-arm64-terminal.tar.gz` contains only the standalone `alpine-usb` terminal binary.
 
-- `Alpine USB Installer.app` for the Qt GUI.
-- `Terminal/alpine-usb`, a standalone executable terminal binary for the unified TUI/CLI.
-- `Open Terminal Utility.command` to launch the terminal utility from Finder.
-
-The terminal binary carries the build resources it needs and copies them to `/tmp/alpine-usb-installer/terminal-runtime` before invoking build scripts.
+The terminal binary is shipped as `.tar.gz` because raw GitHub asset downloads do not preserve Unix executable bits. The terminal binary carries the build resources it needs and copies them to `/tmp/alpine-usb-installer/terminal-runtime` before invoking build scripts.
 
 ## Validation and tests
 

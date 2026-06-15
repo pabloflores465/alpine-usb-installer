@@ -16,6 +16,13 @@ assets_dir="dist/release-assets"
 terminal_pkg_dir="dist/terminal-binary"
 source_base="alpine-usb-installer-${version}-terminal-source"
 terminal_base="alpine-usb-installer-${version}-macos-arm64-terminal"
+if [ -n "${PYINSTALLER:-}" ]; then
+  PYINSTALLER_CMD="$PYINSTALLER"
+elif [ -x ".qtvenv/bin/pyinstaller" ]; then
+  PYINSTALLER_CMD=".qtvenv/bin/pyinstaller"
+else
+  PYINSTALLER_CMD="pyinstaller"
+fi
 
 tar_cmd=(tar --format=ustar --owner=0 --group=0 --numeric-owner)
 if ! tar --version >/dev/null 2>&1; then
@@ -25,10 +32,24 @@ fi
 
 scripts/build-macos-dmg.sh
 
+"$PYINSTALLER_CMD" \
+  --noconfirm \
+  --onefile \
+  --console \
+  --name "alpine-usb" \
+  --hidden-import "cli" \
+  --hidden-import "tui" \
+  --add-data "build-alpine-usb.sh:." \
+  --add-data "configure-alpine-usb.sh:." \
+  --add-data "README.md:." \
+  --add-data "LICENSE:." \
+  --add-data "efi-fallback:efi-fallback" \
+  alpine-usb
+
 rm -rf "$assets_dir" "$terminal_pkg_dir"
 mkdir -p "$assets_dir" "$terminal_pkg_dir"
 
-cp "dist/Alpine USB Installer.dmg" "$assets_dir/alpine-usb-installer-${version}-macos-arm64-gui-and-terminal.dmg"
+cp "dist/Alpine USB Installer.dmg" "$assets_dir/alpine-usb-installer-${version}-macos-arm64-gui.dmg"
 cp dist/alpine-usb "$terminal_pkg_dir/alpine-usb"
 chmod 755 "$terminal_pkg_dir/alpine-usb"
 
