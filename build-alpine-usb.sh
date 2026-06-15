@@ -9,6 +9,11 @@ ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
 MAKE_VM_IMAGE="$WORK_DIR/alpine-make-vm-image.uefi"
+MAKE_VM_IMAGE_SOURCE="$WORK_DIR/alpine-make-vm-image.uefi.source"
+MAKE_VM_IMAGE_COMMIT="dda77715d4dfe8704eb55f310dc1318920d5fd75"
+MAKE_VM_IMAGE_SHA256="860b2b9efb73869085ba0a9401555ff0eac29072d102ffd39884ddb90aedc2f4"
+MAKE_VM_IMAGE_URL="https://raw.githubusercontent.com/alpinelinux/alpine-make-vm-image/$MAKE_VM_IMAGE_COMMIT/alpine-make-vm-image"
+DOCKER_IMAGE="${ALPINE_USB_DOCKER_IMAGE:-alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601}"
 
 ALPINE_USB_KERNEL_FLAVOR="${ALPINE_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
 ALPINE_USB_BOOTLOADER="${ALPINE_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
@@ -22,8 +27,44 @@ ALPINE_USB_BOOTLOADER="$(printf '%s' "$ALPINE_USB_BOOTLOADER" | tr '[:upper:]' '
 case "$ALPINE_USB_BOOTLOADER" in grub|systemd-boot) ;; *) echo "Invalid bootloader: $ALPINE_USB_BOOTLOADER" >&2; exit 1 ;; esac
 case "$ALPINE_USB_KERNEL_FLAVOR" in lts|stable) ;; *) echo "Invalid kernel flavor: $ALPINE_USB_KERNEL_FLAVOR" >&2; exit 1 ;; esac
 case "$ALPINE_USB_ROOTFS" in ext4) ;; *) echo "Only ext4 rootfs is supported by this USB installer" >&2; exit 1 ;; esac
+if [[ "$ALPINE_BRANCH" != "latest-stable" && "$ALPINE_BRANCH" != "edge" && ! "$ALPINE_BRANCH" =~ ^v[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid Alpine branch: $ALPINE_BRANCH" >&2
+  exit 1
+fi
+if [[ -z "$IMAGE_NAME" || "$IMAGE_NAME" == *"/"* || "$IMAGE_NAME" == *".."* || "$IMAGE_NAME" == -* || ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Invalid image name: $IMAGE_NAME" >&2
+  exit 1
+fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
+
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+verify_sha256() {
+  local file="$1"
+  local expected="$2"
+  local actual
+  actual="$(sha256_file "$file")"
+  [ "$actual" = "$expected" ] || {
+    echo "Checksum mismatch for $file" >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    return 1
+  }
+}
+
+mkdir -p "$WORK_DIR"
+chmod 700 "$WORK_DIR" 2>/dev/null || true
 
 # macOS cannot run the Linux/NBD build natively. Always run it in a fresh
 # privileged Docker container with the required build tools, and remove the
@@ -40,7 +81,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
 
   pass_env=(
     IMAGE_NAME IMAGE_SIZE ALPINE_BRANCH ARCH
-    ALPINE_USB_USER ALPINE_USB_PASSWORD ALPINE_USB_ROOT_PASSWORD ALPINE_USB_HOSTNAME
+    ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME
     ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE
     ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL
     ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER
@@ -51,15 +92,19 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   )
   docker_env=(-e ALPINE_USB_BUILD_IN_DOCKER=1)
   for name in "${pass_env[@]}"; do
-    docker_env+=( -e "$name=${!name-}" )
+    value="${!name-}"
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
+      value="/work/${value#"$SCRIPT_DIR"/}"
+    fi
+    docker_env+=( -e "$name=$value" )
   done
 
-  echo "Starting fresh Docker build container with Alpine build tools..."
+  echo "Starting fresh Docker build container with Alpine build tools ($DOCKER_IMAGE)..."
   exec docker run --rm --platform linux/amd64 --privileged \
     "${docker_env[@]}" \
     -v "$SCRIPT_DIR:/work" \
     -w /work \
-    alpine:latest \
+    "$DOCKER_IMAGE" \
     sh -ceu '
       apk add --no-cache bash curl sudo python3 e2fsprogs dosfstools util-linux sfdisk \
         multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools \
@@ -76,11 +121,17 @@ need mmd
 need mcopy
 need mdir
 
-mkdir -p "$WORK_DIR"
+if [ ! -f "$MAKE_VM_IMAGE_SOURCE" ] || ! verify_sha256 "$MAKE_VM_IMAGE_SOURCE" "$MAKE_VM_IMAGE_SHA256" >/dev/null 2>&1; then
+  echo "Downloading pinned alpine-make-vm-image ($MAKE_VM_IMAGE_COMMIT)..."
+  tmp_source="$MAKE_VM_IMAGE_SOURCE.tmp.$$"
+  rm -f "$tmp_source"
+  curl --fail --location --proto '=https' --tlsv1.2 "$MAKE_VM_IMAGE_URL" -o "$tmp_source"
+  verify_sha256 "$tmp_source" "$MAKE_VM_IMAGE_SHA256"
+  mv "$tmp_source" "$MAKE_VM_IMAGE_SOURCE"
+fi
 
-if [ ! -x "$MAKE_VM_IMAGE" ]; then
-  echo "Downloading alpine-make-vm-image..."
-  curl -L "https://raw.githubusercontent.com/alpinelinux/alpine-make-vm-image/master/alpine-make-vm-image" -o "$MAKE_VM_IMAGE"
+if [ ! -x "$MAKE_VM_IMAGE" ] || [ "$MAKE_VM_IMAGE_SOURCE" -nt "$MAKE_VM_IMAGE" ]; then
+  cp "$MAKE_VM_IMAGE_SOURCE" "$MAKE_VM_IMAGE"
   chmod +x "$MAKE_VM_IMAGE"
 fi
 
@@ -269,11 +320,32 @@ cd "$SCRIPT_DIR"
 # filesystem signatures and confuse NBD partition node creation.
 rm -f "$SCRIPT_DIR/$IMAGE_NAME"
 
+CONFIGURE_SCRIPT_FOR_BUILD="$SCRIPT_DIR/configure-alpine-usb.sh"
+SECRET_CONFIGURE_SCRIPT=""
+cleanup_secret_configure() {
+  [ -n "$SECRET_CONFIGURE_SCRIPT" ] && rm -f "$SECRET_CONFIGURE_SCRIPT"
+}
+trap cleanup_secret_configure EXIT INT TERM
+if [ -n "${ALPINE_USB_PASSWORD_FILE:-}" ] || [ -n "${ALPINE_USB_ROOT_PASSWORD_FILE:-}" ]; then
+  password_value=""
+  root_password_value=""
+  [ -n "${ALPINE_USB_PASSWORD_FILE:-}" ] && password_value="$(cat "$ALPINE_USB_PASSWORD_FILE")"
+  [ -n "${ALPINE_USB_ROOT_PASSWORD_FILE:-}" ] && root_password_value="$(cat "$ALPINE_USB_ROOT_PASSWORD_FILE")"
+  [ -n "$root_password_value" ] || root_password_value="$password_value"
+  SECRET_CONFIGURE_SCRIPT="$WORK_DIR/configure-alpine-usb-secure-$$.sh"
+  {
+    printf '#!/bin/sh\n'
+    printf 'ALPINE_USB_PASSWORD=%s\n' "$(shell_quote "$password_value")"
+    printf 'ALPINE_USB_ROOT_PASSWORD=%s\n' "$(shell_quote "$root_password_value")"
+    cat "$SCRIPT_DIR/configure-alpine-usb.sh"
+  } > "$SECRET_CONFIGURE_SCRIPT"
+  chmod 700 "$SECRET_CONFIGURE_SCRIPT"
+  CONFIGURE_SCRIPT_FOR_BUILD="$SECRET_CONFIGURE_SCRIPT"
+fi
+
 # raw image: easiest to dd to USB.
 sudo env \
   ALPINE_USB_USER="$ALPINE_USB_USER" \
-  ALPINE_USB_PASSWORD="${ALPINE_USB_PASSWORD:-}" \
-  ALPINE_USB_ROOT_PASSWORD="${ALPINE_USB_ROOT_PASSWORD:-}" \
   ALPINE_USB_HOSTNAME="${ALPINE_USB_HOSTNAME:-}" \
   ALPINE_USB_TIMEZONE="${ALPINE_USB_TIMEZONE:-}" \
   ALPINE_USB_LOCALE="${ALPINE_USB_LOCALE:-}" \
@@ -311,7 +383,7 @@ sudo env \
   --repositories-file "$SCRIPT_DIR/repositories" \
   --script-chroot \
   "$SCRIPT_DIR/$IMAGE_NAME" \
-  "$SCRIPT_DIR/configure-alpine-usb.sh"
+  "$CONFIGURE_SCRIPT_FOR_BUILD"
 
 case "$ALPINE_USB_BOOTLOADER" in
   grub) install_grub_removable_bootloader "$SCRIPT_DIR/$IMAGE_NAME" ;;

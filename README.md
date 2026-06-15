@@ -90,6 +90,8 @@ GUI flow:
 5. Select USB target.
 6. Flash USB.
 
+Saved GUI profiles do not store user/root passwords. Password fields stay in memory while the app is open; after restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials.
+
 If USB auto-detection fails, type the device manually, for example `/dev/disk7` on macOS or `/dev/sdb` on Linux.
 
 ### TUI
@@ -116,13 +118,13 @@ Common commands:
 ./alpine-usb search firefox
 
 # Validate a profile without building
-./alpine-usb build --dry-run --desktop xfce --bootloader systemd-boot
+./alpine-usb build --dry-run --ask-password --desktop xfce --bootloader systemd-boot
 
-# Build default profile without prompts
-./alpine-usb build -y
+# Build default profile without prompts (avoid shell history by using --ask-password instead)
+./alpine-usb build --password 'change-me' -y
 
 # Build Plasma profile
-./alpine-usb build --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+./alpine-usb build --ask-password --desktop plasma --display-manager sddm --bootloader systemd-boot -y
 
 # List removable devices
 ./alpine-usb devices
@@ -131,10 +133,12 @@ Common commands:
 ./alpine-usb flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
 ```
 
+Flash refuses partitions and non-removable/non-hotplug disks. Confirmation shows target model, size, serial/id, and device path before writing.
+
 Extra packages can be repeated or space-separated:
 
 ```sh
-./alpine-usb build \
+./alpine-usb build --ask-password \
   --extra-package neovim \
   --extra-package "tmux htop" \
   --extra-package docker
@@ -150,8 +154,8 @@ Defaults are generic and distro-like:
 | Output | `/tmp/alpine-usb-installer/alpine-usb.img` |
 | Alpine branch | `latest-stable` |
 | Architecture | `x86_64` |
-| User/password | `alpine` / `alpine` |
-| Root password | `alpine` |
+| User/password | user `alpine` / password required before build |
+| Root password | same as user password unless configured separately |
 | Locale/timezone | `en_US.UTF-8` / `UTC` |
 | Keyboard | US console + XKB |
 | Desktop | XFCE |
@@ -338,9 +342,11 @@ Defaults unless changed:
 
 ```txt
 user: alpine
-password: alpine
-root password: alpine
+password: the password entered before build
+root password: same as user password unless configured separately
 ```
+
+Saved GUI profiles do not persist these passwords; enter the user password again before each build after restarting the GUI. CLI builds require `--ask-password` or `--password`; TUI builds require filling the user password field. By default, root password mirrors the user password; enable “Use separate root password” in GUI, fill root password in TUI, or pass `--root-password` in CLI only when you want different credentials.
 
 Change passwords after first boot:
 

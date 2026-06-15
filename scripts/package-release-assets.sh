@@ -14,7 +14,6 @@ version="${version#v}"
 
 assets_dir="dist/release-assets"
 terminal_pkg_dir="dist/terminal-binary"
-source_base="alpine-usb-installer-${version}-terminal-source"
 terminal_base="alpine-usb-installer-${version}-macos-arm64-terminal"
 if [ -n "${PYINSTALLER:-}" ]; then
   PYINSTALLER_CMD="$PYINSTALLER"
@@ -99,7 +98,7 @@ PY
 
 (
   cd "$assets_dir"
-  shasum -a 256 alpine-usb-installer-${version}-* > SHA256SUMS.txt
+  shasum -a 256 alpine-usb-installer-"${version}"-* > SHA256SUMS.txt
 )
 
 ls -lh "$assets_dir"

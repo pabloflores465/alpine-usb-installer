@@ -32,7 +32,7 @@ PY
 fi
 ./alpine-usb --help >/dev/null
 ./alpine-usb build --help >/dev/null
-./alpine-usb build --dry-run --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/alpine-usb-cli-dry-run.out
+./alpine-usb build --dry-run --password testpass --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/alpine-usb-cli-dry-run.out
 grep -q 'DRY RUN OK' /tmp/alpine-usb-cli-dry-run.out
 grep -q 'neovim' /tmp/alpine-usb-cli-dry-run.out
 

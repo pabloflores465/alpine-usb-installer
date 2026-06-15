@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import getpass
 import io
+import json
 import os
 import platform
 import plistlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -20,6 +22,8 @@ DEFAULT_IMAGE_NAME = "alpine-usb.img"
 APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
 APK_SEARCH_REPOS = ("main", "community")
 VALID_WMS = ("i3", "sway", "hyprland", "awesome", "bspwm", "openbox", "labwc")
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
+BRANCH_RE = re.compile(r"^(latest-stable|edge|v[0-9]+\.[0-9]+)$")
 
 TERMINAL_ENTRYPOINT = "alpine-usb"
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -85,9 +89,26 @@ def can_write_to_dir(path: Path) -> bool:
         return False
 
 
+def secure_runtime_dir(name: str) -> Path:
+    uid = os.getuid() if hasattr(os, "getuid") else "user"
+    base = Path(tempfile.gettempdir()) / f"alpine-usb-installer-{uid}"
+    for path in [base, base / name]:
+        if path.is_symlink():
+            raise RuntimeError(f"Refusing symlinked runtime path: {path}")
+        if path.exists():
+            st = path.stat()
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                raise RuntimeError(f"Refusing runtime path not owned by current user: {path}")
+            if stat.S_IMODE(st.st_mode) & 0o077:
+                path.chmod(0o700)
+        else:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.chmod(0o700)
+    return base / name
+
+
 def prepare_terminal_runtime(source_dir: Path) -> Path:
-    runtime = Path(tempfile.gettempdir()) / "alpine-usb-installer" / "terminal-runtime"
-    runtime.mkdir(parents=True, exist_ok=True)
+    runtime = secure_runtime_dir("terminal-runtime")
     for name in TERMINAL_RUNTIME_RESOURCES:
         src = source_dir / name
         dst = runtime / name
@@ -135,6 +156,29 @@ def print_panel(title: str, rows: list[tuple[str, str] | str]):
     print(c("╰" + "─" * width, C.blue))
 
 
+def format_size_bytes(size: int | None) -> str:
+    if not size:
+        return "unknown size"
+    value = float(size)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if value < 1000 or unit == "TB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1000
+    return f"{int(value)} B"
+
+
+def validate_branch(branch: str) -> str:
+    if not BRANCH_RE.match(branch):
+        raise ValueError("Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)")
+    return branch
+
+
+def validate_package_name(package: str) -> str:
+    if not PACKAGE_RE.match(package):
+        raise ValueError(f"Invalid package name: {package!r}")
+    return package
+
+
 def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
     packages = []
     current: dict[str, str] = {}
@@ -156,6 +200,7 @@ def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
 
 
 def fetch_official_apk_packages(branch: str, arch: str) -> list[dict[str, str]]:
+    branch = validate_branch(branch)
     merged: dict[str, dict[str, str]] = {}
     for repo in APK_SEARCH_REPOS:
         url = f"{APK_MIRROR}/{branch}/{repo}/{arch}/APKINDEX.tar.gz"
@@ -199,6 +244,74 @@ def search_official_apk_packages(branch: str, arch: str, query: str, limit: int 
     return [item[3] for item in results[:limit]]
 
 
+def linux_lsblk_devices(path: str | None = None) -> list[dict]:
+    cmd = ["lsblk", "-J", "-b", "-o", "PATH,NAME,SIZE,TRAN,TYPE,MODEL,SERIAL,RM,HOTPLUG"]
+    if path:
+        cmd.append(path)
+    cp = run(cmd, capture_output=True)
+    if cp.returncode != 0:
+        return []
+    try:
+        return json.loads(cp.stdout).get("blockdevices", []) or []
+    except Exception:
+        return []
+
+
+def linux_device_is_removable_disk(info: dict) -> bool:
+    return (
+        info.get("type") == "disk"
+        and (str(info.get("rm", "0")) == "1" or str(info.get("hotplug", "0")) == "1" or info.get("tran") == "usb")
+    )
+
+
+def normalize_disk_device(dev: str) -> str:
+    if platform.system() == "Darwin" and dev.startswith("/dev/rdisk"):
+        return dev.replace("/dev/rdisk", "/dev/disk", 1)
+    return dev
+
+
+def device_safety_report(dev: str) -> tuple[bool, str, list[tuple[str, str]], str | None]:
+    sysname = platform.system()
+    dev = normalize_disk_device(dev)
+    rows: list[tuple[str, str]] = [("Target", dev)]
+    if looks_like_partition(dev):
+        return False, dev, rows, f"Use the whole disk, not a partition: {dev}"
+    if sysname == "Darwin":
+        if not re.match(r"^/dev/disk\d+$", dev):
+            return False, dev, rows, "macOS target must be a whole disk like /dev/disk7"
+        cp = run(["diskutil", "info", "-plist", dev], capture_output=True)
+        if cp.returncode != 0:
+            return False, dev, rows, f"Could not inspect target device: {dev}"
+        try:
+            meta = plistlib.loads(cp.stdout.encode())
+        except Exception as exc:
+            return False, dev, rows, f"Could not parse diskutil info for {dev}: {exc}"
+        if bool(meta.get("Internal")):
+            return False, dev, rows, f"Refusing to flash internal disk: {dev}"
+        size = format_size_bytes(int(meta.get("TotalSize", 0) or 0))
+        model = meta.get("MediaName") or meta.get("IORegistryEntryName") or "unknown"
+        protocol = meta.get("BusProtocol") or meta.get("DeviceProtocol") or "unknown"
+        serial = meta.get("DeviceIdentifier") or "unknown"
+        rows.extend([("Model/media", str(model)), ("Size", size), ("Protocol", str(protocol)), ("Serial/id", str(serial))])
+        return True, dev, rows, None
+    if sysname == "Linux":
+        infos = linux_lsblk_devices(dev)
+        if not infos:
+            return False, dev, rows, f"Could not inspect target device with lsblk: {dev}"
+        info = infos[0]
+        if not linux_device_is_removable_disk(info):
+            return False, dev, rows, f"Refusing non-removable/non-hotplug disk: {dev}"
+        rows.extend([
+            ("Model", str(info.get("model") or "unknown")),
+            ("Size", format_size_bytes(int(info.get("size", 0) or 0))),
+            ("Transport", str(info.get("tran") or "unknown")),
+            ("Serial", str(info.get("serial") or "unknown")),
+            ("RM/HOTPLUG", f"{info.get('rm', 0)}/{info.get('hotplug', 0)}"),
+        ])
+        return True, dev, rows, None
+    return False, dev, rows, "Windows flashing is not implemented. Use Rufus/balenaEtcher with the generated image."
+
+
 def list_devices() -> list[tuple[str, str]]:
     sysname = platform.system()
     devices: list[tuple[str, str]] = []
@@ -211,28 +324,25 @@ def list_devices() -> list[tuple[str, str]]:
                 if not ident:
                     continue
                 dev = f"/dev/{ident}"
-                info_cp = run(["diskutil", "info", "-plist", dev], capture_output=True)
-                label = dev
-                try:
-                    meta = plistlib.loads(info_cp.stdout.encode())
-                    size_bytes = int(meta.get("TotalSize", 0) or 0)
-                    size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
-                    media = meta.get("IORegistryEntryName") or meta.get("MediaName") or "USB"
-                    label = f"{dev} ({size}) {media}"
-                except Exception:
-                    pass
-                devices.append((dev, label))
+                ok_safe, safe_dev, rows, _reason = device_safety_report(dev)
+                if not ok_safe:
+                    continue
+                details = {key: value for key, value in rows}
+                label = f"{safe_dev} ({details.get('Size', 'unknown size')}) {details.get('Model/media', 'USB')} serial={details.get('Serial/id', 'unknown')}"
+                devices.append((safe_dev, label))
         except Exception:
             pass
     elif sysname == "Linux":
-        cp = run(["lsblk", "-dpno", "NAME,SIZE,TRAN,TYPE,MODEL"], capture_output=True)
-        for line in cp.stdout.splitlines():
-            parts = line.split(None, 4)
-            if len(parts) >= 4 and parts[3] == "disk":
-                name, size, tran = parts[0], parts[1], parts[2]
-                model = parts[4] if len(parts) > 4 else ""
-                if tran in {"usb", "mmc"} or name.startswith("/dev/sd"):
-                    devices.append((name, f"{name} ({size}) {model}".strip()))
+        for info in linux_lsblk_devices():
+            if not linux_device_is_removable_disk(info):
+                continue
+            path = info.get("path") or (f"/dev/{info.get('name')}" if info.get("name") else "")
+            if not path:
+                continue
+            size = format_size_bytes(int(info.get("size", 0) or 0))
+            model = str(info.get("model") or "USB")
+            serial = str(info.get("serial") or "unknown")
+            devices.append((path, f"{path} ({size}) {model} serial={serial}".strip()))
     return devices
 
 
@@ -249,6 +359,7 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
     deduped: list[str] = []
     seen: set[str] = set()
     for pkg in packages:
+        validate_package_name(pkg)
         if pkg not in seen:
             seen.add(pkg)
             deduped.append(pkg)
@@ -256,6 +367,7 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
 
 
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    validate_branch(args.branch)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
     wms = list(args.wm or [])
@@ -328,14 +440,48 @@ def confirm(prompt: str, yes: bool = False) -> bool:
     return answer in {"y", "yes", "s", "si", "sí"}
 
 
+SECRET_ENV_TO_FILE = {
+    "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
+    "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+}
+
+
+def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]:
+    safe_env = dict(env)
+    created: list[Path] = []
+    secret_dir = repo_root() / ".work" / "secrets"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    secret_dir.chmod(0o700)
+    for key, file_key in SECRET_ENV_TO_FILE.items():
+        value = safe_env.pop(key, "")
+        path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
+        path.write_text(value)
+        path.chmod(0o600)
+        safe_env[file_key] = str(path)
+        created.append(path)
+    return safe_env, created
+
+
+def cleanup_secret_files(paths: list[Path]):
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def run_config_dry_run(env: dict[str, str]) -> int:
     sys.stdout.flush()
     dry_env = os.environ.copy()
-    dry_env.update(env)
+    safe_env, secret_files = prepare_secret_env(env)
+    dry_env.update(safe_env)
     dry_env["ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
-    proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
-    return proc.wait()
+    try:
+        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        return proc.wait()
+    finally:
+        cleanup_secret_files(secret_files)
 
 
 def cmd_build(args: argparse.Namespace) -> int:
@@ -343,7 +489,14 @@ def cmd_build(args: argparse.Namespace) -> int:
         args.password = getpass.getpass("User password: ")
         root_pw = getpass.getpass("Root password (empty = same as user): ")
         args.root_password = root_pw or args.password
-    env = env_from_build_args(args)
+    if not args.password:
+        err("User password is required. Use --ask-password or --password.")
+        return 2
+    try:
+        env = env_from_build_args(args)
+    except ValueError as exc:
+        err(str(exc))
+        return 2
     output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
@@ -359,7 +512,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         return 1
 
     build_env = os.environ.copy()
-    build_env.update(env)
+    safe_env, secret_files = prepare_secret_env(env)
+    build_env.update(safe_env)
     build_name = env["IMAGE_NAME"]
     built_path = repo_root() / build_name
     try:
@@ -382,6 +536,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         ok(f"Image ready: {output}")
         return 0
     finally:
+        cleanup_secret_files(secret_files)
         if built_path.exists() and built_path != output:
             try:
                 built_path.unlink()
@@ -390,6 +545,11 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    try:
+        validate_branch(args.branch)
+    except ValueError as exc:
+        err(str(exc))
+        return 2
     info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
     try:
         results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
@@ -429,10 +589,7 @@ def selected_device(label: str) -> str | None:
 
 
 def looks_like_partition(dev: str) -> bool:
-    sysname = platform.system()
-    if sysname == "Darwin":
-        return bool(re.match(r"^/dev/disk\d+s\d+", dev))
-    return bool(re.match(r"^/dev/(sd[a-z]\d+|nvme\d+n\d+p\d+|mmcblk\d+p\d+)", dev))
+    return bool(re.match(r"^/dev/(r?disk\d+s\d+|sd[a-z]\d+|nvme\d+n\d+p\d+|mmcblk\d+p\d+)", dev))
 
 
 def cmd_flash(args: argparse.Namespace) -> int:
@@ -444,15 +601,16 @@ def cmd_flash(args: argparse.Namespace) -> int:
     if not dev:
         err("Invalid target device.")
         return 1
-    if looks_like_partition(dev):
-        err(f"Use the whole disk, not a partition: {dev}")
+    ok_safe, dev, device_rows, reason = device_safety_report(dev)
+    if not ok_safe:
+        err(reason or "Unsafe target device.")
         return 1
 
-    print_panel("Flash USB", [("Image", str(image)), ("Target", dev), ("Size", f"{image.stat().st_size / 1_000_000_000:.1f} GB")])
+    print_panel("Flash USB", [("Image", str(image)), ("Image size", f"{image.stat().st_size / 1_000_000_000:.1f} GB"), *device_rows])
     if not args.yes:
         warn("This permanently erases the selected USB device.")
-        typed = input(f"Type {c('ERASE', C.red)} to continue: ").strip()
-        if typed != "ERASE":
+        typed = input(f"Type {c(f'ERASE {dev}', C.red)} to continue: ").strip()
+        if typed != f"ERASE {dev}":
             warn("Cancelled.")
             return 1
 
@@ -513,7 +671,7 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
-    parser.add_argument("--password", default="alpine", help="Initial user password (use --ask-password to avoid shell history)")
+    parser.add_argument("--password", default=None, help="Initial user password (use --ask-password to avoid shell history)")
     parser.add_argument("--root-password", default=None, help="Initial root password; default is user password")
     parser.add_argument("--ask-password", action="store_true", help="Prompt for passwords interactively")
     parser.add_argument("--timezone", default="UTC")

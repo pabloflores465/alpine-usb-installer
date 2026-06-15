@@ -1,8 +1,26 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import html, io, json, os, platform, plistlib, re, shutil, subprocess, sys, tarfile, tempfile, urllib.request
+import html, io, json, os, platform, plistlib, re, shutil, stat, subprocess, sys, tarfile, tempfile, urllib.request
 from pathlib import Path
+
+def secure_runtime_dir(name: str) -> Path:
+    uid = os.getuid() if hasattr(os, "getuid") else "user"
+    base = Path(tempfile.gettempdir()) / f"alpine-usb-installer-{uid}"
+    for path in [base, base / name]:
+        if path.is_symlink():
+            raise RuntimeError(f"Refusing symlinked runtime path: {path}")
+        if path.exists():
+            st = path.stat()
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                raise RuntimeError(f"Refusing runtime path not owned by current user: {path}")
+            if stat.S_IMODE(st.st_mode) & 0o077:
+                path.chmod(0o700)
+        else:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.chmod(0o700)
+    return base / name
+
 
 def prepare_frozen_runtime(bundle_dir: Path) -> Path:
     """Copy bundled build resources to a writable, stable directory.
@@ -12,8 +30,7 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
     create work files next to themselves. Use /tmp/alpine-usb-installer/app-runtime
     instead and make sure required files/directories exist there.
     """
-    runtime = Path(tempfile.gettempdir()) / "alpine-usb-installer" / "app-runtime"
-    runtime.mkdir(parents=True, exist_ok=True)
+    runtime = secure_runtime_dir("app-runtime")
     for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
         src = bundle_dir / name
         if src.exists():
@@ -27,7 +44,9 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
         if dst_efi.exists():
             shutil.rmtree(dst_efi)
         shutil.copytree(src_efi, dst_efi)
-    (runtime / ".work").mkdir(exist_ok=True)
+    work = runtime / ".work"
+    work.mkdir(exist_ok=True)
+    work.chmod(0o700)
     return runtime
 
 
@@ -258,6 +277,8 @@ def add_combo_items(combo: QComboBox, items):
 APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
 APK_SEARCH_REPOS = ("main", "community")
 APK_INDEX_CACHE: dict[tuple[str, str], list[dict[str, str]]] = {}
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
+BRANCH_RE = re.compile(r"^(latest-stable|edge|v[0-9]+\.[0-9]+)$")
 
 
 def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
@@ -280,7 +301,21 @@ def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
     return packages
 
 
+def validate_branch(branch: str) -> str:
+    if not BRANCH_RE.match(branch):
+        raise ValueError("Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)")
+    return branch
+
+
+def validate_extra_packages(text: str) -> str | None:
+    for package in [part for part in re.split(r"\s+", text.strip()) if part]:
+        if not PACKAGE_RE.match(package):
+            return f"Invalid package name: {package}"
+    return None
+
+
 def fetch_official_apk_packages(branch: str, arch: str) -> list[dict[str, str]]:
+    branch = validate_branch(branch)
     key = (branch, arch)
     if key in APK_INDEX_CACHE:
         return APK_INDEX_CACHE[key]
@@ -332,6 +367,89 @@ def search_official_apk_packages(branch: str, arch: str, query: str, limit: int 
     return [item[3] for item in results[:limit]]
 
 
+def format_size_bytes(size: int | None) -> str:
+    if not size:
+        return "unknown size"
+    value = float(size)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if value < 1000 or unit == "TB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1000
+    return f"{int(value)} B"
+
+
+def linux_lsblk_devices(path: str | None = None) -> list[dict]:
+    cmd = ["lsblk", "-J", "-b", "-o", "PATH,NAME,SIZE,TRAN,TYPE,MODEL,SERIAL,RM,HOTPLUG"]
+    if path:
+        cmd.append(path)
+    cp = run(cmd)
+    if cp.returncode != 0:
+        return []
+    try:
+        return json.loads(cp.stdout).get("blockdevices", []) or []
+    except Exception:
+        return []
+
+
+def linux_device_is_removable_disk(info: dict) -> bool:
+    return (
+        info.get("type") == "disk"
+        and (str(info.get("rm", "0")) == "1" or str(info.get("hotplug", "0")) == "1" or info.get("tran") == "usb")
+    )
+
+
+def looks_like_partition(dev: str) -> bool:
+    return bool(re.match(r"^/dev/(r?disk\d+s\d+|sd[a-z]\d+|nvme\d+n\d+p\d+|mmcblk\d+p\d+)", dev))
+
+
+def normalize_disk_device(dev: str) -> str:
+    if platform.system() == "Darwin" and dev.startswith("/dev/rdisk"):
+        return dev.replace("/dev/rdisk", "/dev/disk", 1)
+    return dev
+
+
+def device_safety_report(dev: str) -> tuple[bool, str, list[tuple[str, str]], str | None]:
+    dev = normalize_disk_device(dev)
+    rows: list[tuple[str, str]] = [("Target", dev)]
+    if looks_like_partition(dev):
+        return False, dev, rows, f"Use the whole disk, not a partition: {dev}"
+    if platform.system() == "Darwin":
+        if not re.match(r"^/dev/disk\d+$", dev):
+            return False, dev, rows, "macOS target must be a whole disk like /dev/disk7"
+        info = run(["diskutil", "info", "-plist", dev])
+        if info.returncode != 0:
+            return False, dev, rows, f"Could not inspect target device: {dev}"
+        try:
+            meta = plistlib.loads(info.stdout.encode())
+        except Exception as exc:
+            return False, dev, rows, f"Could not parse diskutil info for {dev}: {exc}"
+        if bool(meta.get("Internal")):
+            return False, dev, rows, f"Refusing to flash internal disk: {dev}"
+        rows.extend([
+            ("Model/media", str(meta.get("MediaName") or meta.get("IORegistryEntryName") or "unknown")),
+            ("Size", format_size_bytes(int(meta.get("TotalSize", 0) or 0))),
+            ("Protocol", str(meta.get("BusProtocol") or meta.get("DeviceProtocol") or "unknown")),
+            ("Serial/id", str(meta.get("DeviceIdentifier") or "unknown")),
+        ])
+        return True, dev, rows, None
+    if platform.system() == "Linux":
+        infos = linux_lsblk_devices(dev)
+        if not infos:
+            return False, dev, rows, f"Could not inspect target device with lsblk: {dev}"
+        info = infos[0]
+        if not linux_device_is_removable_disk(info):
+            return False, dev, rows, f"Refusing non-removable/non-hotplug disk: {dev}"
+        rows.extend([
+            ("Model", str(info.get("model") or "unknown")),
+            ("Size", format_size_bytes(int(info.get("size", 0) or 0))),
+            ("Transport", str(info.get("tran") or "unknown")),
+            ("Serial", str(info.get("serial") or "unknown")),
+            ("RM/HOTPLUG", f"{info.get('rm', 0)}/{info.get('hotplug', 0)}"),
+        ])
+        return True, dev, rows, None
+    return False, dev, rows, "Windows flashing not implemented. Use Rufus/balenaEtcher."
+
+
 def list_devices():
     sysname = platform.system()
     devices = []
@@ -344,49 +462,34 @@ def list_devices():
                 if not ident:
                     continue
                 dev = f"/dev/{ident}"
-                info = run(["diskutil", "info", "-plist", dev])
-                label = dev
-                try:
-                    meta = plistlib.loads(info.stdout.encode())
-                    size_bytes = int(meta.get("TotalSize", 0) or 0)
-                    size = f"{size_bytes / 1_000_000_000:.1f} GB" if size_bytes else "unknown size"
-                    media = meta.get("IORegistryEntryName") or meta.get("MediaName") or "USB"
-                    volumes = []
-                    for part in disk.get("Partitions", []) or []:
-                        vol = part.get("VolumeName")
-                        part_id = part.get("DeviceIdentifier")
-                        if not vol and part_id:
-                            part_info = run(["diskutil", "info", "-plist", f"/dev/{part_id}"])
-                            try:
-                                part_meta = plistlib.loads(part_info.stdout.encode())
-                                vol = (
-                                    part_meta.get("VolumeName")
-                                    or part_meta.get("MediaName")
-                                    or part_meta.get("MountPoint", "").rstrip("/").split("/")[-1]
-                                )
-                            except Exception:
-                                pass
-                        content = part.get("Content")
-                        if vol and vol not in volumes:
-                            volumes.append(vol)
-                        elif content and content not in {"EFI", "Apple_partition_scheme"} and content not in volumes:
-                            volumes.append(content)
-                    vol_text = f" — Volume: {', '.join(volumes)}" if volumes else ""
-                    label = f"{dev} ({size}) {media}{vol_text}"
-                except Exception:
-                    pass
-                devices.append((dev, label))
+                ok_safe, safe_dev, rows, _reason = device_safety_report(dev)
+                if not ok_safe:
+                    continue
+                details = {key: value for key, value in rows}
+                volumes = []
+                for part in disk.get("Partitions", []) or []:
+                    vol = part.get("VolumeName")
+                    content = part.get("Content")
+                    if vol and vol not in volumes:
+                        volumes.append(vol)
+                    elif content and content not in {"EFI", "Apple_partition_scheme"} and content not in volumes:
+                        volumes.append(content)
+                vol_text = f" — Volume: {', '.join(volumes)}" if volumes else ""
+                label = f"{safe_dev} ({details.get('Size', 'unknown size')}) {details.get('Model/media', 'USB')} serial={details.get('Serial/id', 'unknown')}{vol_text}"
+                devices.append((safe_dev, label))
         except Exception:
             pass
     elif sysname == "Linux":
-        cp = run(["lsblk", "-dpno", "NAME,SIZE,TRAN,TYPE,MODEL"])
-        for line in cp.stdout.splitlines():
-            parts = line.split(None, 4)
-            if len(parts) >= 4 and parts[3] == "disk":
-                name, size, tran = parts[0], parts[1], parts[2]
-                model = parts[4] if len(parts) > 4 else ""
-                if tran in {"usb", "mmc"} or name.startswith("/dev/sd"):
-                    devices.append((name, f"{name} ({size}) {model}".strip()))
+        for info in linux_lsblk_devices():
+            if not linux_device_is_removable_disk(info):
+                continue
+            path = info.get("path") or (f"/dev/{info.get('name')}" if info.get("name") else "")
+            if not path:
+                continue
+            size = format_size_bytes(int(info.get("size", 0) or 0))
+            model = str(info.get("model") or "USB")
+            serial = str(info.get("serial") or "unknown")
+            devices.append((path, f"{path} ({size}) {model} serial={serial}".strip()))
     return devices
 
 
@@ -582,6 +685,36 @@ class PackageSuggestionList(QListWidget):
         super().keyPressEvent(event)
 
 
+SECRET_ENV_TO_FILE = {
+    "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
+    "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+}
+
+
+def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]:
+    safe_env = dict(env)
+    created: list[Path] = []
+    secret_dir = SCRIPT_DIR / ".work" / "secrets"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    secret_dir.chmod(0o700)
+    for key, file_key in SECRET_ENV_TO_FILE.items():
+        value = safe_env.pop(key, "")
+        path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
+        path.write_text(value)
+        path.chmod(0o600)
+        safe_env[file_key] = str(path)
+        created.append(path)
+    return safe_env, created
+
+
+def cleanup_secret_files(paths: list[Path]):
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 class BuildWorker(QThread):
     log = Signal(str)
     done = Signal(bool, str)
@@ -594,7 +727,8 @@ class BuildWorker(QThread):
     def run(self):
         try:
             env = os.environ.copy()
-            env.update({k: str(v) for k, v in self.config_env.items()})
+            safe_config_env, secret_files = prepare_secret_env({k: str(v) for k, v in self.config_env.items()})
+            env.update(safe_config_env)
             env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
             script = SCRIPT_DIR / "build-alpine-usb.sh"
             if not script.exists():
@@ -620,6 +754,8 @@ class BuildWorker(QThread):
             self.done.emit(True, f"Image build complete: {final}")
         except Exception as e:
             self.done.emit(False, str(e))
+        finally:
+            cleanup_secret_files(locals().get("secret_files", []))
 
 
 class FlashWorker(QThread):
@@ -644,6 +780,9 @@ class FlashWorker(QThread):
             dev = self.selected_device()
             if not dev:
                 raise RuntimeError("Invalid USB device")
+            ok_safe, dev, _rows, reason = device_safety_report(dev)
+            if not ok_safe:
+                raise RuntimeError(reason or "Unsafe USB target")
             if platform.system() == "Darwin":
                 raw = dev.replace("/dev/disk", "/dev/rdisk")
                 tmp_image = os.path.join(tempfile.gettempdir(), DEFAULT_IMAGE_NAME)
@@ -719,6 +858,9 @@ class FlashWorker(QThread):
                 raise RuntimeError("Windows flashing not implemented. Use Rufus/balenaEtcher.")
         except Exception as e:
             self.done.emit(False, str(e))
+        finally:
+            # Keep the sudo password only for the active flash operation.
+            self.sudo_password = None
 
     def tail_progress(self, log_path: str, pos: int, total: int, last_percent: int):
         if not os.path.exists(log_path):
@@ -793,8 +935,13 @@ class Main(QWidget):
         self.arch = QComboBox(); add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
         self.username = QLineEdit("alpine")
-        self.password = QLineEdit("alpine"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.root_password = QLineEdit("alpine"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password = QLineEdit(""); self.password.setEchoMode(QLineEdit.EchoMode.Password); self.password.setPlaceholderText("Required")
+        self.root_password = QLineEdit(""); self.root_password.setEchoMode(QLineEdit.EchoMode.Password); self.root_password.setPlaceholderText("Same as user password")
+        self.root_password.setReadOnly(True)
+        self.separate_root_password_label = "Use separate root password"
+        self.separate_root_password = QCheckBox()
+        self.separate_root_password.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.separate_root_password.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.show_passwords_label = "Show passwords"
         self.show_passwords = QCheckBox()
         self.show_passwords.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -892,8 +1039,9 @@ class Main(QWidget):
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
             "username": self.username.text(),
-            "password": self.password.text(),
-            "root_password": self.root_password.text(),
+            "separate_root_password": self.separate_root_password.isChecked(),
+            # Passwords are intentionally not persisted. They stay in memory for
+            # the current app session and are read only when building an image.
             "timezone": self.timezone.currentText(),
             "locale": self.locale.currentText(),
             "console_keymap": self.console_keymap.currentText(),
@@ -924,8 +1072,9 @@ class Main(QWidget):
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
         self.username.setText(str(cfg.get("username", "alpine")))
-        self.password.setText(str(cfg.get("password", "alpine")))
-        self.root_password.setText(str(cfg.get("root_password", "alpine")))
+        self.separate_root_password.setChecked(bool(cfg.get("separate_root_password", False)))
+        # Never load persisted passwords. Older config files may contain these
+        # keys; load_saved_config_if_available() scrubs them from disk.
         self.timezone.setCurrentText(str(cfg.get("timezone", "UTC")))
         self.locale.setCurrentText(str(cfg.get("locale", "en_US.UTF-8")))
         self.console_keymap.setCurrentText(str(cfg.get("console_keymap", "us")))
@@ -969,9 +1118,20 @@ class Main(QWidget):
         current = current or self.snapshot_config()
         return any(self.config_dirty(key, current) for key in keys)
 
+    def update_required_field_highlights(self):
+        if not hasattr(self, "password"):
+            return
+        required_empty_style = (
+            "background:#450a0a;color:#ffffff;border:1px solid #ef4444;"
+            "border-radius:4px;padding:2px 5px;min-height:24px;"
+        )
+        self.password.setStyleSheet(required_empty_style if not self.password.text().strip() else "")
+        self.root_password.setStyleSheet(required_empty_style if self.separate_root_password.isChecked() and not self.root_password.text().strip() else "")
+
     def update_dirty_indicators(self):
         if not hasattr(self, "field_labels"):
             return
+        self.update_required_field_highlights()
         current = self.snapshot_config()
         for key, label in self.field_labels.items():
             dirty = self.config_dirty(key, current)
@@ -995,31 +1155,48 @@ class Main(QWidget):
         if hasattr(self, "save_config_button"):
             self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
 
+    def write_saved_config(self, cfg: dict):
+        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SAVED_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, sort_keys=True))
+        try:
+            SAVED_CONFIG_PATH.chmod(0o600)
+        except OSError:
+            pass
+
     def load_saved_config_if_available(self):
         try:
             if SAVED_CONFIG_PATH.exists():
                 cfg = json.loads(SAVED_CONFIG_PATH.read_text())
-                self.saved_config_snapshot = dict(cfg)
-                self.apply_config(cfg)
+                scrubbed = dict(cfg)
+                scrubbed.pop("password", None)
+                scrubbed.pop("root_password", None)
+                if scrubbed != cfg:
+                    self.write_saved_config(scrubbed)
+                self.saved_config_snapshot = dict(scrubbed)
+                self.apply_config(scrubbed)
+                self.password.clear()
+                self.root_password.clear()
+                self.sync_root_password_state()
         except Exception:
             pass
 
     def save_config(self):
-        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.saved_config_snapshot = self.snapshot_config()
-        SAVED_CONFIG_PATH.write_text(json.dumps(self.saved_config_snapshot, indent=2, sort_keys=True))
+        self.write_saved_config(self.saved_config_snapshot)
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(self, "info", APP_TITLE, f"Configuration saved:\n{SAVED_CONFIG_PATH}")
+        modal(self, "info", APP_TITLE, f"Configuration saved:\n{SAVED_CONFIG_PATH}\n\nPasswords are not saved; enter them again after restarting the app.")
 
     def restore_defaults(self):
         self.saved_config_snapshot = dict(self.default_config)
         self.apply_config(dict(self.default_config))
-        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SAVED_CONFIG_PATH.write_text(json.dumps(self.saved_config_snapshot, indent=2, sort_keys=True))
+        self.password.clear()
+        self.root_password.clear()
+        self.sync_root_password_state()
+        self.write_saved_config(self.saved_config_snapshot)
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(self, "info", APP_TITLE, "Default image configuration restored.")
+        modal(self, "info", APP_TITLE, "Default image configuration restored. Passwords were not saved.")
 
     def connect_config_change_signals(self):
         def changed(*_args):
@@ -1034,10 +1211,18 @@ class Main(QWidget):
         ]:
             widget.currentTextChanged.connect(changed)
         for widget in [
-            self.image, self.hostname, self.username, self.xkb_variant, self.xkb_model,
-            self.boot_timeout, self.extra_packages,
+            self.image, self.hostname, self.username, self.xkb_variant,
+            self.xkb_model, self.boot_timeout, self.extra_packages,
         ]:
             widget.textChanged.connect(changed)
+
+        def password_changed(*_args):
+            self.sync_root_password_state()
+            changed()
+
+        self.password.textChanged.connect(password_changed)
+        self.root_password.textChanged.connect(changed)
+        self.separate_root_password.stateChanged.connect(lambda *_args: (self.sync_root_password_state(), changed()))
         for widget in [self.auto_resize, self.wifi, self.bluetooth, *self.wm_checks.values()]:
             widget.stateChanged.connect(changed)
 
@@ -1056,6 +1241,17 @@ class Main(QWidget):
         layout.addStretch(1)
         return row
 
+    def sync_root_password_state(self):
+        if not hasattr(self, "separate_root_password"):
+            return
+        separate = self.separate_root_password.isChecked()
+        if not separate and self.root_password.text() != self.password.text():
+            self.root_password.setText(self.password.text())
+        self.root_password.setReadOnly(not separate)
+        self.root_password.setPlaceholderText("Required when separate" if separate else "Same as user password")
+        self.root_password.setToolTip("Enter a different root password" if separate else "Root password will match the user password")
+        self.update_required_field_highlights()
+
     def toggle_password_visibility(self):
         mode = QLineEdit.EchoMode.Normal if self.show_passwords.isChecked() else QLineEdit.EchoMode.Password
         self.password.setEchoMode(mode)
@@ -1070,6 +1266,7 @@ class Main(QWidget):
             QLabel { color:#ffffff; margin:0px; padding:0px; border:0; background:transparent; }
             QFormLayout QLabel { border:0; background:transparent; }
             QLineEdit, QComboBox { background:#1f2937; color:#ffffff; border:0; border-radius:4px; padding:2px 5px; min-height:24px; }
+            QLineEdit:read-only { background:#111827; color:#cbd5e1; border:1px solid #374151; }
             QComboBox QAbstractItemView { background:#1f2937; color:#ffffff; selection-background-color:#2563eb; }
             QCheckBox { color:#ffffff; spacing:8px; min-height:22px; border:0; background:transparent; padding:0px; }
             QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
@@ -1181,19 +1378,24 @@ class Main(QWidget):
 
     def add_config_sections(self, parent_layout: QVBoxLayout):
         self.section_fields = {
-            "system": ["image_size", "alpine_branch", "arch", "hostname", "username", "password", "root_password", "timezone", "locale", "console_keymap", "xkb_layout", "xkb_variant", "xkb_model"],
+            "system": ["image_size", "alpine_branch", "arch", "hostname", "username", "separate_root_password", "password", "root_password", "timezone", "locale", "console_keymap", "xkb_layout", "xkb_variant", "xkb_model"],
             "desktop": ["desktop", "display_manager", "default_session", "browser", "audio", "wms"],
             "network": ["network", "wifi", "bluetooth"],
             "boot": ["bootloader", "kernel", "firmware", "boot_timeout", "auto_resize"],
             "extra": ["extra_packages"],
         }
 
-        system = CollapsibleSection("System, user, localization", collapsed=True)
+        system = CollapsibleSection("System, user, localization (required)", collapsed=False)
         self.sections["system"] = system
+        required_note = QLabel("Required before build. By default, root password matches the user password. Enable separate root password only if you want different credentials. Passwords are not saved.")
+        required_note.setWordWrap(True)
+        required_note.setStyleSheet("color:#fbbf24;font-size:12px;margin:2px 0px 8px 0px;padding:0px;border:0;background:transparent;")
+        system.body_layout.addWidget(required_note)
         form = QFormLayout(); form.setLabelAlignment(Qt.AlignmentFlag.AlignRight); form.setHorizontalSpacing(12); form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size), ("alpine_branch", "Alpine branch:", self.alpine_branch), ("arch", "Architecture:", self.arch),
-            ("hostname", "Hostname:", self.hostname), ("username", "User:", self.username), ("password", "User password:", self.password),
+            ("hostname", "Hostname:", self.hostname), ("username", "User:", self.username), ("password", "User password *:", self.password),
+            ("separate_root_password", "", self.checkbox_row(self.separate_root_password, self.separate_root_password_label, "separate_root_password")),
             ("root_password", "Root password:", self.root_password), ("show_passwords", "", self.checkbox_row(self.show_passwords, self.show_passwords_label)),
             ("timezone", "Timezone:", self.timezone), ("locale", "Locale:", self.locale),
             ("console_keymap", "Console keymap:", self.console_keymap), ("xkb_layout", "XKB layout:", self.xkb_layout),
@@ -1446,7 +1648,7 @@ class Main(QWidget):
 
     def collect_build_env(self) -> dict[str, str]:
         password = self.password.text()
-        root_password = self.root_password.text() or password
+        root_password = self.root_password.text() if self.separate_root_password.isChecked() else password
         return {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
@@ -1483,10 +1685,17 @@ class Main(QWidget):
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
+        if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
+            return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
         if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
             return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
         if not env["ALPINE_USB_PASSWORD"]:
             return "User password cannot be empty."
+        if self.separate_root_password.isChecked() and not env["ALPINE_USB_ROOT_PASSWORD"]:
+            return "Root password cannot be empty when separate root password is enabled."
+        package_error = validate_extra_packages(env["ALPINE_USB_EXTRA_PACKAGES"])
+        if package_error:
+            return package_error
         if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env["ALPINE_USB_HOSTNAME"]):
             return "Hostname may contain only letters, numbers and dash; it cannot start/end with dash."
         if not env["ALPINE_USB_BOOT_TIMEOUT"].isdigit():
@@ -1619,8 +1828,13 @@ class Main(QWidget):
             modal(self, "error", APP_TITLE, "Image not found."); return
         if not dev:
             modal(self, "error", APP_TITLE, "Select USB device."); return
-        if not modal(self, "question", APP_TITLE, f"Erase and flash?\n\n{dev}\n\nImage: {img}", question=True):
+        ok_safe, safe_dev, device_rows, reason = device_safety_report(dev)
+        if not ok_safe:
+            modal(self, "error", APP_TITLE, reason or "Unsafe USB target."); return
+        device_details = "\n".join(f"{key}: {value}" for key, value in device_rows)
+        if not modal(self, "question", APP_TITLE, f"Erase and flash this device?\n\n{device_details}\n\nImage: {img}\n\nThis permanently erases the selected USB device.", question=True):
             return
+        dev = safe_dev
         sudo_password = None
         if platform.system() == "Darwin":
             sudo_password, ok = QInputDialog.getText(

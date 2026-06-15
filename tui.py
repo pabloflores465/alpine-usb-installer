@@ -41,8 +41,8 @@ DEFAULT_CONFIG = {
     "arch": "x86_64",
     "hostname": "alpine-usb",
     "user": "alpine",
-    "password": "alpine",
-    "root_password": "alpine",
+    "password": "",
+    "root_password": "",
     "timezone": "UTC",
     "locale": "en_US.UTF-8",
     "language": "",
@@ -393,7 +393,7 @@ class TuiApp:
             hostname=self.config["hostname"],
             user=self.config["user"],
             password=self.config["password"],
-            root_password=self.config["root_password"],
+            root_password=self.config["root_password"] or self.config["password"],
             ask_password=False,
             timezone=self.config["timezone"],
             locale=self.config["locale"],
@@ -436,9 +436,19 @@ class TuiApp:
             curses.curs_set(0)
             self.stdscr.keypad(True)
 
+    def validate_build_config(self) -> bool:
+        if not str(self.config["password"]).strip():
+            self.message("Build image", "User password is required before build.", error=True)
+            return False
+        return True
+
     def build_screen(self):
         while True:
-            env = cli.env_from_build_args(self.namespace(dry_run=True))
+            try:
+                env = cli.env_from_build_args(self.namespace(dry_run=True))
+            except ValueError as exc:
+                self.message("Build profile", str(exc), error=True)
+                return
             items = [
                 ("Output", self.config["output"]),
                 ("Profile", f"{self.config['desktop']} / {self.config['display_manager']} / {self.config['bootloader']}"),
@@ -455,12 +465,14 @@ class TuiApp:
                 if value:
                     self.config["output"] = value
             elif choice == 3:
-                self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=True, yes=True)))
+                if self.validate_build_config():
+                    self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=True, yes=True)))
             elif choice == 4:
-                if self.confirm_curses("Build the image now? This can take a while."):
+                if self.validate_build_config() and self.confirm_curses("Build the image now? This can take a while."):
                     self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=False, yes=True)))
             else:
-                self.message("Build profile", "\n".join(f"{k}={v}" for k, v in env.items() if k.startswith("ALPINE_USB_") or k in {"IMAGE_SIZE", "ALPINE_BRANCH", "ARCH"}))
+                hidden = {"ALPINE_USB_PASSWORD", "ALPINE_USB_ROOT_PASSWORD"}
+                self.message("Build profile", "\n".join(f"{k}={v}" for k, v in env.items() if (k.startswith("ALPINE_USB_") and k not in hidden) or k in {"IMAGE_SIZE", "ALPINE_BRANCH", "ARCH"}))
 
     def usb_screen(self):
         while True:
@@ -530,8 +542,8 @@ class TuiApp:
                     ("Architecture", "arch", "choice"),
                     ("Hostname", "hostname", "text"),
                     ("User", "user", "text"),
-                    ("User password", "password", "password"),
-                    ("Root password", "root_password", "password"),
+                    ("User password (required)", "password", "password"),
+                    ("Root password (empty = same)", "root_password", "password"),
                     ("Timezone", "timezone", "choice"),
                     ("Locale", "locale", "choice"),
                     ("Language", "language", "text"),
@@ -585,6 +597,8 @@ def run_tui(stdscr):
 
 def self_test() -> int:
     app_config = dict(DEFAULT_CONFIG)
+    app_config["password"] = "testpass"
+    app_config["root_password"] = ""
     app_config["wms"] = ["i3", "sway"]
     assert app_config["desktop"] == "xfce"
     assert "systemd-boot" in CHOICES["bootloader"]

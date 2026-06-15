@@ -56,10 +56,33 @@ safe_optional_token() {
   safe_token "$name" "$value"
 }
 
+safe_package_name() {
+  pkg="$1"
+  case "$pkg" in
+    ""|-*|*[!A-Za-z0-9+_.-]*) die "Invalid package name: $pkg" ;;
+  esac
+}
+
+read_secret_value() {
+  file_var="$1"
+  value_var="$2"
+  default_value="$3"
+  eval "file_value=\${$file_var:-}"
+  eval "direct_value=\${$value_var:-}"
+  if [ -n "$file_value" ]; then
+    [ -f "$file_value" ] || die "Secret file not found: $file_value"
+    cat "$file_value"
+  elif [ -n "$direct_value" ]; then
+    printf '%s' "$direct_value"
+  else
+    printf '%s' "$default_value"
+  fi
+}
+
 # ---- Input configuration -------------------------------------------------
 USER_NAME="${ALPINE_USB_USER:-alpine}"
-USER_PASSWORD="${ALPINE_USB_PASSWORD:-alpine}"
-ROOT_PASSWORD="${ALPINE_USB_ROOT_PASSWORD:-$USER_PASSWORD}"
+USER_PASSWORD="$(read_secret_value ALPINE_USB_PASSWORD_FILE ALPINE_USB_PASSWORD alpine)"
+ROOT_PASSWORD="$(read_secret_value ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD "$USER_PASSWORD")"
 HOSTNAME="${ALPINE_USB_HOSTNAME:-alpine-usb}"
 TIMEZONE="${ALPINE_USB_TIMEZONE:-UTC}"
 LOCALE="${ALPINE_USB_LOCALE:-en_US.UTF-8}"
@@ -256,8 +279,10 @@ case "$BROWSER" in
   none) ;;
 esac
 
-# shellcheck disable=SC2086 # EXTRA_PACKAGES is intentionally word-split package names.
-append_packages $EXTRA_PACKAGES
+for pkg in $EXTRA_PACKAGES; do
+  safe_package_name "$pkg"
+  append_packages "$pkg"
+done
 
 if [ "$DRY_RUN" = "1" ]; then
   cat <<EOF
@@ -497,8 +522,8 @@ chmod 440 /etc/sudoers.d/wheel
 
 mkdir -p /etc/X11
 cat > /etc/X11/Xwrapper.config <<'EOF'
-allowed_users=anybody
-needs_root_rights=yes
+allowed_users=console
+needs_root_rights=auto
 EOF
 
 cat > "/home/$USER_NAME/.dmrc" <<EOF
@@ -637,10 +662,10 @@ polkit.addRule(function(action, subject) {
     if (powerActions.indexOf(action.id) >= 0 && subject.local && subject.active && (subject.isInGroup("wheel") || subject.user == "lightdm" || subject.user == "sddm" || subject.user == "gdm" || subject.user == "greetd")) {
         return polkit.Result.YES;
     }
-    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.local && subject.active && (subject.isInGroup("plugdev") || subject.isInGroup("netdev") || subject.isInGroup("wheel"))) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.local && subject.active && (subject.isInGroup("netdev") || subject.isInGroup("wheel"))) {
         return polkit.Result.YES;
     }
-    if (action.id.indexOf("org.bluez.") === 0 && subject.local && subject.active && (subject.isInGroup("plugdev") || subject.isInGroup("wheel"))) {
+    if (action.id.indexOf("org.bluez.") === 0 && subject.local && subject.active && subject.isInGroup("wheel")) {
         return polkit.Result.YES;
     }
 });
