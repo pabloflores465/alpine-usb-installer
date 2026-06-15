@@ -686,6 +686,8 @@ class Main(QWidget):
         self.username = QLineEdit("alpine")
         self.password = QLineEdit("alpine"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.root_password = QLineEdit("alpine"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.show_passwords = QCheckBox("Show passwords")
+        self.show_passwords.stateChanged.connect(self.toggle_password_visibility)
         self.timezone = QComboBox(); self.timezone.setEditable(True)
         add_combo_items(self.timezone, ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"])
         self.locale = QComboBox(); self.locale.setEditable(True)
@@ -769,6 +771,11 @@ class Main(QWidget):
             widget.textChanged.connect(changed)
         for widget in [self.auto_resize, self.wifi, self.bluetooth, *self.wm_checks.values()]:
             widget.stateChanged.connect(changed)
+
+    def toggle_password_visibility(self):
+        mode = QLineEdit.EchoMode.Normal if self.show_passwords.isChecked() else QLineEdit.EchoMode.Password
+        self.password.setEchoMode(mode)
+        self.root_password.setEchoMode(mode)
 
     def build(self):
         layout = QVBoxLayout(self)
@@ -874,7 +881,7 @@ class Main(QWidget):
         for label, widget in [
             ("Minimum image size:", self.image_size), ("Alpine branch:", self.alpine_branch), ("Architecture:", self.arch),
             ("Hostname:", self.hostname), ("User:", self.username), ("User password:", self.password),
-            ("Root password:", self.root_password), ("Timezone:", self.timezone), ("Locale:", self.locale),
+            ("Root password:", self.root_password), ("", self.show_passwords), ("Timezone:", self.timezone), ("Locale:", self.locale),
             ("Console keymap:", self.console_keymap), ("XKB layout:", self.xkb_layout), ("XKB variant:", self.xkb_variant),
             ("XKB model:", self.xkb_model),
         ]:
