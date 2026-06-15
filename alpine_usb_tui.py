@@ -7,6 +7,7 @@ import getpass
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,19 +36,19 @@ CHOICES = {
 WM_CHOICES = list(cli.VALID_WMS)
 
 DEFAULT_CONFIG = {
-    "output": str(cli.repo_root() / cli.DEFAULT_IMAGE_NAME),
+    "output": str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / cli.DEFAULT_IMAGE_NAME),
     "image_size": "16G",
     "branch": "latest-stable",
     "arch": "x86_64",
     "hostname": "alpine-usb",
-    "user": "pablo",
-    "password": "pablo",
-    "root_password": "pablo",
+    "user": "alpine",
+    "password": "alpine",
+    "root_password": "alpine",
     "timezone": "UTC",
     "locale": "en_US.UTF-8",
     "language": "",
-    "console_keymap": "la-latin1",
-    "xkb_layout": "latam",
+    "console_keymap": "us",
+    "xkb_layout": "us",
     "xkb_variant": "",
     "xkb_model": "pc105",
     "desktop": "xfce",

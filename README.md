@@ -6,7 +6,7 @@ It started as an XFCE-only builder, but now the GUI and build scripts expose a f
 
 ## What it can configure
 
-Defaults are safe and match the original experience: `linux-lts`, GRUB removable UEFI, XFCE, LightDM, NetworkManager + Wi‑Fi, Bluetooth, PipeWire, Firefox ESR, user `pablo` / password `pablo`, English locale and Latin American Spanish keyboard.
+Defaults are distro-like and generic: `linux-lts`, GRUB removable UEFI, XFCE, LightDM, NetworkManager + Wi‑Fi, Bluetooth, PipeWire, Firefox ESR, user `alpine` / password `alpine`, English locale and US keyboard. GUI/TUI/CLI output defaults to `/tmp/alpine-usb-installer/alpine-usb.img`.
 
 `Image size` is the minimum build image size, not the final used space limit. By default the installed USB auto-expands the root partition/filesystem on first boot to use the full target USB drive.
 
@@ -321,9 +321,9 @@ For this class of hardware, the most reliable profile is usually `XFCE`, `LightD
 Default credentials unless changed in the GUI/CLI:
 
 ```txt
-user: pablo
-password: pablo
-root password: pablo
+user: alpine
+password: alpine
+root password: alpine
 ```
 
 Change passwords after the first boot:

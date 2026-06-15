@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 
 APP_TITLE = "Alpine USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
+DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
+DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
 
 
 def make_app_icon() -> QIcon:
@@ -628,8 +630,9 @@ class Main(QWidget):
         self.setWindowIcon(make_app_icon())
         self.resize(1120, 760)
 
-        self.image = QLineEdit(str(Path.cwd() / DEFAULT_IMAGE_NAME))
-        self.image.setPlaceholderText(f"Output image path, e.g. /Users/you/Downloads/{DEFAULT_IMAGE_NAME}")
+        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        self.image = QLineEdit(str(DEFAULT_OUTPUT_PATH))
+        self.image.setPlaceholderText(f"Output image path, e.g. {DEFAULT_OUTPUT_PATH}")
         self.device = QLineEdit()
         self.status = QLabel("")
         self.status.setStyleSheet("color:#d1d5db;")
@@ -671,17 +674,17 @@ class Main(QWidget):
         add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
         self.arch = QComboBox(); add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
-        self.username = QLineEdit("pablo")
-        self.password = QLineEdit("pablo"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.root_password = QLineEdit("pablo"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.username = QLineEdit("alpine")
+        self.password = QLineEdit("alpine"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.root_password = QLineEdit("alpine"); self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.timezone = QComboBox(); self.timezone.setEditable(True)
         add_combo_items(self.timezone, ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"])
         self.locale = QComboBox(); self.locale.setEditable(True)
         add_combo_items(self.locale, ["en_US.UTF-8", "es_ES.UTF-8", "es_MX.UTF-8"])
         self.console_keymap = QComboBox(); self.console_keymap.setEditable(True)
-        add_combo_items(self.console_keymap, ["la-latin1", "es", "us", "br-abnt2", "fr", "de"])
+        add_combo_items(self.console_keymap, ["us", "la-latin1", "es", "br-abnt2", "fr", "de"])
         self.xkb_layout = QComboBox(); self.xkb_layout.setEditable(True)
-        add_combo_items(self.xkb_layout, [("Latin American Spanish", "latam"), ("Spanish", "es"), ("US English", "us"), ("Brazil ABNT2", "br"), ("French", "fr"), ("German", "de")])
+        add_combo_items(self.xkb_layout, [("US English", "us"), ("Latin American Spanish", "latam"), ("Spanish", "es"), ("Brazil ABNT2", "br"), ("French", "fr"), ("German", "de")])
         self.xkb_variant = QLineEdit("")
         self.xkb_model = QLineEdit("pc105")
 
@@ -738,6 +741,25 @@ class Main(QWidget):
         self.package_search_button.clicked.connect(self.search_packages)
         self.package_add_button.clicked.connect(self.add_selected_packages)
         self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
+        self.connect_config_change_signals()
+
+    def connect_config_change_signals(self):
+        def changed(*_args):
+            self.refresh_build_summary()
+        for widget in [
+            self.image_size, self.alpine_branch, self.arch, self.timezone, self.locale,
+            self.console_keymap, self.xkb_layout, self.desktop, self.display_manager,
+            self.default_session, self.browser, self.audio, self.network, self.bootloader,
+            self.kernel, self.firmware,
+        ]:
+            widget.currentTextChanged.connect(changed)
+        for widget in [
+            self.image, self.hostname, self.username, self.xkb_variant, self.xkb_model,
+            self.boot_timeout, self.extra_packages,
+        ]:
+            widget.textChanged.connect(changed)
+        for widget in [self.auto_resize, self.wifi, self.bluetooth, *self.wm_checks.values()]:
+            widget.stateChanged.connect(changed)
 
     def build(self):
         layout = QVBoxLayout(self)
@@ -782,7 +804,7 @@ class Main(QWidget):
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
-        img_title = QLabel("1. Image")
+        img_title = QLabel("1. Image configuration")
         img_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;")
         content_layout.addWidget(img_title)
         img_grid = QGridLayout(); img_grid.setColumnStretch(1, 1); img_grid.setHorizontalSpacing(10); img_grid.setVerticalSpacing(8)
@@ -790,9 +812,6 @@ class Main(QWidget):
         self.build_button = QPushButton("Build image"); self.build_button.setIcon(make_button_icon("build")); self.build_button.clicked.connect(self.build_image); self.build_button.setFixedWidth(150)
         self.build_button.setStyleSheet("background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;")
         img_grid.addWidget(QLabel("Output path:"), 0, 0); img_grid.addWidget(self.image, 0, 1); img_grid.addWidget(choose_output, 0, 2)
-        img_buttons = QHBoxLayout(); img_buttons.addWidget(self.build_button); img_buttons.addStretch(); img_grid.addLayout(img_buttons, 1, 0, 1, 3)
-        img_grid.addWidget(self.build_status, 2, 0, 1, 3)
-        self.build_progress = QProgressBar(); self.build_progress.setRange(0, 0); self.build_progress.hide(); img_grid.addWidget(self.build_progress, 3, 0, 1, 3)
         content_layout.addLayout(img_grid)
 
         config_note = QLabel("Configuration sections are collapsed by default; open only what you want to customize.")
@@ -800,7 +819,22 @@ class Main(QWidget):
         content_layout.addWidget(config_note)
         self.add_config_sections(content_layout)
 
-        usb_title = QLabel("2. USB target")
+        build_title = QLabel("2. Image build")
+        build_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
+        content_layout.addWidget(build_title)
+        build_box = QVBoxLayout(); build_box.setSpacing(6)
+        self.build_summary = QLabel("")
+        self.build_summary.setWordWrap(True)
+        self.build_summary.setTextFormat(Qt.TextFormat.RichText)
+        self.build_summary.setStyleSheet("color:#cbd5e1;font-size:12px;margin:0px 0px 6px 0px;padding:8px;background:#0f172a;border:1px solid #374151;border-radius:6px;")
+        build_box.addWidget(self.build_summary)
+        self.refresh_build_summary()
+        build_buttons = QHBoxLayout(); build_buttons.addWidget(self.build_button); build_buttons.addStretch(); build_box.addLayout(build_buttons)
+        build_box.addWidget(self.build_status)
+        self.build_progress = QProgressBar(); self.build_progress.setRange(0, 0); self.build_progress.hide(); build_box.addWidget(self.build_progress)
+        content_layout.addLayout(build_box)
+
+        usb_title = QLabel("3. USB target")
         usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
         content_layout.addWidget(usb_title)
         usb_box = QVBoxLayout(); usb_box.setSpacing(6)
@@ -971,7 +1005,7 @@ class Main(QWidget):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Select output image path",
-            self.image.text().strip() or str(Path.cwd() / DEFAULT_IMAGE_NAME),
+            self.image.text().strip() or str(DEFAULT_OUTPUT_PATH),
             "Disk images (*.img);;All files (*)",
         )
         if path:
@@ -1029,14 +1063,14 @@ class Main(QWidget):
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
             "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
             "ARCH": combo_value(self.arch) or "x86_64",
-            "ALPINE_USB_USER": self.username.text().strip() or "pablo",
+            "ALPINE_USB_USER": self.username.text().strip() or "alpine",
             "ALPINE_USB_PASSWORD": password,
             "ALPINE_USB_ROOT_PASSWORD": root_password,
             "ALPINE_USB_HOSTNAME": self.hostname.text().strip() or "alpine-usb",
             "ALPINE_USB_TIMEZONE": self.timezone.currentText().strip() or "UTC",
             "ALPINE_USB_LOCALE": self.locale.currentText().strip() or "en_US.UTF-8",
-            "ALPINE_USB_CONSOLE_KEYMAP": self.console_keymap.currentText().strip() or "la-latin1",
-            "ALPINE_USB_XKB_LAYOUT": combo_value(self.xkb_layout) or "latam",
+            "ALPINE_USB_CONSOLE_KEYMAP": self.console_keymap.currentText().strip() or "us",
+            "ALPINE_USB_XKB_LAYOUT": combo_value(self.xkb_layout) or "us",
             "ALPINE_USB_XKB_VARIANT": self.xkb_variant.text().strip(),
             "ALPINE_USB_XKB_MODEL": self.xkb_model.text().strip() or "pc105",
             "ALPINE_USB_DESKTOP": combo_value(self.desktop),
@@ -1086,11 +1120,27 @@ class Main(QWidget):
             f"Keyboard: {env['ALPINE_USB_XKB_LAYOUT']}"
         )
 
+    def refresh_build_summary(self):
+        if not hasattr(self, "build_summary"):
+            return
+        env = self.collect_build_env()
+        extra = env.get("ALPINE_USB_EXTRA_PACKAGES", "").strip() or "none"
+        self.build_summary.setText(
+            "<b>Current configuration</b><br>"
+            f"<b>Image:</b> {env['IMAGE_SIZE']} · Alpine {env['ALPINE_BRANCH']} · {env['ARCH']}<br>"
+            f"<b>Desktop:</b> {env['ALPINE_USB_DESKTOP']} · DM {env['ALPINE_USB_DISPLAY_MANAGER']} · Session {env['ALPINE_USB_DEFAULT_SESSION']} · WMs {env['ALPINE_USB_TILING_WMS'] or 'none'}<br>"
+            f"<b>Boot:</b> {env['ALPINE_USB_BOOTLOADER']} · linux-{env['ALPINE_USB_KERNEL_FLAVOR']} · firmware {env['ALPINE_USB_FIRMWARE']} · auto-resize {env['ALPINE_USB_AUTO_RESIZE']}<br>"
+            f"<b>Hardware:</b> Wi‑Fi {env['ALPINE_USB_WIFI']} · Bluetooth {env['ALPINE_USB_BLUETOOTH']} · Audio {env['ALPINE_USB_AUDIO']} · Network {env['ALPINE_USB_NETWORK']}<br>"
+            f"<b>Locale:</b> {env['ALPINE_USB_LOCALE']} · TZ {env['ALPINE_USB_TIMEZONE']} · Keyboard {env['ALPINE_USB_XKB_LAYOUT']}<br>"
+            f"<b>Extra packages:</b> {extra}"
+        )
+
     def build_image(self):
         if self.has_running_worker():
             modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
             return
-        output_path = self.image.text().strip() or str(Path.cwd() / DEFAULT_IMAGE_NAME)
+        output_path = self.image.text().strip() or str(DEFAULT_OUTPUT_PATH)
+        self.refresh_build_summary()
         env = self.collect_build_env()
         validation_error = self.validate_build_config(env)
         if validation_error:
