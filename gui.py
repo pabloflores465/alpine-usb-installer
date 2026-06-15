@@ -17,6 +17,20 @@ else:
         os.execv(str(QT_VENV_PYTHON), [str(QT_VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
 os.chdir(SCRIPT_DIR)
 
+# Finder-launched macOS apps get a minimal PATH. Add common CLI locations so
+# Docker Desktop and Nix/Homebrew tools are discoverable from the standalone app.
+HOST_PATHS = [
+    "/run/current-system/sw/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/Applications/Docker.app/Contents/Resources/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+]
+os.environ["PATH"] = os.pathsep.join([p for p in HOST_PATHS if Path(p).exists()] + [os.environ.get("PATH", "")])
+
 from PySide6.QtCore import QPoint, Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
@@ -164,6 +178,17 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
 
 def run(cmd):
     return subprocess.run(cmd, text=True, capture_output=True)
+
+
+def find_executable(name: str) -> str | None:
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in HOST_PATHS:
+        candidate = Path(directory) / name
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def sh_quote(s: str) -> str:
@@ -1167,10 +1192,11 @@ class Main(QWidget):
             modal(self, "error", APP_TITLE, validation_error)
             return
         if platform.system() == "Darwin":
-            if not shutil.which("docker"):
-                modal(self, "error", APP_TITLE, "Docker not found. Install Docker Desktop and try again.")
+            docker = find_executable("docker")
+            if not docker:
+                modal(self, "error", APP_TITLE, "Docker not found. Install Docker Desktop and try again. If it is installed, open Docker Desktop once so /usr/local/bin/docker is created.")
                 return
-            if subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            if subprocess.run([docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
                 modal(self, "error", APP_TITLE, "Docker is not running. Start Docker Desktop and try again.")
                 return
         confirm = f"Build Alpine image?\n\nOutput:\n{output_path}\n\n{self.config_summary_text(env)}"
