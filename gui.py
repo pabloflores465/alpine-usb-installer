@@ -236,11 +236,23 @@ def combo_value(combo: QComboBox) -> str:
 
 
 def add_combo_items(combo: QComboBox, items):
+    labels = []
     for item in items:
         if isinstance(item, tuple):
             combo.addItem(item[0], item[1])
+            labels.append(str(item[0]))
         else:
             combo.addItem(item)
+            labels.append(str(item))
+    if labels:
+        try:
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+            width = max(combo.fontMetrics().horizontalAdvance(label) for label in labels) + 56
+            width = min(max(width, 120), 520)
+            combo.setMinimumWidth(width)
+            combo.view().setMinimumWidth(width)
+        except Exception:
+            pass
 
 
 APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
