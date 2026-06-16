@@ -20,6 +20,7 @@ from alpine_usb.apk_packages.index import (
     validate_package_name,
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
+from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
 APP_TITLE = "Alpine USB Installer"
@@ -407,6 +408,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
         return 1
     if not dev:
         err("Invalid target device.")
+        return 1
+    image_check = validate_usb_image(image)
+    if not image_check.ok:
+        err(image_check.reason or "Image failed validation.")
         return 1
     ok_safe, dev, device_rows, reason = device_safety_report(dev)
     if not ok_safe:

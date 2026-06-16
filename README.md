@@ -36,7 +36,7 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
-- Flash generated images to USB from macOS/Linux with whole-disk safety checks.
+- Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
 - Auto-expand the root filesystem on first boot to use the full USB drive.
 - Run compile/lint/test/smoke validation with one project check command.
 
@@ -88,6 +88,8 @@ Default output path:
 ./gui.py
 ```
 
+<img src="docs/assets/gui-overview.png" alt="Alpine USB Installer GUI" width="900">
+
 `./gui.py` creates and uses its own `.qtvenv` automatically if PySide6 is missing. The dev GUI installs the minimal Qt runtime declared in `requirements.txt`.
 
 GUI flow:
@@ -95,11 +97,11 @@ GUI flow:
 1. Set image output path.
 2. Open only the configuration sections you want to change.
 3. Review the live configuration summary.
-4. Build the image.
+4. Build the image. During a build, the form stays editable for the next profile and the build can be stopped/cleaned.
 5. Select USB target.
-6. Flash USB.
+6. Flash USB. The image is checked before flashing to avoid writing incomplete or corrupt builds.
 
-Saved GUI profiles do not store user/root passwords. Password fields stay in memory while the app is open. After restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials.
+GUI image configurations auto-save as you edit and can also be saved/loaded as JSON (`.json`) or YAML (`.yaml`/`.yml`). Saved files never include user/root passwords. Password fields stay in memory while the app is open, including when loading another configuration file. After restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials. The live configuration summary updates immediately, and loaded/changed fields stay marked with dirty dots until you explicitly save them.
 
 USB selection shows the full device label, size, model, serial/id, and volume info when available. Internally, flashing strips that label down to the safe whole-disk device path, for example `/dev/disk20`.
 
@@ -150,7 +152,7 @@ Common commands:
 ./alpine-usb flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
 ```
 
-Flash refuses partitions and non-removable/non-hotplug disks. Confirmation shows target model, size, serial/id, and device path before writing.
+Flash refuses partitions, non-removable/non-hotplug disks, missing images, truncated images, corrupt GPT images, and images without the expected EFI + Linux root partitions. Confirmation shows target model, size, serial/id, and device path before writing.
 
 Extra packages can be repeated or space-separated:
 
@@ -412,7 +414,7 @@ password: the password entered before build
 root password: same as user password unless configured separately
 ```
 
-Saved GUI profiles do not persist these passwords; enter the user password again before each build after restarting the GUI. CLI builds require `--ask-password` or `--password`; TUI builds require filling the user password field. By default, root password mirrors the user password; enable “Use separate root password” in GUI, fill root password in TUI, or pass `--root-password` in CLI only when you want different credentials.
+Saved GUI profiles/configuration files do not persist these passwords; enter the user password again before each build after restarting the GUI. Loading a saved file does not clear passwords already entered in the current GUI session. CLI builds require `--ask-password` or `--password`; TUI builds require filling the user password field. By default, root password mirrors the user password; enable “Use separate root password” in GUI, fill root password in TUI, or pass `--root-password` in CLI only when you want different credentials.
 
 Change passwords after first boot:
 
@@ -432,7 +434,7 @@ scripts/build-macos-dmg.sh
 Build all release assets with:
 
 ```sh
-scripts/package-release-assets.sh 0.1.7
+scripts/package-release-assets.sh 0.1.9
 ```
 
 The release packager creates separate GUI and terminal assets:

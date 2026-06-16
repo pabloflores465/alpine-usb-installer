@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import html
-import json
 import os
 import platform
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -22,6 +22,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
+from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
+from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
 
 
@@ -153,6 +155,7 @@ DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
 SAVED_CONFIG_PATH = Path.home() / ".config" / "alpine-usb-installer" / "gui-config.json"
+CONFIG_FILE_FILTER = "JSON configuration (*.json);;YAML configuration (*.yaml *.yml)"
 
 
 def make_app_icon() -> QIcon:
@@ -608,6 +611,61 @@ class BuildWorker(QThread):
         super().__init__()
         self.config_env = config_env
         self.output_path = output_path
+        self.proc: subprocess.Popen | None = None
+        self.cancel_requested = False
+        self.docker_container_name = f"alpine-usb-build-{os.getpid()}-{int(time.time() * 1000)}"
+
+    def stop_docker_container(self):
+        docker = shutil.which("docker")
+        if not docker:
+            return
+        try:
+            subprocess.Popen(
+                [docker, "rm", "-f", self.docker_container_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+
+    def stop_process_group(self, sig: signal.Signals):
+        proc = self.proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except OSError:
+            if sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
+
+    def force_cancel(self):
+        if not self.cancel_requested or not self.thread_running_self():
+            return
+        self.log.emit("Build did not stop after SIGTERM; forcing cleanup...")
+        self.stop_docker_container()
+        self.stop_process_group(signal.SIGKILL)
+
+    def thread_running_self(self) -> bool:
+        proc = self.proc
+        return bool(proc and proc.poll() is None)
+
+    def cancel(self):
+        self.cancel_requested = True
+        self.log.emit("Stopping build process...")
+        self.stop_docker_container()
+        self.stop_process_group(signal.SIGTERM)
+        QTimer.singleShot(5000, self.force_cancel)
+
+    def cleanup_partial_output(self):
+        for candidate in [Path(self.output_path).expanduser(), SCRIPT_DIR / DEFAULT_IMAGE_NAME]:
+            try:
+                if candidate.exists():
+                    candidate.unlink()
+                    self.log.emit(f"Removed partial image: {candidate}")
+            except OSError as exc:
+                self.log.emit(f"Could not remove partial image {candidate}: {exc}")
 
     def run(self):
         try:
@@ -615,6 +673,7 @@ class BuildWorker(QThread):
             safe_config_env, secret_files = prepare_secret_env({k: str(v) for k, v in self.config_env.items()})
             env.update(safe_config_env)
             env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
+            env["ALPINE_USB_DOCKER_NAME"] = self.docker_container_name
             final = str(Path(self.output_path).expanduser().resolve())
             Path(final).parent.mkdir(parents=True, exist_ok=True)
             env["OUTPUT_PATH"] = final
@@ -628,12 +687,22 @@ class BuildWorker(QThread):
             if configure.exists():
                 configure.chmod(0o755)
             cmd = [str(script)]
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=str(SCRIPT_DIR)
+            self.proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+                cwd=str(SCRIPT_DIR),
+                start_new_session=True,
             )
-            for line in proc.stdout or []:
+            for line in self.proc.stdout or []:
                 self.log.emit(line.rstrip())
-            code = proc.wait()
+            code = self.proc.wait()
+            if self.cancel_requested:
+                self.cleanup_partial_output()
+                self.done.emit(False, "Build stopped and partial image cleaned.")
+                return
             if code != 0:
                 raise RuntimeError(f"Build failed with exit code {code}")
             if not os.path.exists(final):
@@ -642,6 +711,7 @@ class BuildWorker(QThread):
         except Exception as e:
             self.done.emit(False, str(e))
         finally:
+            self.proc = None
             cleanup_secret_files(locals().get("secret_files", []))
 
 
@@ -667,6 +737,9 @@ class FlashWorker(QThread):
             dev = self.selected_device()
             if not dev:
                 raise RuntimeError("Invalid USB device")
+            image_check = validate_usb_image(self.image)
+            if not image_check.ok:
+                raise RuntimeError(image_check.reason or "Image failed validation")
             ok_safe, dev, _rows, reason = device_safety_report(dev)
             if not ok_safe:
                 raise RuntimeError(reason or "Unsafe USB target")
@@ -984,10 +1057,22 @@ class Main(QWidget):
         self.package_search_timer.timeout.connect(self.search_packages)
         self.package_search_active_query = ""
         self.package_search_pending = False
+        self.package_search_empty = QLabel("Type a package to search")
+        self.package_search_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.package_search_empty.setMinimumHeight(150)
+        self.package_search_empty.setStyleSheet(
+            "background:#0b1220;color:#ffffff;border:1px solid #374151;font-size:15pt;font-weight:bold;"
+        )
         self.package_search_results = PackageSuggestionList()
         self.package_search_results.setMaximumHeight(150)
         self.package_search_results.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.package_search_results.accept_suggestion.connect(self.add_selected_packages)
+        self.package_search_stack = QWidget()
+        self.package_search_stack_layout = QStackedLayout(self.package_search_stack)
+        self.package_search_stack_layout.setContentsMargins(0, 0, 0, 0)
+        self.package_search_stack_layout.addWidget(self.package_search_empty)
+        self.package_search_stack_layout.addWidget(self.package_search_results)
+        self.package_search_stack_layout.setCurrentWidget(self.package_search_empty)
         self.package_search_status = QLabel("Type a package name for suggestions. ↓ selects, →/Enter accepts.")
         self.package_search_status.setStyleSheet("color:#cbd5e1;font-size:12px;")
         self.extra_packages.installEventFilter(self)
@@ -1076,7 +1161,13 @@ class Main(QWidget):
         self.boot_timeout.setText(str(cfg.get("boot_timeout", "3")))
         self.auto_resize.setChecked(bool(cfg.get("auto_resize", True)))
         self.extra_packages.setText(str(cfg.get("extra_packages", "")))
-        selected = set(cfg.get("wms", []))
+        raw_wms = cfg.get("wms", [])
+        if isinstance(raw_wms, str):
+            selected = set(raw_wms.replace(",", " ").split())
+        elif isinstance(raw_wms, list):
+            selected = {str(wm) for wm in raw_wms}
+        else:
+            selected = set()
         for key, cb in self.wm_checks.items():
             cb.setChecked(key in selected)
         self.update_selected()
@@ -1145,40 +1236,86 @@ class Main(QWidget):
             self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
 
     def write_saved_config(self, cfg: dict):
-        SAVED_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SAVED_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, sort_keys=True))
+        save_config_file(SAVED_CONFIG_PATH, scrub_config(cfg))
+
+    def write_current_config_silently(self):
         try:
-            SAVED_CONFIG_PATH.chmod(0o600)
-        except OSError:
+            self.write_saved_config(self.snapshot_config())
+        except ConfigFileError:
             pass
 
     def load_saved_config_if_available(self):
         try:
             if SAVED_CONFIG_PATH.exists():
-                cfg = json.loads(SAVED_CONFIG_PATH.read_text())
-                scrubbed = dict(cfg)
-                scrubbed.pop("password", None)
-                scrubbed.pop("root_password", None)
-                if scrubbed != cfg:
-                    self.write_saved_config(scrubbed)
-                self.saved_config_snapshot = dict(scrubbed)
-                self.apply_config(scrubbed)
+                cfg = load_config_file(SAVED_CONFIG_PATH)
+                self.write_saved_config(cfg)
+                self.saved_config_snapshot = dict(cfg)
+                self.apply_config(cfg)
                 self.password.clear()
                 self.root_password.clear()
                 self.sync_root_password_state()
         except Exception:
             pass
 
+    def config_path_with_extension(self, path: str, selected_filter: str) -> str:
+        if Path(path).suffix.lower() in {".json", ".yaml", ".yml"}:
+            return path
+        suffix = ".yaml" if "YAML" in selected_filter else ".json"
+        return path + suffix
+
     def save_config(self):
-        self.saved_config_snapshot = self.snapshot_config()
-        self.write_saved_config(self.saved_config_snapshot)
+        default_path = str(SAVED_CONFIG_PATH)
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save image configuration",
+            default_path,
+            CONFIG_FILE_FILTER,
+        )
+        if not path:
+            return
+        path = self.config_path_with_extension(path, selected_filter)
+        cfg = scrub_config(self.snapshot_config())
+        try:
+            save_config_file(path, cfg)
+            self.saved_config_snapshot = dict(cfg)
+            self.write_saved_config(self.saved_config_snapshot)
+        except ConfigFileError as exc:
+            modal(self, "error", APP_TITLE, str(exc))
+            return
         self.refresh_build_summary()
         self.update_dirty_indicators()
         modal(
             self,
             "info",
             APP_TITLE,
-            f"Configuration saved:\n{SAVED_CONFIG_PATH}\n\nPasswords are not saved; enter them again after restarting the app.",
+            f"Configuration saved:\n{path}\n\nPasswords are not saved; enter them again before building.",
+        )
+
+    def load_config(self):
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Load image configuration",
+            str(SAVED_CONFIG_PATH.parent),
+            CONFIG_FILE_FILTER,
+        )
+        if not path:
+            return
+        try:
+            cfg = load_config_file(path)
+        except ConfigFileError as exc:
+            modal(self, "error", APP_TITLE, str(exc))
+            return
+        self.apply_config(cfg)
+        # Do not clear in-memory passwords when loading an image profile. The
+        # file still never supplies passwords; existing session secrets remain.
+        self.sync_root_password_state()
+        self.refresh_build_summary()
+        self.update_dirty_indicators()
+        modal(
+            self,
+            "info",
+            APP_TITLE,
+            "Configuration loaded. Passwords from the file were ignored, and current in-memory passwords were kept. Changed fields stay marked with dirty dots until you save.",
         )
 
     def restore_defaults(self):
@@ -1194,8 +1331,11 @@ class Main(QWidget):
 
     def connect_config_change_signals(self):
         def changed(*_args):
-            # The summary shows saved image config; dirty dots show unsaved changes.
+            # Keep default GUI config and live summary current as the user edits.
+            # Dirty dots still compare against the last explicit save/default snapshot.
             self.update_selected()
+            self.write_current_config_silently()
+            self.refresh_build_summary()
             self.update_dirty_indicators()
 
         for widget in [
@@ -1346,9 +1486,20 @@ class Main(QWidget):
         self.build_button.setIcon(make_button_icon("build"))
         self.build_button.clicked.connect(self.build_image)
         self.build_button.setFixedWidth(150)
-        self.build_button.setStyleSheet(
-            "background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;"
-        )
+        self.build_button.setStyleSheet("""
+            QPushButton { background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
+            QPushButton:disabled { background:#374151;color:#9ca3af; }
+        """)
+        self.stop_build_button = QPushButton("Stop build and clean")
+        self.stop_build_button.setIcon(make_button_icon("error"))
+        self.stop_build_button.clicked.connect(self.stop_build)
+        self.stop_build_button.setFixedWidth(190)
+        self.stop_build_button.setEnabled(False)
+        self.stop_build_button.hide()
+        self.stop_build_button.setStyleSheet("""
+            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
+            QPushButton:disabled { background:#374151;color:#9ca3af; }
+        """)
         img_grid.addWidget(self.config_label("image", "Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
         img_grid.addWidget(choose_output, 0, 2)
@@ -1364,6 +1515,12 @@ class Main(QWidget):
         self.save_config_button = QPushButton("Save configuration")
         self.save_config_button.setIcon(make_button_icon("check"))
         self.save_config_button.clicked.connect(self.save_config)
+        self.load_config_button = QPushButton("Load configuration")
+        self.load_config_button.setIcon(make_button_icon("folder"))
+        self.load_config_button.clicked.connect(self.load_config)
+        self.load_config_button.setStyleSheet(
+            "background:#7c3aed;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;"
+        )
         self.restore_defaults_button = QPushButton("Restore defaults")
         self.restore_defaults_button.setIcon(make_button_icon("refresh"))
         self.restore_defaults_button.clicked.connect(self.restore_defaults)
@@ -1371,9 +1528,19 @@ class Main(QWidget):
             "background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;"
         )
         config_actions.addWidget(self.save_config_button)
+        config_actions.addWidget(self.load_config_button)
         config_actions.addWidget(self.restore_defaults_button)
         config_actions.addStretch(1)
         content_layout.addLayout(config_actions)
+
+        self.build_summary = QLabel("")
+        self.build_summary.setWordWrap(True)
+        self.build_summary.setTextFormat(Qt.TextFormat.RichText)
+        self.build_summary.setStyleSheet(
+            "color:#cbd5e1;font-size:12px;margin:8px 0px 6px 0px;padding:8px;background:#0f172a;border:1px solid #374151;border-radius:6px;"
+        )
+        content_layout.addWidget(self.build_summary)
+        self.refresh_build_summary()
         self.update_dirty_indicators()
 
         build_title = QLabel("2. Image build")
@@ -1381,16 +1548,9 @@ class Main(QWidget):
         content_layout.addWidget(build_title)
         build_box = QVBoxLayout()
         build_box.setSpacing(6)
-        self.build_summary = QLabel("")
-        self.build_summary.setWordWrap(True)
-        self.build_summary.setTextFormat(Qt.TextFormat.RichText)
-        self.build_summary.setStyleSheet(
-            "color:#cbd5e1;font-size:12px;margin:0px 0px 6px 0px;padding:8px;background:#0f172a;border:1px solid #374151;border-radius:6px;"
-        )
-        build_box.addWidget(self.build_summary)
-        self.refresh_build_summary()
         build_buttons = QHBoxLayout()
         build_buttons.addWidget(self.build_button)
+        build_buttons.addWidget(self.stop_build_button)
         build_buttons.addStretch()
         build_box.addLayout(build_buttons)
         build_box.addWidget(self.build_status)
@@ -1587,9 +1747,17 @@ class Main(QWidget):
         )
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
-        extra.body_layout.addWidget(self.package_search_results)
+        extra.body_layout.addWidget(self.package_search_stack)
         extra.body_layout.addWidget(self.package_search_status)
         parent_layout.addWidget(extra)
+
+    def show_package_search_message(self, message: str):
+        self.package_search_results.clear()
+        self.package_search_empty.setText(message)
+        self.package_search_stack_layout.setCurrentWidget(self.package_search_empty)
+
+    def show_package_search_results(self):
+        self.package_search_stack_layout.setCurrentWidget(self.package_search_results)
 
     def current_package_query(self) -> str:
         text = self.extra_packages.text()
@@ -1601,7 +1769,7 @@ class Main(QWidget):
         query = self.current_package_query()
         if len(query) < 2:
             self.package_search_timer.stop()
-            self.package_search_results.clear()
+            self.show_package_search_message("Type a package to search")
             self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
             return
         self.package_search_status.setText(f"Will search suggestions for '{query}'…")
@@ -1625,7 +1793,7 @@ class Main(QWidget):
         query = self.current_package_query()
         if len(query) < 2:
             self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
-            self.package_search_results.clear()
+            self.show_package_search_message("Type a package to search")
             return
         if self.thread_running(self.package_search_worker):
             self.package_search_pending = True
@@ -1634,7 +1802,7 @@ class Main(QWidget):
         branch = self.alpine_branch.currentText().strip() or "latest-stable"
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
-        self.package_search_results.clear()
+        self.show_package_search_message("Searching packages…")
         self.package_search_status.setText(f"Searching {branch}/{arch} main + community…")
         self.package_search_worker = ApkSearchWorker(branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
@@ -1648,6 +1816,7 @@ class Main(QWidget):
             return
         self.package_search_results.clear()
         if not results:
+            self.show_package_search_message("No packages found")
             self.package_search_status.setText(f"No official packages found for '{query}'.")
             return
         for package in results:
@@ -1656,6 +1825,7 @@ class Main(QWidget):
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, package["name"])
             self.package_search_results.addItem(item)
+        self.show_package_search_results()
         self.package_search_results.setCurrentRow(0)
         first = self.package_search_results.item(0)
         if first:
@@ -1666,6 +1836,7 @@ class Main(QWidget):
 
     def package_search_failed(self, query: str, message: str):
         self.package_search_results.clear()
+        self.show_package_search_message("Package search failed")
         self.package_search_status.setText(f"Search failed for '{query}': {message}")
 
     def package_search_finished(self):
@@ -1701,7 +1872,7 @@ class Main(QWidget):
                 added.append(name)
         self.extra_packages.setText(" ".join(tokens) + (" " if tokens else ""))
         self.extra_packages.setCursorPosition(len(self.extra_packages.text()))
-        self.package_search_results.clear()
+        self.show_package_search_message("Type a package to search")
         self.package_search_status.setText(
             "Added: " + ", ".join(added) if added else "Selected package(s) already added."
         )
@@ -1749,8 +1920,13 @@ class Main(QWidget):
                 path += ".img"
             self.image.setText(path)
 
-    def refresh(self):
+    def clear_flash_target(self):
         self.device.clear()
+        if hasattr(self, "flash_button"):
+            self.flash_button.setEnabled(False)
+
+    def refresh(self):
+        self.clear_flash_target()
         self.status.clear()
         self.status.hide()
         self.build_status.clear()
@@ -1781,46 +1957,54 @@ class Main(QWidget):
             or self.thread_running(self.package_search_worker)
         )
 
-    def set_busy(self, busy: bool):
-        widgets = [
-            self.build_button,
-            self.pick_button,
-            self.device,
-            self.image,
-            self.image_size,
-            self.alpine_branch,
-            self.arch,
-            self.hostname,
-            self.username,
-            self.password,
-            self.root_password,
-            self.timezone,
-            self.locale,
-            self.console_keymap,
-            self.xkb_layout,
-            self.xkb_variant,
-            self.xkb_model,
-            self.desktop,
-            self.display_manager,
-            self.default_session,
-            self.browser,
-            self.audio,
-            self.network,
-            self.wifi,
-            self.bluetooth,
-            self.bootloader,
-            self.kernel,
-            self.firmware,
-            self.boot_timeout,
-            self.auto_resize,
-            self.extra_packages,
-            self.package_search_results,
-            self.save_config_button,
-            self.restore_defaults_button,
-            *self.wm_checks.values(),
-        ]
-        for widget in widgets:
-            widget.setEnabled(not busy)
+    def set_busy(self, busy: bool, lock_inputs: bool = True):
+        # Image builds use a snapshot of the current configuration. Keep the form
+        # editable while building so users can prepare/save the next profile, but
+        # disable the build button to make it clear another build cannot start.
+        if lock_inputs:
+            widgets = [
+                self.build_button,
+                self.stop_build_button,
+                self.pick_button,
+                self.device,
+                self.image,
+                self.image_size,
+                self.alpine_branch,
+                self.arch,
+                self.hostname,
+                self.username,
+                self.password,
+                self.root_password,
+                self.timezone,
+                self.locale,
+                self.console_keymap,
+                self.xkb_layout,
+                self.xkb_variant,
+                self.xkb_model,
+                self.desktop,
+                self.display_manager,
+                self.default_session,
+                self.browser,
+                self.audio,
+                self.network,
+                self.wifi,
+                self.bluetooth,
+                self.bootloader,
+                self.kernel,
+                self.firmware,
+                self.boot_timeout,
+                self.auto_resize,
+                self.extra_packages,
+                self.package_search_results,
+                self.save_config_button,
+                self.load_config_button,
+                self.restore_defaults_button,
+                *self.wm_checks.values(),
+            ]
+            for widget in widgets:
+                widget.setEnabled(not busy)
+        if not lock_inputs:
+            self.build_button.setEnabled(not busy)
         self.flash_button.setEnabled(False if busy else bool(self.device.text().strip() and self.image.text().strip()))
 
     def selected_wms(self) -> list[str]:
@@ -1910,6 +2094,14 @@ class Main(QWidget):
             f"Extra packages: {env['ALPINE_USB_EXTRA_PACKAGES'] or 'none'}"
         )
 
+    def summary_wms_from_config(self, cfg: dict) -> str:
+        raw_wms = cfg.get("wms", [])
+        if isinstance(raw_wms, str):
+            return raw_wms
+        if isinstance(raw_wms, list):
+            return " ".join(str(wm) for wm in raw_wms)
+        return ""
+
     def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
         return {
             "image": str(cfg.get("image", DEFAULT_OUTPUT_PATH)),
@@ -1927,7 +2119,7 @@ class Main(QWidget):
             "desktop": str(cfg.get("desktop", "xfce")),
             "display_manager": str(cfg.get("display_manager", "auto")),
             "default_session": str(cfg.get("default_session", "auto")),
-            "wms": " ".join(cfg.get("wms", [])),
+            "wms": self.summary_wms_from_config(cfg),
             "browser": str(cfg.get("browser", "firefox")),
             "audio": str(cfg.get("audio", "pipewire")),
             "network": str(cfg.get("network", "networkmanager")),
@@ -1945,12 +2137,12 @@ class Main(QWidget):
     def refresh_build_summary(self):
         if not hasattr(self, "build_summary"):
             return
-        env = self.summary_env_from_config(getattr(self, "saved_config_snapshot", self.snapshot_config()))
+        env = self.summary_env_from_config(self.snapshot_config())
         e = {key: html.escape(str(value)) for key, value in env.items()}
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
         self.build_summary.setText(
-            "<b>Saved image configuration</b><br>"
+            "<b>Current image configuration</b> <span style='color:#9ca3af;'>(auto-saved, passwords hidden)</span><br>"
             f"<b>Output:</b> {e['image']}<br>"
             f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
@@ -1994,7 +2186,9 @@ class Main(QWidget):
         self.build_status.show()
         self.build_status.setText("Building image...")
         self.status.hide()
-        self.set_busy(True)
+        self.set_busy(True, lock_inputs=False)
+        self.stop_build_button.show()
+        self.stop_build_button.setEnabled(True)
         self.builder = BuildWorker(env, output_path)
         self.builder.log.connect(self.append_log)
         self.builder.done.connect(self.build_done)
@@ -2011,8 +2205,27 @@ class Main(QWidget):
             m = re.search(r"Image build complete: (.+)$", msg)
             if m:
                 self.image.setText(m.group(1))
+        self.stop_build_button.setEnabled(False)
+        self.stop_build_button.hide()
         self.set_busy(False)
         modal(self, "info" if ok else "error", APP_TITLE, msg)
+
+    def stop_build(self):
+        if not self.thread_running(self.builder):
+            return
+        if not modal(
+            self,
+            "question",
+            APP_TITLE,
+            "Stop the running build and delete any partial image?",
+            question=True,
+        ):
+            return
+        self.stop_build_button.setEnabled(False)
+        self.build_status.show()
+        self.build_status.setText("Stopping build and cleaning partial image...")
+        self.append_log("Stopping build and cleaning partial image...")
+        self.builder.cancel()
 
     def build_thread_finished(self):
         if self.sender() is self.builder:
@@ -2024,14 +2237,18 @@ class Main(QWidget):
             return
         img = self.image.text().strip()
         dev = self.device.text().strip()
-        if not Path(img).exists():
-            modal(self, "error", APP_TITLE, "Image not found.")
+        image_check = validate_usb_image(img)
+        if not image_check.ok:
+            if dev:
+                self.clear_flash_target()
+            modal(self, "error", APP_TITLE, image_check.reason or "Image failed validation.")
             return
         if not dev:
             modal(self, "error", APP_TITLE, "Select USB device.")
             return
         ok_safe, safe_dev, device_rows, reason = device_safety_report(dev)
         if not ok_safe:
+            self.clear_flash_target()
             modal(self, "error", APP_TITLE, reason or "Unsafe USB target.")
             return
         device_details = "\n".join(f"{key}: {value}" for key, value in device_rows)
@@ -2092,9 +2309,9 @@ class Main(QWidget):
         self.status.show()
         self.status.setText(msg)
         self.append_log(msg)
-        if ok:
-            # USB is ejected; require explicit re-selection before another flash.
-            self.device.clear()
+        # Success ejects USB, and any failure can leave stale host/device state.
+        # Require explicit re-selection before another flash attempt.
+        self.clear_flash_target()
         self.set_busy(False)
         # Let progress/status layout settle, then center completion modal over main window.
         QTimer.singleShot(0, lambda: modal(self, "info" if ok else "error", APP_TITLE, msg))

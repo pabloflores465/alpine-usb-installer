@@ -102,6 +102,10 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   )
   docker_env=(-e ALPINE_USB_BUILD_IN_DOCKER=1)
   docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_name_args=()
+  if [ -n "${ALPINE_USB_DOCKER_NAME:-}" ]; then
+    docker_name_args=(--name "$ALPINE_USB_DOCKER_NAME")
+  fi
   for name in "${pass_env[@]}"; do
     value="${!name-}"
     if [ "$name" = "OUTPUT_PATH" ] && [ -n "$value" ]; then
@@ -124,7 +128,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
       docker build --platform linux/amd64 -f "$BUILDER_DOCKERFILE" -t "$BUILDER_IMAGE" "$(dirname "$BUILDER_DOCKERFILE")"
     fi
     echo "Starting Docker build container with cached Alpine USB build tools ($BUILDER_IMAGE)..."
-    exec docker run --rm --platform linux/amd64 --privileged \
+    exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged \
       "${docker_env[@]}" \
       "${docker_mounts[@]}" \
       -w /work \
@@ -133,7 +137,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   fi
 
   echo "Starting fresh Docker build container with Alpine build tools ($DOCKER_IMAGE)..."
-  exec docker run --rm --platform linux/amd64 --privileged \
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged \
     "${docker_env[@]}" \
     "${docker_mounts[@]}" \
     -w /work \
