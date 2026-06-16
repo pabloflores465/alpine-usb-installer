@@ -1712,11 +1712,16 @@ class Main(QWidget):
         )
         content_layout.addWidget(password_notice)
 
+        self.build_summary_title = QLabel("Current image configuration")
+        self.build_summary_title.setStyleSheet(
+            f"color:{BREEZE_TEXT};font-size:15px;font-weight:bold;margin:8px 0px 0px 0px;padding:0px;"
+        )
+        content_layout.addWidget(self.build_summary_title)
         self.build_summary = QLabel("")
         self.build_summary.setWordWrap(True)
         self.build_summary.setTextFormat(Qt.TextFormat.RichText)
         self.build_summary.setStyleSheet(
-            f"color:{BREEZE_SUBTLE};font-size:12px;margin:8px 0px 6px 0px;padding:8px;background:{BREEZE_VIEW};border:1px solid {BREEZE_BORDER};border-radius:6px;"
+            f"color:{BREEZE_SUBTLE};font-size:12px;margin:2px 0px 6px 0px;padding:8px;background:{BREEZE_VIEW};border:1px solid {BREEZE_BORDER};border-radius:6px;"
         )
         content_layout.addWidget(self.build_summary)
         self.refresh_build_summary()
@@ -2362,7 +2367,6 @@ class Main(QWidget):
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
         self.build_summary.setText(
-            "<b>Current image configuration</b><br>"
             f"<b>Output:</b> {e['image']}<br>"
             f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
