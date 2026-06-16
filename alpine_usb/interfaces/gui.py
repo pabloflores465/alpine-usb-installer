@@ -123,7 +123,7 @@ HOST_PATHS = [
 ]
 os.environ["PATH"] = os.pathsep.join([p for p in HOST_PATHS if Path(p).exists()] + [os.environ.get("PATH", "")])
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -165,15 +165,17 @@ BREEZE_PANEL_ALT = "#2a2e32"
 BREEZE_BORDER = "#4b5057"
 BREEZE_TEXT = "#eff0f1"
 BREEZE_SUBTLE = "#bdc3c7"
-BREEZE_BLUE = "#3daee9"
-BREEZE_BLUE_HOVER = "#54bff7"
-BREEZE_RED = "#da4453"
-BREEZE_RED_HOVER = "#e85d6a"
-BREEZE_GREEN = "#27ae60"
-BREEZE_GREEN_HOVER = "#2ecc71"
+BREEZE_BLUE = "#1f5f85"
+BREEZE_BLUE_HOVER = "#26729f"
+BREEZE_RED = "#8f2731"
+BREEZE_RED_HOVER = "#a8323d"
+BREEZE_GREEN = "#1f6f43"
+BREEZE_GREEN_HOVER = "#268452"
 BREEZE_YELLOW = "#fdbc4b"
-BREEZE_PURPLE = "#8e44ad"
-BREEZE_PURPLE_HOVER = "#9b59b6"
+BREEZE_ORANGE = "#8a5a12"
+BREEZE_ORANGE_HOVER = "#a66d17"
+BREEZE_PURPLE = "#5b2d72"
+BREEZE_PURPLE_HOVER = "#6d3688"
 BREEZE_DISABLED = "#4d5358"
 BREEZE_DISABLED_TEXT = "#9aa0a6"
 
@@ -246,7 +248,53 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     def xy(v):
         return int(v * scale)
 
-    if kind == "folder":
+    if kind == "config":
+        p.drawEllipse(xy(6), xy(6), xy(8), xy(8))
+        p.drawEllipse(xy(8), xy(8), xy(4), xy(4))
+        for x1, y1, x2, y2 in [
+            (10, 2, 10, 5),
+            (10, 15, 10, 18),
+            (2, 10, 5, 10),
+            (15, 10, 18, 10),
+            (4, 4, 6, 6),
+            (14, 14, 16, 16),
+            (16, 4, 14, 6),
+            (6, 14, 4, 16),
+        ]:
+            p.drawLine(xy(x1), xy(y1), xy(x2), xy(y2))
+    elif kind == "desktop":
+        p.drawRect(xy(3), xy(4), xy(14), xy(9))
+        p.drawLine(xy(8), xy(16), xy(12), xy(16))
+        p.drawLine(xy(10), xy(13), xy(10), xy(16))
+    elif kind == "network":
+        p.drawEllipse(xy(3), xy(3), xy(14), xy(14))
+        p.drawLine(xy(3), xy(10), xy(17), xy(10))
+        p.drawArc(xy(6), xy(3), xy(8), xy(14), 90 * 16, 180 * 16)
+        p.drawArc(xy(6), xy(3), xy(8), xy(14), 270 * 16, 180 * 16)
+    elif kind == "disk":
+        p.drawEllipse(xy(4), xy(3), xy(12), xy(4))
+        p.drawLine(xy(4), xy(5), xy(4), xy(15))
+        p.drawLine(xy(16), xy(5), xy(16), xy(15))
+        p.drawEllipse(xy(4), xy(13), xy(12), xy(4))
+        p.drawArc(xy(4), xy(8), xy(12), xy(4), 180 * 16, 180 * 16)
+    elif kind == "package":
+        p.drawPolyline(
+            pts(
+                [
+                    (xy(10), xy(2)),
+                    (xy(17), xy(6)),
+                    (xy(17), xy(14)),
+                    (xy(10), xy(18)),
+                    (xy(3), xy(14)),
+                    (xy(3), xy(6)),
+                    (xy(10), xy(2)),
+                ]
+            )
+        )
+        p.drawLine(xy(3), xy(6), xy(10), xy(10))
+        p.drawLine(xy(17), xy(6), xy(10), xy(10))
+        p.drawLine(xy(10), xy(10), xy(10), xy(18))
+    elif kind == "folder":
         p.drawPolyline(
             pts(
                 [
@@ -305,6 +353,26 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     return QIcon(pix)
 
 
+def icon_label(kind: str, size: int = 18) -> QLabel:
+    label = QLabel()
+    label.setPixmap(make_button_icon(kind, size).pixmap(size, size))
+    label.setFixedSize(size + 2, size + 2)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return label
+
+
+def title_widget(label: QLabel, icon_kind: str) -> QWidget:
+    widget = QWidget()
+    widget.setStyleSheet("background:transparent;border:0;")
+    layout = QHBoxLayout(widget)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    layout.addWidget(icon_label(icon_kind, 18))
+    layout.addWidget(label)
+    layout.addStretch(1)
+    return widget
+
+
 def ensure_widget_visible(widget: QWidget, parent: QWidget | None = None):
     anchor = parent.window() if parent and parent.window() else parent
     screen = (
@@ -358,10 +426,12 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
     box.setTextFormat(Qt.TextFormat.RichText if "<" in text and ">" in text else Qt.TextFormat.PlainText)
     box.setText(text)
     box.setWindowIcon(make_app_icon())
-    box.setMinimumWidth(760)
+    wide = question and box.textFormat() == Qt.TextFormat.RichText
+    if wide:
+        box.setMinimumWidth(620)
     box.setStyleSheet(
         f"QMessageBox {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}"
-        f"QLabel {{ color:{BREEZE_TEXT}; min-width:640px; font-weight:400; }}"
+        f"QLabel {{ color:{BREEZE_TEXT}; min-width:{520 if wide else 300}px; font-weight:400; }}"
     )
     icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
     box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
@@ -554,7 +624,7 @@ class DeviceDialog(QDialog):
 
 
 class CollapsibleSection(QWidget):
-    def __init__(self, title: str, collapsed: bool = True, parent=None):
+    def __init__(self, title: str, collapsed: bool = True, parent=None, icon_kind: str | None = None):
         super().__init__(parent)
         self.title = title
         self.dirty = False
@@ -562,11 +632,14 @@ class CollapsibleSection(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self.toggle = QPushButton()
+        if icon_kind:
+            self.toggle.setIcon(make_button_icon(icon_kind, 18))
+            self.toggle.setIconSize(QSize(18, 18))
         self.toggle.setCheckable(True)
         self.toggle.setChecked(not collapsed)
         self.toggle.clicked.connect(self.update_state)
         self.toggle.setStyleSheet(
-            f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+            f"text-align:left;font-size:14px;color:{BREEZE_TEXT};"
             "margin:0px;padding:6px 10px;"
             f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-radius:6px;"
         )
@@ -592,7 +665,7 @@ class CollapsibleSection(QWidget):
         self.toggle.setText(f"{self.title}{dot}  {'▼' if expanded else '▲'}")
         if expanded:
             self.toggle.setStyleSheet(
-                f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+                f"text-align:left;font-size:14px;color:{BREEZE_TEXT};"
                 "margin:0px;padding:6px 10px;"
                 f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
@@ -600,7 +673,7 @@ class CollapsibleSection(QWidget):
             )
         else:
             self.toggle.setStyleSheet(
-                f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+                f"text-align:left;font-size:14px;color:{BREEZE_TEXT};"
                 "margin:0px;padding:6px 10px;"
                 f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-radius:6px;"
             )
@@ -1279,10 +1352,9 @@ class Main(QWidget):
                 section.set_dirty(self.section_dirty(keys, current))
         any_dirty = self.section_dirty(list(current.keys()), current)
         if hasattr(self, "img_title"):
-            self.img_title.setText(self.image_title_base + ("  ●" if any_dirty else ""))
+            self.img_title.setText(self.image_title_base)
             self.img_title.setStyleSheet(
-                "font-size:15px;font-weight:bold;margin:6px 0px 2px 0px;padding:0px;"
-                + (f"color:{BREEZE_YELLOW};" if any_dirty else f"color:{BREEZE_BLUE};")
+                f"font-size:15px;font-weight:bold;margin:6px 0px 2px 0px;padding:0px;color:{BREEZE_TEXT};"
             )
         if hasattr(self, "save_config_button"):
             self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
@@ -1465,11 +1537,15 @@ class Main(QWidget):
             QWidget {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}
             QLabel {{ color:{BREEZE_TEXT}; margin:0px; padding:0px; border:0; background:transparent; }}
             QFormLayout QLabel {{ border:0; background:transparent; }}
-            QLineEdit, QComboBox {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:4px; padding:2px 5px; min-height:24px; }}
+            QLineEdit, QComboBox {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:4px; padding:2px 5px; min-height:24px; selection-background-color:{BREEZE_BLUE}; selection-color:#ffffff; }}
             QLineEdit:read-only {{ background:{BREEZE_VIEW}; color:{BREEZE_SUBTLE}; border:1px solid {BREEZE_BORDER}; }}
-            QComboBox QAbstractItemView {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; selection-background-color:{BREEZE_BLUE}; }}
+            QComboBox QAbstractItemView {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; selection-background-color:{BREEZE_BLUE}; selection-color:#ffffff; }}
+            QAbstractItemView::item:selected, QListWidget::item:selected {{ background:{BREEZE_BLUE}; color:#ffffff; }}
             QCheckBox {{ color:{BREEZE_TEXT}; spacing:8px; min-height:22px; border:0; background:transparent; padding:0px; }}
-            QTextEdit {{ background:{BREEZE_VIEW}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:6px; }}
+            QCheckBox::indicator {{ width:16px; height:16px; border:1px solid {BREEZE_SUBTLE}; border-radius:3px; background:{BREEZE_VIEW}; }}
+            QCheckBox::indicator:hover {{ border:1px solid {BREEZE_BLUE_HOVER}; }}
+            QCheckBox::indicator:checked {{ background:{BREEZE_BLUE}; border:1px solid {BREEZE_BLUE_HOVER}; }}
+            QTextEdit {{ background:{BREEZE_VIEW}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:6px; selection-background-color:{BREEZE_BLUE}; selection-color:#ffffff; }}
             QPushButton {{ background:{BREEZE_BLUE}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:4px; padding:3px 8px; min-height:24px; }}
             QPushButton:hover {{ background:{BREEZE_BLUE_HOVER}; }}
             QPushButton:disabled {{ background:{BREEZE_DISABLED}; color:{BREEZE_DISABLED_TEXT}; }}
@@ -1514,12 +1590,12 @@ class Main(QWidget):
         self.field_label_text = {}
         self.sections = {}
         self.section_fields = {}
-        self.image_title_base = "1. Image configuration"
+        self.image_title_base = "Image configuration"
         self.img_title = QLabel(self.image_title_base)
         self.img_title.setStyleSheet(
-            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:6px 0px 2px 0px;padding:0px;"
+            f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:6px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(self.img_title)
+        content_layout.addWidget(title_widget(self.img_title, "config"))
         img_grid = QGridLayout()
         img_grid.setColumnStretch(1, 1)
         img_grid.setHorizontalSpacing(10)
@@ -1559,12 +1635,18 @@ class Main(QWidget):
         self.restore_defaults_button = QPushButton("Restore defaults")
         self.restore_defaults_button.setIcon(make_button_icon("refresh"))
         self.restore_defaults_button.clicked.connect(self.restore_defaults)
-        self.restore_defaults_button.setStyleSheet(button_style(BREEZE_GREEN, BREEZE_GREEN_HOVER))
+        self.restore_defaults_button.setStyleSheet(button_style(BREEZE_ORANGE, BREEZE_ORANGE_HOVER))
         config_actions.addWidget(self.save_config_button)
         config_actions.addWidget(self.load_config_button)
         config_actions.addWidget(self.restore_defaults_button)
         config_actions.addStretch(1)
         content_layout.addLayout(config_actions)
+        password_notice = QLabel("Notice: passwords are not saved.")
+        password_notice.setWordWrap(True)
+        password_notice.setStyleSheet(
+            f"color:{BREEZE_YELLOW};font-size:12px;margin:0px 0px 2px 0px;padding:0px;border:0;background:transparent;"
+        )
+        content_layout.addWidget(password_notice)
 
         self.build_summary = QLabel("")
         self.build_summary.setWordWrap(True)
@@ -1576,11 +1658,11 @@ class Main(QWidget):
         self.refresh_build_summary()
         self.update_dirty_indicators()
 
-        build_title = QLabel("2. Image build")
+        build_title = QLabel("Image build")
         build_title.setStyleSheet(
-            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:10px 0px 2px 0px;padding:0px;"
+            f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:10px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(build_title)
+        content_layout.addWidget(title_widget(build_title, "build"))
         build_box = QVBoxLayout()
         build_box.setSpacing(6)
         build_buttons = QHBoxLayout()
@@ -1595,11 +1677,11 @@ class Main(QWidget):
         build_box.addWidget(self.build_progress)
         content_layout.addLayout(build_box)
 
-        usb_title = QLabel("3. USB target")
+        usb_title = QLabel("USB target")
         usb_title.setStyleSheet(
-            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:10px 0px 2px 0px;padding:0px;"
+            f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:10px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(usb_title)
+        content_layout.addWidget(title_widget(usb_title, "usb"))
         usb_box = QVBoxLayout()
         usb_box.setSpacing(6)
         usb_row = QHBoxLayout()
@@ -1668,14 +1750,8 @@ class Main(QWidget):
             "extra": ["extra_packages"],
         }
 
-        system = CollapsibleSection("System, user, localization (required)", collapsed=False)
+        system = CollapsibleSection("System, user, localization (required)", collapsed=False, icon_kind="config")
         self.sections["system"] = system
-        required_note = QLabel("Passwords are not saved.")
-        required_note.setWordWrap(True)
-        required_note.setStyleSheet(
-            f"color:{BREEZE_YELLOW};font-size:12px;margin:2px 0px 8px 0px;padding:0px;border:0;background:transparent;"
-        )
-        system.body_layout.addWidget(required_note)
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setHorizontalSpacing(12)
@@ -1707,7 +1783,9 @@ class Main(QWidget):
         system.body_layout.addLayout(form)
         parent_layout.addWidget(system)
 
-        desktop = CollapsibleSection("Desktop environments, display manager and window managers", collapsed=True)
+        desktop = CollapsibleSection(
+            "Desktop environments, display manager and window managers", collapsed=True, icon_kind="desktop"
+        )
         self.sections["desktop"] = desktop
         dform = QFormLayout()
         dform.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -1733,7 +1811,7 @@ class Main(QWidget):
         desktop.body_layout.addLayout(wm_grid)
         parent_layout.addWidget(desktop)
 
-        network = CollapsibleSection("Network, Wi‑Fi and Bluetooth", collapsed=True)
+        network = CollapsibleSection("Network, Wi‑Fi and Bluetooth", collapsed=True, icon_kind="network")
         self.sections["network"] = network
         nform = QFormLayout()
         nform.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -1748,7 +1826,7 @@ class Main(QWidget):
         network.body_layout.addLayout(nform)
         parent_layout.addWidget(network)
 
-        boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True)
+        boot = CollapsibleSection("Bootloader, kernel and firmware", collapsed=True, icon_kind="disk")
         self.sections["boot"] = boot
         bform = QFormLayout()
         bform.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -1770,7 +1848,7 @@ class Main(QWidget):
         boot.body_layout.addLayout(bform)
         parent_layout.addWidget(boot)
 
-        extra = CollapsibleSection("Extra APK packages", collapsed=True)
+        extra = CollapsibleSection("Extra APK packages", collapsed=True, icon_kind="package")
         self.sections["extra"] = extra
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
@@ -1908,7 +1986,7 @@ class Main(QWidget):
         if expanded:
             self.console_toggle.setText("Console output  ▼")
             self.console_toggle.setStyleSheet(
-                f"text-align:left;font-size:15px;color:{BREEZE_BLUE};"
+                f"text-align:left;font-size:15px;color:{BREEZE_TEXT};"
                 f"margin:0px;padding:5px 10px;background:{BREEZE_PANEL};"
                 f"border:1px solid {BREEZE_BORDER};border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
@@ -1927,7 +2005,7 @@ class Main(QWidget):
         else:
             self.console_toggle.setText("Console output  ▲")
             self.console_toggle.setStyleSheet(
-                f"text-align:left;font-size:15px;color:{BREEZE_BLUE};"
+                f"text-align:left;font-size:15px;color:{BREEZE_TEXT};"
                 f"margin:0px;padding:5px 10px;background:{BREEZE_PANEL};"
                 f"border:1px solid {BREEZE_BORDER};border-radius:6px;"
             )
@@ -2157,7 +2235,7 @@ class Main(QWidget):
             f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
             for title, value in rows
         )
-        return f"<div style='min-width:680px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        return f"<div style='min-width:560px;'><h2>Build Alpine image?</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(
@@ -2165,7 +2243,7 @@ class Main(QWidget):
             for key, value in device_rows
         )
         return (
-            "<div style='min-width:680px;'>"
+            "<div style='min-width:560px;'>"
             "<h2>Erase and flash this device?</h2>"
             f"{rows}"
             f"<div style='margin:14px 0 4px 0;'><b>Image:</b> <span style='font-weight:400;'>{html.escape(image_path)}</span></div>"
@@ -2355,7 +2433,9 @@ class Main(QWidget):
         self.flash_progress.show()
         self.status.show()
         self.status.setText("Flashing... 0%")
-        self.set_busy(True)
+        self.set_busy(True, lock_inputs=False)
+        self.pick_button.setEnabled(False)
+        self.device.setEnabled(False)
         self.worker = FlashWorker(img, dev, sudo_password)
         self.worker.log.connect(self.append_log)
         self.worker.progress.connect(self.update_flash_progress)
