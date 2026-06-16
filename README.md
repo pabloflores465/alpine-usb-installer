@@ -88,7 +88,11 @@ Default output path:
 ./gui.py
 ```
 
-<img src="docs/assets/gui-overview.png" alt="Alpine USB Installer GUI" width="900">
+<img src="docs/assets/gui-overview-build-flash.png" alt="Alpine USB Installer GUI while flashing" width="900">
+
+<img src="docs/assets/gui-overview-console.png" alt="Alpine USB Installer GUI console output" width="900">
+
+<img src="docs/assets/gui-overview-config.png" alt="Alpine USB Installer GUI image configuration" width="900">
 
 `./gui.py` creates and uses its own `.qtvenv` automatically if PySide6 is missing. The dev GUI installs the minimal Qt runtime declared in `requirements.txt`.
 
