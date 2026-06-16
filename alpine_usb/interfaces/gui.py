@@ -124,7 +124,7 @@ HOST_PATHS = [
 os.environ["PATH"] = os.pathsep.join([p for p in HOST_PATHS if Path(p).exists()] + [os.environ.get("PATH", "")])
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -145,6 +145,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedLayout,
+    QStyleFactory,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -156,6 +157,56 @@ DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
 SAVED_CONFIG_PATH = Path.home() / ".config" / "alpine-usb-installer" / "gui-config.json"
 CONFIG_FILE_FILTER = "JSON configuration (*.json);;YAML configuration (*.yaml *.yml)"
+
+BREEZE_WINDOW = "#232629"
+BREEZE_VIEW = "#1b1e20"
+BREEZE_PANEL = "#31363b"
+BREEZE_PANEL_ALT = "#2a2e32"
+BREEZE_BORDER = "#4b5057"
+BREEZE_TEXT = "#eff0f1"
+BREEZE_SUBTLE = "#bdc3c7"
+BREEZE_BLUE = "#3daee9"
+BREEZE_BLUE_HOVER = "#54bff7"
+BREEZE_RED = "#da4453"
+BREEZE_RED_HOVER = "#e85d6a"
+BREEZE_GREEN = "#27ae60"
+BREEZE_GREEN_HOVER = "#2ecc71"
+BREEZE_YELLOW = "#fdbc4b"
+BREEZE_PURPLE = "#8e44ad"
+BREEZE_PURPLE_HOVER = "#9b59b6"
+BREEZE_DISABLED = "#4d5358"
+BREEZE_DISABLED_TEXT = "#9aa0a6"
+
+
+def button_style(bg: str = BREEZE_BLUE, hover: str = BREEZE_BLUE_HOVER) -> str:
+    return (
+        "QPushButton { "
+        f"background:{bg};color:{BREEZE_TEXT};border:1px solid {BREEZE_BORDER};"
+        "border-radius:4px;padding:3px 8px;min-height:24px;"
+        " }"
+        f" QPushButton:hover {{ background:{hover}; }}"
+        f" QPushButton:disabled {{ background:{BREEZE_DISABLED};color:{BREEZE_DISABLED_TEXT}; }}"
+    )
+
+
+def apply_breeze_theme(app: QApplication):
+    available_styles = QStyleFactory.keys()
+    style = "Breeze" if "Breeze" in available_styles else "Fusion"
+    app.setStyle(style)
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(BREEZE_WINDOW))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(BREEZE_TEXT))
+    palette.setColor(QPalette.ColorRole.Base, QColor(BREEZE_VIEW))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(BREEZE_PANEL))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(BREEZE_PANEL))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(BREEZE_TEXT))
+    palette.setColor(QPalette.ColorRole.Text, QColor(BREEZE_TEXT))
+    palette.setColor(QPalette.ColorRole.Button, QColor(BREEZE_PANEL))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(BREEZE_TEXT))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(BREEZE_RED))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(BREEZE_BLUE))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    app.setPalette(palette)
 
 
 def make_app_icon() -> QIcon:
@@ -304,8 +355,14 @@ def exec_centered_dialog(box: QMessageBox, parent: QWidget | None = None):
 def modal(parent, kind: str, title: str, text: str, question: bool = False) -> bool:
     box = QMessageBox(parent)
     box.setWindowTitle(title)
+    box.setTextFormat(Qt.TextFormat.RichText if "<" in text and ">" in text else Qt.TextFormat.PlainText)
     box.setText(text)
     box.setWindowIcon(make_app_icon())
+    box.setMinimumWidth(760)
+    box.setStyleSheet(
+        f"QMessageBox {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}"
+        f"QLabel {{ color:{BREEZE_TEXT}; min-width:640px; font-weight:400; }}"
+    )
     icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
     box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
     if question:
@@ -313,21 +370,15 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
         ok.setIcon(make_button_icon("check"))
         cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         cancel.setIcon(make_button_icon("error"))
-        cancel.setStyleSheet(
-            "background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;"
-        )
-        ok.setStyleSheet(
-            "background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;"
-        )
+        cancel.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER).replace("3px 8px", "6px 12px"))
+        ok.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
         exec_centered_dialog(box, parent)
         return box.clickedButton() == ok
     box.setStandardButtons(QMessageBox.StandardButton.Ok)
     ok = box.button(QMessageBox.StandardButton.Ok)
     if ok:
         ok.setIcon(make_button_icon("check"))
-        ok.setStyleSheet(
-            "background:#2563eb;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;"
-        )
+        ok.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
     exec_centered_dialog(box, parent)
     return True
 
@@ -412,7 +463,7 @@ class DeviceDialog(QDialog):
         self.empty_usb_message = QLabel("No USB devices found. Please connect a drive and rescan.")
         self.empty_usb_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_usb_message.setStyleSheet(
-            "background:#0b1220;color:#ffffff;border:1px solid #374151;font-size:15pt;font-weight:bold;"
+            f"background:{BREEZE_VIEW};color:{BREEZE_TEXT};border:1px solid {BREEZE_BORDER};font-size:15pt;font-weight:bold;"
         )
         self.empty_usb_message.hide()
         layout.addWidget(self.empty_usb_message, 1)
@@ -429,9 +480,7 @@ class DeviceDialog(QDialog):
         self.refresh.setIcon(make_button_icon("refresh"))
         self.cancel = QPushButton("Cancel")
         self.cancel.setIcon(make_button_icon("error"))
-        self.cancel.setStyleSheet(
-            "background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:6px 12px;font-weight:bold;"
-        )
+        self.cancel.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER).replace("3px 8px", "6px 12px"))
         btns.addWidget(self.use)
         btns.addWidget(self.refresh)
         btns.addStretch()
@@ -517,15 +566,15 @@ class CollapsibleSection(QWidget):
         self.toggle.setChecked(not collapsed)
         self.toggle.clicked.connect(self.update_state)
         self.toggle.setStyleSheet(
-            "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
-            "margin:0px;padding:6px 10px;background:#1f2937;"
-            "border:1px solid #374151;border-radius:6px;"
+            f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+            "margin:0px;padding:6px 10px;"
+            f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-radius:6px;"
         )
         root.addWidget(self.toggle)
         self.body = QWidget()
         self.body.setObjectName("sectionBody")
         self.body.setStyleSheet(
-            "QWidget#sectionBody { background:#0b1220;border:1px solid #374151;border-top:0;"
+            f"QWidget#sectionBody {{ background:{BREEZE_VIEW};border:1px solid {BREEZE_BORDER};border-top:0;"
             "border-top-left-radius:0px;border-top-right-radius:0px;"
             "border-bottom-left-radius:6px;border-bottom-right-radius:6px; }"
         )
@@ -543,17 +592,17 @@ class CollapsibleSection(QWidget):
         self.toggle.setText(f"{self.title}{dot}  {'▼' if expanded else '▲'}")
         if expanded:
             self.toggle.setStyleSheet(
-                "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
-                "margin:0px;padding:6px 10px;background:#1f2937;"
-                "border:1px solid #374151;border-bottom:0;"
+                f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+                "margin:0px;padding:6px 10px;"
+                f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
                 "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
             )
         else:
             self.toggle.setStyleSheet(
-                "text-align:left;font-size:14px;font-weight:bold;color:#93c5fd;"
-                "margin:0px;padding:6px 10px;background:#1f2937;"
-                "border:1px solid #374151;border-radius:6px;"
+                f"text-align:left;font-size:14px;color:{BREEZE_BLUE};"
+                "margin:0px;padding:6px 10px;"
+                f"background:{BREEZE_PANEL};border:1px solid {BREEZE_BORDER};border-radius:6px;"
             )
 
     def set_dirty(self, dirty: bool):
@@ -1061,7 +1110,7 @@ class Main(QWidget):
         self.package_search_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.package_search_empty.setMinimumHeight(150)
         self.package_search_empty.setStyleSheet(
-            "background:#0b1220;color:#ffffff;border:1px solid #374151;font-size:15pt;font-weight:bold;"
+            f"background:{BREEZE_VIEW};color:{BREEZE_TEXT};border:1px solid {BREEZE_BORDER};font-size:15pt;font-weight:bold;"
         )
         self.package_search_results = PackageSuggestionList()
         self.package_search_results.setMaximumHeight(150)
@@ -1073,8 +1122,9 @@ class Main(QWidget):
         self.package_search_stack_layout.addWidget(self.package_search_empty)
         self.package_search_stack_layout.addWidget(self.package_search_results)
         self.package_search_stack_layout.setCurrentWidget(self.package_search_empty)
-        self.package_search_status = QLabel("Type a package name for suggestions. ↓ selects, →/Enter accepts.")
-        self.package_search_status.setStyleSheet("color:#cbd5e1;font-size:12px;")
+        self.package_search_status = QLabel("")
+        self.package_search_status.setStyleSheet(f"color:{BREEZE_SUBTLE};font-size:12px;")
+        self.package_search_status.hide()
         self.extra_packages.installEventFilter(self)
         self.extra_packages.textChanged.connect(self.schedule_package_search)
         self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
@@ -1175,7 +1225,7 @@ class Main(QWidget):
 
     def config_label(self, key: str, text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("color:#ffffff;border:0;background:transparent;")
+        label.setStyleSheet(f"color:{BREEZE_TEXT};border:0;background:transparent;")
         self.field_labels[key] = label
         self.field_label_text[key] = text
         return label
@@ -1201,7 +1251,7 @@ class Main(QWidget):
         if not hasattr(self, "password"):
             return
         required_empty_style = (
-            "background:#450a0a;color:#ffffff;border:1px solid #ef4444;"
+            f"background:#5c1f27;color:{BREEZE_TEXT};border:1px solid {BREEZE_RED};"
             "border-radius:4px;padding:2px 5px;min-height:24px;"
         )
         self.password.setStyleSheet(required_empty_style if not self.password.text().strip() else "")
@@ -1220,7 +1270,9 @@ class Main(QWidget):
             dirty = self.config_dirty(key, current)
             base = self.field_label_text[key]
             label.setText(("● " if dirty else "") + base)
-            label.setStyleSheet(("color:#fbbf24;" if dirty else "color:#ffffff;") + "border:0;background:transparent;")
+            label.setStyleSheet(
+                (f"color:{BREEZE_YELLOW};" if dirty else f"color:{BREEZE_TEXT};") + "border:0;background:transparent;"
+            )
         for name, keys in getattr(self, "section_fields", {}).items():
             section = self.sections.get(name)
             if section:
@@ -1230,7 +1282,7 @@ class Main(QWidget):
             self.img_title.setText(self.image_title_base + ("  ●" if any_dirty else ""))
             self.img_title.setStyleSheet(
                 "font-size:15px;font-weight:bold;margin:6px 0px 2px 0px;padding:0px;"
-                + ("color:#fbbf24;" if any_dirty else "color:#93c5fd;")
+                + (f"color:{BREEZE_YELLOW};" if any_dirty else f"color:{BREEZE_BLUE};")
             )
         if hasattr(self, "save_config_button"):
             self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
@@ -1284,12 +1336,7 @@ class Main(QWidget):
             return
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(
-            self,
-            "info",
-            APP_TITLE,
-            f"Configuration saved:\n{path}\n\nPasswords are not saved; enter them again before building.",
-        )
+        modal(self, "info", APP_TITLE, f"Configuration saved:\n{path}")
 
     def load_config(self):
         path, _selected_filter = QFileDialog.getOpenFileName(
@@ -1311,23 +1358,22 @@ class Main(QWidget):
         self.sync_root_password_state()
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(
-            self,
-            "info",
-            APP_TITLE,
-            "Configuration loaded. Passwords from the file were ignored, and current in-memory passwords were kept. Changed fields stay marked with dirty dots until you save.",
-        )
+        modal(self, "info", APP_TITLE, "Configuration loaded.")
 
     def restore_defaults(self):
+        user_password = self.password.text()
+        root_password = self.root_password.text()
+        show_passwords = self.show_passwords.isChecked()
         self.saved_config_snapshot = dict(self.default_config)
         self.apply_config(dict(self.default_config))
-        self.password.clear()
-        self.root_password.clear()
+        self.password.setText(user_password)
+        self.root_password.setText(root_password if self.separate_root_password.isChecked() else user_password)
+        self.show_passwords.setChecked(show_passwords)
         self.sync_root_password_state()
         self.write_saved_config(self.saved_config_snapshot)
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(self, "info", APP_TITLE, "Default image configuration restored. Passwords were not saved.")
+        modal(self, "info", APP_TITLE, "Default image configuration restored.")
 
     def connect_config_change_signals(self):
         def changed(*_args):
@@ -1385,7 +1431,7 @@ class Main(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         label = self.config_label(key, text) if key else QLabel(text)
-        label.setStyleSheet("background:transparent;border:0;color:#ffffff;")
+        label.setStyleSheet(f"background:transparent;border:0;color:{BREEZE_TEXT};")
         label.mousePressEvent = lambda _event: checkbox.toggle()
         row.mousePressEvent = lambda _event: checkbox.toggle()
         layout.addWidget(checkbox)
@@ -1415,39 +1461,39 @@ class Main(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
-        self.setStyleSheet("""
-            QWidget { background:#111827; color:#ffffff; }
-            QLabel { color:#ffffff; margin:0px; padding:0px; border:0; background:transparent; }
-            QFormLayout QLabel { border:0; background:transparent; }
-            QLineEdit, QComboBox { background:#1f2937; color:#ffffff; border:0; border-radius:4px; padding:2px 5px; min-height:24px; }
-            QLineEdit:read-only { background:#111827; color:#cbd5e1; border:1px solid #374151; }
-            QComboBox QAbstractItemView { background:#1f2937; color:#ffffff; selection-background-color:#2563eb; }
-            QCheckBox { color:#ffffff; spacing:8px; min-height:22px; border:0; background:transparent; padding:0px; }
-            QTextEdit { background:#0b1220; color:#ffffff; border:1px solid #374151; border-radius:6px; }
-            QPushButton { background:#2563eb; color:#ffffff; border:0; border-radius:6px; padding:3px 8px; min-height:24px; }
-            QPushButton:hover { background:#1d4ed8; }
-            QPushButton:disabled { background:#4b5563; color:#d1d5db; }
-            QListWidget { background:#0b1220; color:#ffffff; border:1px solid #374151; }
-            QProgressBar { color:#ffffff; }
-            QScrollArea { border:0; }
-            QAbstractScrollArea { background:#111827; }
-            QScrollBar:vertical { background:#0f172a; width:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }
-            QScrollBar::handle:vertical { background:#475569; min-height:30px; border-radius:5px; }
-            QScrollBar::handle:vertical:hover { background:#64748b; }
-            QScrollBar::handle:vertical:pressed { background:#93c5fd; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0px; border:0; background:transparent; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }
-            QScrollBar:horizontal { background:#0f172a; height:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }
-            QScrollBar::handle:horizontal { background:#475569; min-width:30px; border-radius:5px; }
-            QScrollBar::handle:horizontal:hover { background:#64748b; }
-            QScrollBar::handle:horizontal:pressed { background:#93c5fd; }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0px; border:0; background:transparent; }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background:transparent; }
+        self.setStyleSheet(f"""
+            QWidget {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}
+            QLabel {{ color:{BREEZE_TEXT}; margin:0px; padding:0px; border:0; background:transparent; }}
+            QFormLayout QLabel {{ border:0; background:transparent; }}
+            QLineEdit, QComboBox {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:4px; padding:2px 5px; min-height:24px; }}
+            QLineEdit:read-only {{ background:{BREEZE_VIEW}; color:{BREEZE_SUBTLE}; border:1px solid {BREEZE_BORDER}; }}
+            QComboBox QAbstractItemView {{ background:{BREEZE_PANEL}; color:{BREEZE_TEXT}; selection-background-color:{BREEZE_BLUE}; }}
+            QCheckBox {{ color:{BREEZE_TEXT}; spacing:8px; min-height:22px; border:0; background:transparent; padding:0px; }}
+            QTextEdit {{ background:{BREEZE_VIEW}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:6px; }}
+            QPushButton {{ background:{BREEZE_BLUE}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; border-radius:4px; padding:3px 8px; min-height:24px; }}
+            QPushButton:hover {{ background:{BREEZE_BLUE_HOVER}; }}
+            QPushButton:disabled {{ background:{BREEZE_DISABLED}; color:{BREEZE_DISABLED_TEXT}; }}
+            QListWidget {{ background:{BREEZE_VIEW}; color:{BREEZE_TEXT}; border:1px solid {BREEZE_BORDER}; }}
+            QProgressBar {{ color:{BREEZE_TEXT}; }}
+            QScrollArea {{ border:0; }}
+            QAbstractScrollArea {{ background:{BREEZE_WINDOW}; }}
+            QScrollBar:vertical {{ background:{BREEZE_VIEW}; width:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }}
+            QScrollBar::handle:vertical {{ background:{BREEZE_BORDER}; min-height:30px; border-radius:5px; }}
+            QScrollBar::handle:vertical:hover {{ background:{BREEZE_SUBTLE}; }}
+            QScrollBar::handle:vertical:pressed {{ background:{BREEZE_BLUE}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0px; border:0; background:transparent; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background:transparent; }}
+            QScrollBar:horizontal {{ background:{BREEZE_VIEW}; height:12px; margin:2px 2px 2px 2px; border:0; border-radius:6px; }}
+            QScrollBar::handle:horizontal {{ background:{BREEZE_BORDER}; min-width:30px; border-radius:5px; }}
+            QScrollBar::handle:horizontal:hover {{ background:{BREEZE_SUBTLE}; }}
+            QScrollBar::handle:horizontal:pressed {{ background:{BREEZE_BLUE}; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0px; border:0; background:transparent; }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
         """)
         title = QLabel("Alpine USB Installer")
-        title.setStyleSheet("font-size:22px;font-weight:bold;color:#ffffff;margin:0px;padding:0px;")
+        title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
         subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
-        subtitle.setStyleSheet("color:#cbd5e1;margin:0px;padding:0px;font-size:12px;")
+        subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
         header.setSpacing(3)
@@ -1471,7 +1517,7 @@ class Main(QWidget):
         self.image_title_base = "1. Image configuration"
         self.img_title = QLabel(self.image_title_base)
         self.img_title.setStyleSheet(
-            "font-size:15px;font-weight:bold;color:#93c5fd;margin:6px 0px 2px 0px;padding:0px;"
+            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:6px 0px 2px 0px;padding:0px;"
         )
         content_layout.addWidget(self.img_title)
         img_grid = QGridLayout()
@@ -1486,28 +1532,19 @@ class Main(QWidget):
         self.build_button.setIcon(make_button_icon("build"))
         self.build_button.clicked.connect(self.build_image)
         self.build_button.setFixedWidth(150)
-        self.build_button.setStyleSheet("""
-            QPushButton { background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
-            QPushButton:disabled { background:#374151;color:#9ca3af; }
-        """)
+        self.build_button.setStyleSheet(button_style(BREEZE_GREEN, BREEZE_GREEN_HOVER))
         self.stop_build_button = QPushButton("Stop build and clean")
         self.stop_build_button.setIcon(make_button_icon("error"))
         self.stop_build_button.clicked.connect(self.stop_build)
         self.stop_build_button.setFixedWidth(190)
         self.stop_build_button.setEnabled(False)
         self.stop_build_button.hide()
-        self.stop_build_button.setStyleSheet("""
-            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
-            QPushButton:disabled { background:#374151;color:#9ca3af; }
-        """)
+        self.stop_build_button.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER))
         img_grid.addWidget(self.config_label("image", "Output path:"), 0, 0)
         img_grid.addWidget(self.image, 0, 1)
         img_grid.addWidget(choose_output, 0, 2)
         content_layout.addLayout(img_grid)
 
-        config_note = QLabel("Configuration sections are collapsed by default; open only what you want to customize.")
-        config_note.setStyleSheet("color:#cbd5e1;font-size:12px;margin-top:6px;")
-        content_layout.addWidget(config_note)
         self.add_config_sections(content_layout)
 
         config_actions = QHBoxLayout()
@@ -1518,15 +1555,11 @@ class Main(QWidget):
         self.load_config_button = QPushButton("Load configuration")
         self.load_config_button.setIcon(make_button_icon("folder"))
         self.load_config_button.clicked.connect(self.load_config)
-        self.load_config_button.setStyleSheet(
-            "background:#7c3aed;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;"
-        )
+        self.load_config_button.setStyleSheet(button_style(BREEZE_PURPLE, BREEZE_PURPLE_HOVER))
         self.restore_defaults_button = QPushButton("Restore defaults")
         self.restore_defaults_button.setIcon(make_button_icon("refresh"))
         self.restore_defaults_button.clicked.connect(self.restore_defaults)
-        self.restore_defaults_button.setStyleSheet(
-            "background:#16a34a;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px;"
-        )
+        self.restore_defaults_button.setStyleSheet(button_style(BREEZE_GREEN, BREEZE_GREEN_HOVER))
         config_actions.addWidget(self.save_config_button)
         config_actions.addWidget(self.load_config_button)
         config_actions.addWidget(self.restore_defaults_button)
@@ -1537,14 +1570,16 @@ class Main(QWidget):
         self.build_summary.setWordWrap(True)
         self.build_summary.setTextFormat(Qt.TextFormat.RichText)
         self.build_summary.setStyleSheet(
-            "color:#cbd5e1;font-size:12px;margin:8px 0px 6px 0px;padding:8px;background:#0f172a;border:1px solid #374151;border-radius:6px;"
+            f"color:{BREEZE_SUBTLE};font-size:12px;margin:8px 0px 6px 0px;padding:8px;background:{BREEZE_VIEW};border:1px solid {BREEZE_BORDER};border-radius:6px;"
         )
         content_layout.addWidget(self.build_summary)
         self.refresh_build_summary()
         self.update_dirty_indicators()
 
         build_title = QLabel("2. Image build")
-        build_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
+        build_title.setStyleSheet(
+            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:10px 0px 2px 0px;padding:0px;"
+        )
         content_layout.addWidget(build_title)
         build_box = QVBoxLayout()
         build_box.setSpacing(6)
@@ -1561,7 +1596,9 @@ class Main(QWidget):
         content_layout.addLayout(build_box)
 
         usb_title = QLabel("3. USB target")
-        usb_title.setStyleSheet("font-size:15px;font-weight:bold;color:#93c5fd;margin:10px 0px 2px 0px;padding:0px;")
+        usb_title.setStyleSheet(
+            f"font-size:15px;font-weight:bold;color:{BREEZE_BLUE};margin:10px 0px 2px 0px;padding:0px;"
+        )
         content_layout.addWidget(usb_title)
         usb_box = QVBoxLayout()
         usb_box.setSpacing(6)
@@ -1576,10 +1613,7 @@ class Main(QWidget):
         self.flash_button.clicked.connect(self.flash)
         self.flash_button.setFixedWidth(150)
         self.flash_button.setEnabled(False)
-        self.flash_button.setStyleSheet("""
-            QPushButton { background:#dc2626;color:#ffffff;border:0;border-radius:6px;padding:3px 8px;font-weight:bold;min-height:24px; }
-            QPushButton:disabled { background:#374151;color:#9ca3af; }
-        """)
+        self.flash_button.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER))
         device_label = QLabel("Device:")
         device_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         usb_row.addWidget(device_label)
@@ -1591,7 +1625,7 @@ class Main(QWidget):
         flash_row.addStretch()
         usb_box.addLayout(flash_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
-        warn.setStyleSheet("color:#fca5a5;font-weight:bold;margin:0px;padding:0px;font-size:12px;")
+        warn.setStyleSheet(f"color:{BREEZE_RED};font-weight:bold;margin:0px;padding:0px;font-size:12px;")
         usb_box.addWidget(warn)
         usb_box.addWidget(self.status)
         self.flash_progress = QProgressBar()
@@ -1636,12 +1670,10 @@ class Main(QWidget):
 
         system = CollapsibleSection("System, user, localization (required)", collapsed=False)
         self.sections["system"] = system
-        required_note = QLabel(
-            "Required before build. By default, root password matches the user password. Enable separate root password only if you want different credentials. Passwords are not saved."
-        )
+        required_note = QLabel("Passwords are not saved.")
         required_note.setWordWrap(True)
         required_note.setStyleSheet(
-            "color:#fbbf24;font-size:12px;margin:2px 0px 8px 0px;padding:0px;border:0;background:transparent;"
+            f"color:{BREEZE_YELLOW};font-size:12px;margin:2px 0px 8px 0px;padding:0px;border:0;background:transparent;"
         )
         system.body_layout.addWidget(required_note)
         form = QFormLayout()
@@ -1691,7 +1723,7 @@ class Main(QWidget):
             dform.addRow(self.config_label(key, label), widget)
         desktop.body_layout.addLayout(dform)
         wm_label = QLabel("Optional tiling/window managers:")
-        wm_label.setStyleSheet("color:#cbd5e1;font-weight:bold;border:0;background:transparent;")
+        wm_label.setStyleSheet(f"color:{BREEZE_SUBTLE};font-weight:bold;border:0;background:transparent;")
         desktop.body_layout.addWidget(wm_label)
         wm_grid = QGridLayout()
         wm_grid.setHorizontalSpacing(18)
@@ -1740,11 +1772,6 @@ class Main(QWidget):
 
         extra = CollapsibleSection("Extra APK packages", collapsed=True)
         self.sections["extra"] = extra
-        extra.body_layout.addWidget(
-            QLabel(
-                "Type package names separated by spaces. Suggestions search Alpine main/community after a short delay."
-            )
-        )
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
         extra.body_layout.addWidget(self.package_search_stack)
@@ -1759,6 +1786,10 @@ class Main(QWidget):
     def show_package_search_results(self):
         self.package_search_stack_layout.setCurrentWidget(self.package_search_results)
 
+    def set_package_search_status(self, message: str):
+        self.package_search_status.setText(message)
+        self.package_search_status.setVisible(bool(message))
+
     def current_package_query(self) -> str:
         text = self.extra_packages.text()
         if not text or text[-1].isspace():
@@ -1770,9 +1801,9 @@ class Main(QWidget):
         if len(query) < 2:
             self.package_search_timer.stop()
             self.show_package_search_message("Type a package to search")
-            self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
+            self.set_package_search_status("")
             return
-        self.package_search_status.setText(f"Will search suggestions for '{query}'…")
+        self.set_package_search_status(f"Will search suggestions for '{query}'…")
         self.package_search_timer.start()
 
     def eventFilter(self, obj, event):
@@ -1792,18 +1823,18 @@ class Main(QWidget):
     def search_packages(self):
         query = self.current_package_query()
         if len(query) < 2:
-            self.package_search_status.setText("Type at least 2 characters in the packages field for suggestions.")
             self.show_package_search_message("Type a package to search")
+            self.set_package_search_status("")
             return
         if self.thread_running(self.package_search_worker):
             self.package_search_pending = True
-            self.package_search_status.setText("Search running; queued latest text…")
+            self.set_package_search_status("Search running; queued latest text…")
             return
         branch = self.alpine_branch.currentText().strip() or "latest-stable"
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.package_search_status.setText(f"Searching {branch}/{arch} main + community…")
+        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
         self.package_search_worker = ApkSearchWorker(branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
@@ -1817,7 +1848,7 @@ class Main(QWidget):
         self.package_search_results.clear()
         if not results:
             self.show_package_search_message("No packages found")
-            self.package_search_status.setText(f"No official packages found for '{query}'.")
+            self.set_package_search_status(f"No official packages found for '{query}'.")
             return
         for package in results:
             desc = package.get("description") or "No description"
@@ -1830,14 +1861,12 @@ class Main(QWidget):
         first = self.package_search_results.item(0)
         if first:
             first.setSelected(True)
-        self.package_search_status.setText(
-            f"Top {len(results)} suggestions. ↓/↑ moves, →/Enter or double-click accepts."
-        )
+        self.set_package_search_status(f"Top {len(results)} suggestions. ↓/↑ moves, →/Enter or double-click accepts.")
 
     def package_search_failed(self, query: str, message: str):
         self.package_search_results.clear()
         self.show_package_search_message("Package search failed")
-        self.package_search_status.setText(f"Search failed for '{query}': {message}")
+        self.set_package_search_status(f"Search failed for '{query}': {message}")
 
     def package_search_finished(self):
         if self.sender() is self.package_search_worker:
@@ -1855,7 +1884,7 @@ class Main(QWidget):
         names = [item.data(Qt.ItemDataRole.UserRole) for item in items]
         names = [str(name) for name in names if name]
         if not names:
-            self.package_search_status.setText("Select one or more suggestions first.")
+            self.set_package_search_status("Select one or more suggestions first.")
             return
         text = self.extra_packages.text()
         trailing_space = bool(text and text[-1].isspace())
@@ -1873,34 +1902,34 @@ class Main(QWidget):
         self.extra_packages.setText(" ".join(tokens) + (" " if tokens else ""))
         self.extra_packages.setCursorPosition(len(self.extra_packages.text()))
         self.show_package_search_message("Type a package to search")
-        self.package_search_status.setText(
-            "Added: " + ", ".join(added) if added else "Selected package(s) already added."
-        )
+        self.set_package_search_status("Added: " + ", ".join(added) if added else "Selected package(s) already added.")
 
     def update_console_style(self, expanded: bool):
         if expanded:
             self.console_toggle.setText("Console output  ▼")
             self.console_toggle.setStyleSheet(
-                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
-                "margin:0px;padding:5px 10px;background:#1f2937;"
-                "border:1px solid #374151;border-bottom:0;"
+                f"text-align:left;font-size:15px;color:{BREEZE_BLUE};"
+                f"margin:0px;padding:5px 10px;background:{BREEZE_PANEL};"
+                f"border:1px solid {BREEZE_BORDER};border-bottom:0;"
                 "border-top-left-radius:6px;border-top-right-radius:6px;"
                 "border-bottom-left-radius:0px;border-bottom-right-radius:0px;"
             )
             panel_style = (
-                "background:#0b1220;color:#ffffff;border:1px solid #374151;"
+                f"background:{BREEZE_VIEW};color:{BREEZE_TEXT};border:1px solid {BREEZE_BORDER};"
                 "border-top:0;border-top-left-radius:0px;border-top-right-radius:0px;"
                 "border-bottom-left-radius:6px;border-bottom-right-radius:6px;"
             )
             self.log.setStyleSheet(panel_style)
             self.console_stack.setStyleSheet(panel_style)
-            self.console_empty.setStyleSheet("background:#0b1220;color:#ffffff;font-size:15pt;font-weight:bold;")
+            self.console_empty.setStyleSheet(
+                f"background:{BREEZE_VIEW};color:{BREEZE_TEXT};font-size:15pt;font-weight:bold;"
+            )
         else:
             self.console_toggle.setText("Console output  ▲")
             self.console_toggle.setStyleSheet(
-                "text-align:left;font-size:15px;font-weight:bold;color:#93c5fd;"
-                "margin:0px;padding:5px 10px;background:#1f2937;"
-                "border:1px solid #374151;border-radius:6px;"
+                f"text-align:left;font-size:15px;color:{BREEZE_BLUE};"
+                f"margin:0px;padding:5px 10px;background:{BREEZE_PANEL};"
+                f"border:1px solid {BREEZE_BORDER};border-radius:6px;"
             )
 
     def toggle_console(self):
@@ -2094,6 +2123,56 @@ class Main(QWidget):
             f"Extra packages: {env['ALPINE_USB_EXTRA_PACKAGES'] or 'none'}"
         )
 
+    def config_summary_html(self, output_path: str, env: dict[str, str]) -> str:
+        def esc(value: object) -> str:
+            return html.escape(str(value))
+
+        rows = [
+            ("Output", esc(output_path)),
+            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+            (
+                "System",
+                f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
+            ),
+            (
+                "Locale",
+                f"{esc(env['ALPINE_USB_LOCALE'])} · TZ {esc(env['ALPINE_USB_TIMEZONE'])} · console {esc(env['ALPINE_USB_CONSOLE_KEYMAP'])} · XKB {esc(env['ALPINE_USB_XKB_LAYOUT'])} {esc(env['ALPINE_USB_XKB_VARIANT'] or '')} · model {esc(env['ALPINE_USB_XKB_MODEL'])}",
+            ),
+            (
+                "Desktop",
+                f"{esc(env['ALPINE_USB_DESKTOP'])} · DM {esc(env['ALPINE_USB_DISPLAY_MANAGER'])} · Session {esc(env['ALPINE_USB_DEFAULT_SESSION'])} · WMs {esc(env['ALPINE_USB_TILING_WMS'] or 'none')}",
+            ),
+            ("Apps", f"browser={esc(env['ALPINE_USB_BROWSER'])} · audio={esc(env['ALPINE_USB_AUDIO'])}"),
+            (
+                "Hardware/network",
+                f"network={esc(env['ALPINE_USB_NETWORK'])} · Wi‑Fi={esc(env['ALPINE_USB_WIFI'])} · Bluetooth={esc(env['ALPINE_USB_BLUETOOTH'])}",
+            ),
+            (
+                "Boot",
+                f"{esc(env['ALPINE_USB_BOOTLOADER'])} · linux-{esc(env['ALPINE_USB_KERNEL_FLAVOR'])} · firmware={esc(env['ALPINE_USB_FIRMWARE'])} · legacy-X11={esc(env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env['ALPINE_USB_BOOT_TIMEOUT'])} · auto-resize={esc(env['ALPINE_USB_AUTO_RESIZE'])}",
+            ),
+            ("Extra packages", esc(env["ALPINE_USB_EXTRA_PACKAGES"] or "none")),
+        ]
+        lines = "".join(
+            f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
+            for title, value in rows
+        )
+        return f"<div style='min-width:680px;'><h2>Build Alpine image?</h2>{lines}</div>"
+
+    def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
+        rows = "".join(
+            f"<div style='margin:4px 0;'><b>{html.escape(str(key))}:</b> <span style='font-weight:400;'>{html.escape(str(value))}</span></div>"
+            for key, value in device_rows
+        )
+        return (
+            "<div style='min-width:680px;'>"
+            "<h2>Erase and flash this device?</h2>"
+            f"{rows}"
+            f"<div style='margin:14px 0 4px 0;'><b>Image:</b> <span style='font-weight:400;'>{html.escape(image_path)}</span></div>"
+            f"<div style='margin-top:18px;color:{BREEZE_RED};font-weight:bold;'>This permanently erases the selected USB device.</div>"
+            "</div>"
+        )
+
     def summary_wms_from_config(self, cfg: dict) -> str:
         raw_wms = cfg.get("wms", [])
         if isinstance(raw_wms, str):
@@ -2142,7 +2221,7 @@ class Main(QWidget):
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
         self.build_summary.setText(
-            "<b>Current image configuration</b> <span style='color:#9ca3af;'>(auto-saved, passwords hidden)</span><br>"
+            "<b>Current image configuration</b><br>"
             f"<b>Output:</b> {e['image']}<br>"
             f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
@@ -2178,7 +2257,7 @@ class Main(QWidget):
             if subprocess.run([docker, "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
                 modal(self, "error", APP_TITLE, "Docker is not running. Start Docker Desktop and try again.")
                 return
-        confirm = f"Build Alpine image?\n\nOutput:\n{output_path}\n\n{self.config_summary_text(env)}"
+        confirm = self.config_summary_html(output_path, env)
         if not modal(self, "question", APP_TITLE, confirm, question=True):
             return
         self.build_progress.show()
@@ -2251,12 +2330,11 @@ class Main(QWidget):
             self.clear_flash_target()
             modal(self, "error", APP_TITLE, reason or "Unsafe USB target.")
             return
-        device_details = "\n".join(f"{key}: {value}" for key, value in device_rows)
         if not modal(
             self,
             "question",
             APP_TITLE,
-            f"Erase and flash this device?\n\n{device_details}\n\nImage: {img}\n\nThis permanently erases the selected USB device.",
+            self.flash_confirmation_html(device_rows, img),
             question=True,
         ):
             return
@@ -2332,6 +2410,7 @@ class Main(QWidget):
 
 def main() -> int:
     app = QApplication(sys.argv)
+    apply_breeze_theme(app)
     app.setWindowIcon(make_app_icon())
     w = Main()
     w.show()

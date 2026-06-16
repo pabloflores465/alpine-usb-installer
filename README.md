@@ -101,7 +101,7 @@ GUI flow:
 5. Select USB target.
 6. Flash USB. The image is checked before flashing to avoid writing incomplete or corrupt builds.
 
-GUI image configurations auto-save as you edit and can also be saved/loaded as JSON (`.json`) or YAML (`.yaml`/`.yml`). Saved files never include user/root passwords. Password fields stay in memory while the app is open, including when loading another configuration file. After restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials. The live configuration summary updates immediately, and loaded/changed fields stay marked with dirty dots until you explicitly save them.
+GUI image configurations auto-save as you edit and can also be saved/loaded as JSON (`.json`) or YAML (`.yaml`/`.yml`). Saved files never include user/root passwords. Password fields stay in memory while the app is open, including when loading another configuration file or restoring defaults. After restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials. The live configuration summary updates immediately, and loaded/changed fields stay marked with dirty dots until you explicitly save them.
 
 USB selection shows the full device label, size, model, serial/id, and volume info when available. Internally, flashing strips that label down to the safe whole-disk device path, for example `/dev/disk20`.
 
@@ -434,7 +434,7 @@ scripts/build-macos-dmg.sh
 Build all release assets with:
 
 ```sh
-scripts/package-release-assets.sh 0.1.9
+scripts/package-release-assets.sh 0.1.10
 ```
 
 The release packager creates separate GUI and terminal assets:
