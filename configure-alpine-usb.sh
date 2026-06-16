@@ -102,6 +102,8 @@ BLUETOOTH="${ALPINE_USB_BLUETOOTH:-1}"
 AUDIO="$(lower "${ALPINE_USB_AUDIO:-pipewire}")"
 BROWSER="$(lower "${ALPINE_USB_BROWSER:-firefox}")"
 FIRMWARE="$(lower "${ALPINE_USB_FIRMWARE:-full}")"
+LEGACY_X11_DRIVERS="${ALPINE_USB_LEGACY_X11_DRIVERS:-1}"
+PROFILE="${ALPINE_USB_PROFILE:-compatibility}"
 BOOTLOADER="$(lower "${ALPINE_USB_BOOTLOADER:-grub}")"
 KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-lts}")"
 ROOTFS="$(lower "${ALPINE_USB_ROOTFS:-ext4}")"
@@ -128,6 +130,8 @@ safe_token "XKB model" "$XKB_MODEL"
 case "$BOOT_TIMEOUT" in *[!0-9]*|"") die "Boot timeout must be a number" ;; esac
 case "$SYSTEMD_BOOT_CONSOLE_MODE" in keep|auto|max|[0-9]|[0-9][0-9]) ;; *) die "Unsupported systemd-boot console mode: $SYSTEMD_BOOT_CONSOLE_MODE" ;; esac
 case "$(lower "$AUTO_RESIZE")" in 1|yes|true|on|enabled|0|no|false|off|disabled) ;; *) die "Unsupported auto-resize value: $AUTO_RESIZE" ;; esac
+case "$(lower "$LEGACY_X11_DRIVERS")" in 1|yes|true|on|enabled|0|no|false|off|disabled) ;; *) die "Unsupported legacy X11 drivers value: $LEGACY_X11_DRIVERS" ;; esac
+case "$PROFILE" in compatibility|minimal|"") ;; *) die "Unsupported profile: $PROFILE" ;; esac
 
 case "$DESKTOP" in xfce|gnome|plasma|mate|lxqt|none) ;; *) die "Unsupported desktop: $DESKTOP" ;; esac
 case "$DISPLAY_MANAGER" in auto|lightdm|sddm|gdm|lxdm|greetd|none) ;; *) die "Unsupported display manager: $DISPLAY_MANAGER" ;; esac
@@ -206,9 +210,12 @@ esac
 if [ "$GRAPHICAL" = "1" ]; then
   append_packages \
     xorg-server xinit setxkbmap xkeyboard-config libinput xf86-input-libinput \
-    xf86-video-amdgpu xf86-video-ati xf86-video-intel xf86-video-nouveau \
-    xf86-video-vesa xf86-video-fbdev \
     mesa-dri-gallium mesa-egl mesa-gl xrandr xdg-utils
+  if is_enabled "$LEGACY_X11_DRIVERS"; then
+    append_packages \
+      xf86-video-amdgpu xf86-video-ati xf86-video-intel xf86-video-nouveau \
+      xf86-video-vesa xf86-video-fbdev
+  fi
 fi
 
 case "$DESKTOP" in
@@ -292,7 +299,7 @@ DRY RUN OK
  default_session=$DEFAULT_SESSION
  display_manager=$DISPLAY_MANAGER
  network=$NETWORK_BACKEND wifi=$WIFI bluetooth=$BLUETOOTH audio=$AUDIO
- bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS auto_resize=$AUTO_RESIZE systemd_boot_console_mode=$SYSTEMD_BOOT_CONSOLE_MODE
+ bootloader=$BOOTLOADER kernel=$KERNEL_FLAVOR firmware=$FIRMWARE rootfs=$ROOTFS auto_resize=$AUTO_RESIZE legacy_x11_drivers=$LEGACY_X11_DRIVERS systemd_boot_console_mode=$SYSTEMD_BOOT_CONSOLE_MODE
  locale=$LOCALE keyboard=$XKB_LAYOUT console_keymap=$CONSOLE_KEYMAP
  packages:$PACKAGES
 EOF
@@ -300,18 +307,14 @@ EOF
 fi
 
 # ---- Base system ----------------------------------------------------------
-apk update
-apk upgrade --available
-
-# Install polkit-elogind before desktop packages. This prevents apk from
-# selecting the non-elogind polkit provider when a desktop/polkit-agent package
-# depends on "polkit". This fixes the previous xfce-polkit/polkit conflict.
-apk add alpine-base "linux-$KERNEL_FLAVOR" dbus dbus-x11 elogind polkit-elogind ca-certificates tzdata
+# One solver/install pass is faster than update + upgrade + multiple apk add
+# calls. polkit-elogind is explicit in PACKAGES so apk keeps the elogind provider
+# when desktop packages depend on "polkit".
 if [ "$FIRMWARE" = "full" ]; then
   apk del linux-firmware-none >/dev/null 2>&1 || true
 fi
 # shellcheck disable=SC2086 # PACKAGES is a generated package list.
-apk add $PACKAGES
+apk add --no-cache $PACKAGES
 
 # ---- Locale, timezone and keyboard ---------------------------------------
 mkdir -p /etc/profile.d /etc/X11/xorg.conf.d
@@ -611,9 +614,7 @@ start_once() {
 }
 
 start_once pipewire pipewire
-sleep 1
 start_once wireplumber wireplumber
-sleep 1
 start_once pipewire-pulse pipewire-pulse
 EOF
   chmod +x /usr/local/bin/alpine-usb-pipewire-session
@@ -709,6 +710,8 @@ resolve_root_device() {
   esac
 }
 
+command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=5 >/dev/null 2>&1 || true
+
 root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
 rootdev="$(resolve_root_device "$root_src" 2>/dev/null || true)"
 if [ -z "$rootdev" ] || [ ! -b "$rootdev" ]; then
@@ -756,7 +759,7 @@ fi
 
 partx -u "$disk" 2>/dev/null || true
 blockdev --rereadpt "$disk" 2>/dev/null || true
-sleep 1
+command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=5 >/dev/null 2>&1 || true
 resize2fs "$rootdev"
 touch "$marker"
 echo "Root filesystem expansion complete."
@@ -769,7 +772,7 @@ description="Grow Alpine USB root partition/filesystem to fill the target USB dr
 
 depend() {
   need localmount
-  after modules udev-settle
+  after modules udev-trigger
   before lightdm sddm gdm lxdm greetd
 }
 
@@ -793,7 +796,6 @@ rc-update add dmesg sysinit || true
 rc-update del mdev sysinit || true
 rc-update add udev sysinit || true
 rc-update add udev-trigger sysinit || true
-rc-update add udev-settle sysinit || true
 rc-update add hwdrivers sysinit || true
 rc-update add modules boot || true
 rc-update add loadkeys boot || rc-update add keymaps boot || true

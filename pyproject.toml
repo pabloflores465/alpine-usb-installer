@@ -1,0 +1,40 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+  "aports",
+  "build",
+  "dist",
+  "standalone-release",
+  ".venv",
+  ".qtvenv",
+  ".work",
+]
+
+[tool.ruff.lint]
+select = [
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "I",
+  "B",
+  "UP",
+  "C4",
+  "SIM",
+  "RUF",
+]
+ignore = [
+  "E501", # long command/UI strings are common in this CLI/GUI project
+  "RUF001", # UI strings intentionally use typographic symbols (Wi‑Fi, ›, etc.)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alpine_usb/interfaces/gui.py" = ["E402", "E701", "E702", "SIM105"]
+"alpine_usb/interfaces/tui.py" = ["E701", "E702"]
+"tests/*" = ["S101"]

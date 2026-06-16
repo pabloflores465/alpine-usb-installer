@@ -39,11 +39,14 @@ mkdir -p "$STAGE_DIR"
   --noconfirm \
   --windowed \
   --name "$APP_NAME" \
+  --hidden-import "alpine_usb.interfaces.gui" \
+  --hidden-import "alpine_usb.apk_packages.index" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
+  --add-data "scripts/Dockerfile.builder:scripts" \
   gui.py
 
 cp -R "$DIST_DIR/$APP_NAME.app" "$STAGE_DIR/"

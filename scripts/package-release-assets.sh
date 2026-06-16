@@ -38,11 +38,16 @@ scripts/build-macos-dmg.sh
   --name "alpine-usb" \
   --hidden-import "cli" \
   --hidden-import "tui" \
+  --hidden-import "apk_index" \
+  --hidden-import "alpine_usb.interfaces.cli" \
+  --hidden-import "alpine_usb.interfaces.tui" \
+  --hidden-import "alpine_usb.apk_packages.index" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
+  --add-data "scripts/Dockerfile.builder:scripts" \
   alpine-usb
 
 rm -rf "$assets_dir" "$terminal_pkg_dir"
@@ -67,18 +72,33 @@ files = [
     "alpine-usb",
     "cli.py",
     "tui.py",
+    "apk_index.py",
+    "alpine_usb",
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
     "README.md",
     "LICENSE",
     "requirements.txt",
+    "pyproject.toml",
+    "tests",
     "repositories",
+    ".dockerignore",
+    "scripts/Dockerfile.builder",
+    "scripts/check-project.sh",
 ]
+
+def wanted(path: Path) -> bool:
+    return "__pycache__" not in path.parts and path.suffix != ".pyc"
+
 
 with tarfile.open(out / f"{base}.tar.gz", "w:gz") as tar:
     for name in files:
         path = root / name
-        if path.exists():
+        if path.is_dir():
+            for child in path.rglob("*"):
+                if child.is_file() and wanted(child):
+                    tar.add(child, arcname=f"{base}/{name}/{child.relative_to(path)}")
+        elif path.exists():
             tar.add(path, arcname=f"{base}/{name}")
     efi = root / "efi-fallback"
     if efi.exists():
@@ -87,7 +107,11 @@ with tarfile.open(out / f"{base}.tar.gz", "w:gz") as tar:
 with zipfile.ZipFile(out / f"{base}.zip", "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for name in files:
         path = root / name
-        if path.exists():
+        if path.is_dir():
+            for child in path.rglob("*"):
+                if child.is_file() and wanted(child):
+                    zf.write(child, f"{base}/{name}/{child.relative_to(path)}")
+        elif path.exists():
             zf.write(path, f"{base}/{name}")
     efi = root / "efi-fallback"
     if efi.exists():

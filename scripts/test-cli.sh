@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile alpine-usb cli.py tui.py gui.py
+python3 -m py_compile alpine-usb cli.py tui.py gui.py apk_index.py $(find alpine_usb -name '*.py' -type f | sort)
 ./alpine-usb tui --self-test >/dev/null
 if [ "${SKIP_TUI_PTY_TESTS:-0}" != "1" ]; then
   python3 - <<'PY'
@@ -35,6 +35,9 @@ fi
 ./alpine-usb build --dry-run --password testpass --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/alpine-usb-cli-dry-run.out
 grep -q 'DRY RUN OK' /tmp/alpine-usb-cli-dry-run.out
 grep -q 'neovim' /tmp/alpine-usb-cli-dry-run.out
+./alpine-usb build --dry-run --password testpass --profile minimal -y >/tmp/alpine-usb-cli-minimal.out
+grep -q 'desktop=none' /tmp/alpine-usb-cli-minimal.out
+grep -q 'legacy_x11_drivers=0' /tmp/alpine-usb-cli-minimal.out
 
 if [ "${SKIP_NETWORK_TESTS:-0}" != "1" ]; then
   ./alpine-usb search firefox --limit 3 >/tmp/alpine-usb-cli-search.out

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-alpine-usb.img}"
+OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ALPINE_BRANCH="${ALPINE_BRANCH:-latest-stable}"
 ARCH="${ARCH:-x86_64}"
@@ -14,6 +15,8 @@ MAKE_VM_IMAGE_COMMIT="dda77715d4dfe8704eb55f310dc1318920d5fd75"
 MAKE_VM_IMAGE_SHA256="860b2b9efb73869085ba0a9401555ff0eac29072d102ffd39884ddb90aedc2f4"
 MAKE_VM_IMAGE_URL="https://raw.githubusercontent.com/alpinelinux/alpine-make-vm-image/$MAKE_VM_IMAGE_COMMIT/alpine-make-vm-image"
 DOCKER_IMAGE="${ALPINE_USB_DOCKER_IMAGE:-alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601}"
+BUILDER_IMAGE="${ALPINE_USB_BUILDER_IMAGE:-alpine-usb-builder:3.22-amd64}"
+BUILDER_DOCKERFILE="${ALPINE_USB_BUILDER_DOCKERFILE:-$SCRIPT_DIR/scripts/Dockerfile.builder}"
 
 ALPINE_USB_KERNEL_FLAVOR="${ALPINE_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
 ALPINE_USB_BOOTLOADER="${ALPINE_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
@@ -34,6 +37,12 @@ fi
 if [[ -z "$IMAGE_NAME" || "$IMAGE_NAME" == *"/"* || "$IMAGE_NAME" == *".."* || "$IMAGE_NAME" == -* || ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid image name: $IMAGE_NAME" >&2
   exit 1
+fi
+if [ -n "$OUTPUT_PATH" ]; then
+  case "$OUTPUT_PATH" in
+    /*) ;;
+    *) echo "OUTPUT_PATH must be absolute: $OUTPUT_PATH" >&2; exit 1 ;;
+  esac
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
@@ -66,9 +75,10 @@ verify_sha256() {
 mkdir -p "$WORK_DIR"
 chmod 700 "$WORK_DIR" 2>/dev/null || true
 
-# macOS cannot run the Linux/NBD build natively. Always run it in a fresh
-# privileged Docker container with the required build tools, and remove the
-# container afterwards (--rm). This also makes the CLI behave like the GUI.
+# macOS cannot run the Linux/NBD build natively. Run it in a privileged Docker
+# container. Prefer a cached builder image so repeated builds do not reinstall
+# the same build tools every time; fall back to the pinned Alpine base image if
+# the Dockerfile is unavailable or ALPINE_USB_SKIP_BUILDER_CACHE=1.
 if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   if ! command -v docker >/dev/null 2>&1; then
     echo "Docker not found. Install Docker Desktop and try again." >&2
@@ -80,29 +90,52 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   fi
 
   pass_env=(
-    IMAGE_NAME IMAGE_SIZE ALPINE_BRANCH ARCH
+    IMAGE_NAME OUTPUT_PATH IMAGE_SIZE ALPINE_BRANCH ARCH
     ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME
     ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE
     ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL
     ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER
     ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER
-    ALPINE_USB_FIRMWARE ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_ROOTFS
+    ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_ROOTFS
     ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_INITFS_FEATURES ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE
-    ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES
+    ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE
   )
   docker_env=(-e ALPINE_USB_BUILD_IN_DOCKER=1)
+  docker_mounts=(-v "$SCRIPT_DIR:/work")
   for name in "${pass_env[@]}"; do
     value="${!name-}"
+    if [ "$name" = "OUTPUT_PATH" ] && [ -n "$value" ]; then
+      mkdir -p "$(dirname "$value")"
+      output_dir="$(cd "$(dirname "$value")" && pwd -P)"
+      output_base="$(basename "$value")"
+      docker_mounts+=( -v "$output_dir:/out" )
+      docker_env+=( -e "OUTPUT_PATH=/out/$output_base" )
+      continue
+    fi
     if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
       value="/work/${value#"$SCRIPT_DIR"/}"
     fi
     docker_env+=( -e "$name=$value" )
   done
 
+  if [ "${ALPINE_USB_SKIP_BUILDER_CACHE:-0}" != "1" ] && [ -f "$BUILDER_DOCKERFILE" ]; then
+    if [ "${ALPINE_USB_REBUILD_BUILDER:-0}" = "1" ] || ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
+      echo "Building cached Alpine USB builder image ($BUILDER_IMAGE)..."
+      docker build --platform linux/amd64 -f "$BUILDER_DOCKERFILE" -t "$BUILDER_IMAGE" "$(dirname "$BUILDER_DOCKERFILE")"
+    fi
+    echo "Starting Docker build container with cached Alpine USB build tools ($BUILDER_IMAGE)..."
+    exec docker run --rm --platform linux/amd64 --privileged \
+      "${docker_env[@]}" \
+      "${docker_mounts[@]}" \
+      -w /work \
+      "$BUILDER_IMAGE" \
+      sh -ceu 'chmod +x build-alpine-usb.sh configure-alpine-usb.sh; exec ./build-alpine-usb.sh'
+  fi
+
   echo "Starting fresh Docker build container with Alpine build tools ($DOCKER_IMAGE)..."
   exec docker run --rm --platform linux/amd64 --privileged \
     "${docker_env[@]}" \
-    -v "$SCRIPT_DIR:/work" \
+    "${docker_mounts[@]}" \
     -w /work \
     "$DOCKER_IMAGE" \
     sh -ceu '
@@ -316,9 +349,15 @@ EOF
 
 cd "$SCRIPT_DIR"
 
+BUILD_IMAGE_PATH="$SCRIPT_DIR/$IMAGE_NAME"
+if [ -n "$OUTPUT_PATH" ]; then
+  BUILD_IMAGE_PATH="$OUTPUT_PATH"
+fi
+mkdir -p "$(dirname "$BUILD_IMAGE_PATH")"
+
 # Always rebuild from a clean image. Reusing an old raw image can leave stale
 # filesystem signatures and confuse NBD partition node creation.
-rm -f "$SCRIPT_DIR/$IMAGE_NAME"
+rm -f "$BUILD_IMAGE_PATH"
 
 CONFIGURE_SCRIPT_FOR_BUILD="$SCRIPT_DIR/configure-alpine-usb.sh"
 SECRET_CONFIGURE_SCRIPT=""
@@ -364,6 +403,8 @@ sudo env \
   ALPINE_USB_AUDIO="${ALPINE_USB_AUDIO:-}" \
   ALPINE_USB_BROWSER="${ALPINE_USB_BROWSER:-}" \
   ALPINE_USB_FIRMWARE="${ALPINE_USB_FIRMWARE:-}" \
+  ALPINE_USB_LEGACY_X11_DRIVERS="${ALPINE_USB_LEGACY_X11_DRIVERS:-}" \
+  ALPINE_USB_PROFILE="${ALPINE_USB_PROFILE:-}" \
   ALPINE_USB_BOOTLOADER="$ALPINE_USB_BOOTLOADER" \
   ALPINE_USB_KERNEL_FLAVOR="$ALPINE_USB_KERNEL_FLAVOR" \
   ALPINE_USB_ROOTFS="$ALPINE_USB_ROOTFS" \
@@ -382,17 +423,21 @@ sudo env \
   --initfs-features "$ALPINE_USB_INITFS_FEATURES" \
   --repositories-file "$SCRIPT_DIR/repositories" \
   --script-chroot \
-  "$SCRIPT_DIR/$IMAGE_NAME" \
+  "$BUILD_IMAGE_PATH" \
   "$CONFIGURE_SCRIPT_FOR_BUILD"
 
+if [ -f "$BUILD_IMAGE_PATH" ]; then
+  sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE_PATH" 2>/dev/null || true
+fi
+
 case "$ALPINE_USB_BOOTLOADER" in
-  grub) install_grub_removable_bootloader "$SCRIPT_DIR/$IMAGE_NAME" ;;
-  systemd-boot) validate_systemd_bootloader "$SCRIPT_DIR/$IMAGE_NAME" ;;
+  grub) install_grub_removable_bootloader "$BUILD_IMAGE_PATH" ;;
+  systemd-boot) validate_systemd_bootloader "$BUILD_IMAGE_PATH" ;;
 esac
 
 cat <<EOF
 
-DONE: $SCRIPT_DIR/$IMAGE_NAME
+DONE: $BUILD_IMAGE_PATH
 
 Image profile:
   desktop: ${ALPINE_USB_DESKTOP:-xfce}
@@ -405,7 +450,7 @@ Image profile:
 
 Write to USB:
   lsblk
-  sudo dd if="$SCRIPT_DIR/$IMAGE_NAME" of=/dev/sdX bs=4M status=progress conv=fsync
+  sudo dd if="$BUILD_IMAGE_PATH" of=/dev/sdX bs=16M iflag=fullblock status=progress conv=fsync
 
 Replace /dev/sdX with USB device, not partition. Example /dev/sdb, NOT /dev/sdb1.
 EOF
