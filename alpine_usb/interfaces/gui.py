@@ -147,6 +147,7 @@ from PySide6.QtWidgets import (
     QStackedLayout,
     QStyleFactory,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -240,7 +241,7 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     scale = size / 20
-    pen = QPen(QColor("#ffffff"), max(2, int(2 * scale)))
+    pen = QPen(QColor("#ffffff"), max(1.0, 1.15 * scale))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
@@ -1014,6 +1015,34 @@ class FlashWorker(QThread):
         return pos, last_percent
 
 
+class PasswordLineEdit(QLineEdit):
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setEchoMode(QLineEdit.EchoMode.Password)
+        self.reveal_button = QToolButton(self)
+        self.reveal_button.setCursor(Qt.CursorShape.ArrowCursor)
+        self.reveal_button.setIcon(make_button_icon("eye", 16))
+        self.reveal_button.setIconSize(QSize(16, 16))
+        self.reveal_button.setToolTip("Show password")
+        self.reveal_button.setFixedSize(22, 22)
+        self.reveal_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reveal_button.setStyleSheet("QToolButton { background:transparent;border:0;padding:0;margin:0; }")
+        self.reveal_button.clicked.connect(self.toggle_password_visible)
+        self.setTextMargins(0, 0, 28, 0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        x = self.rect().right() - self.reveal_button.width() - 5
+        y = (self.rect().height() - self.reveal_button.height()) // 2
+        self.reveal_button.move(x, y)
+
+    def toggle_password_visible(self):
+        show = self.echoMode() == QLineEdit.EchoMode.Password
+        self.setEchoMode(QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password)
+        self.reveal_button.setIcon(make_button_icon("eye_off" if show else "eye", 16))
+        self.reveal_button.setToolTip("Hide password" if show else "Show password")
+
+
 class Main(QWidget):
     def __init__(self):
         super().__init__()
@@ -1075,17 +1104,12 @@ class Main(QWidget):
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
         self.username = QLineEdit("alpine")
-        self.password = QLineEdit("")
-        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password = PasswordLineEdit("")
         self.password.setPlaceholderText("Required")
-        self.password.setMinimumHeight(32)
-        self.root_password = QLineEdit("")
-        self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setStyleSheet(f"QLineEdit {{ placeholder-text-color:{BREEZE_DANGER_TEXT}; }}")
+        self.root_password = PasswordLineEdit("")
         self.root_password.setPlaceholderText("Same as user password")
-        self.root_password.setMinimumHeight(32)
         self.root_password.setReadOnly(True)
-        self.add_password_toggle(self.password)
-        self.add_password_toggle(self.root_password)
         self.separate_root_password_label = "Use separate root password"
         self.separate_root_password = QCheckBox()
         self.separate_root_password.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1367,8 +1391,12 @@ class Main(QWidget):
         if not hasattr(self, "password"):
             return
         required_empty_style = (
+            "QLineEdit {"
             f"background:#5c1f27;color:{BREEZE_TEXT};border:1px solid {BREEZE_RED};"
+            f"placeholder-text-color:{BREEZE_DANGER_TEXT};"
             "border-radius:4px;padding:2px 5px;min-height:24px;"
+            "}"
+            "QToolButton { background:transparent;border:0;padding:0;margin:0; }"
         )
         self.password.setStyleSheet(required_empty_style if not self.password.text().strip() else "")
         self.root_password.setStyleSheet(
@@ -1564,18 +1592,6 @@ class Main(QWidget):
             "Enter a different root password" if separate else "Root password will match the user password"
         )
         self.update_required_field_highlights()
-
-    def add_password_toggle(self, field: QLineEdit):
-        action = field.addAction(make_button_icon("eye", 16), QLineEdit.ActionPosition.TrailingPosition)
-        action.setToolTip("Show password")
-
-        def toggle():
-            show = field.echoMode() == QLineEdit.EchoMode.Password
-            field.setEchoMode(QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password)
-            action.setIcon(make_button_icon("eye_off" if show else "eye", 16))
-            action.setToolTip("Hide password" if show else "Show password")
-
-        action.triggered.connect(toggle)
 
     def build(self):
         layout = QVBoxLayout(self)
