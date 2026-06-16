@@ -438,35 +438,58 @@ def exec_centered_dialog(box: QMessageBox, parent: QWidget | None = None):
 
 
 def modal(parent, kind: str, title: str, text: str, question: bool = False) -> bool:
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setTextFormat(Qt.TextFormat.RichText if "<" in text and ">" in text else Qt.TextFormat.PlainText)
-    box.setText(text)
-    box.setWindowIcon(make_app_icon())
-    wide = question and box.textFormat() == Qt.TextFormat.RichText
-    if wide:
-        box.setMinimumWidth(500)
-    box.setStyleSheet(
-        f"QMessageBox {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}"
-        f"QLabel {{ color:{BREEZE_TEXT}; min-width:{420 if wide else 260}px; max-width:{520 if wide else 360}px; font-weight:400; }}"
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setWindowIcon(make_app_icon())
+    dialog.setStyleSheet(
+        f"QDialog {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}"
+        f"QLabel {{ color:{BREEZE_TEXT}; font-weight:400; background:transparent; }}"
     )
+
+    outer = QVBoxLayout(dialog)
+    outer.setContentsMargins(18, 16, 18, 14)
+    outer.setSpacing(14)
+    body = QHBoxLayout()
+    body.setContentsMargins(0, 0, 0, 0)
+    body.setSpacing(12)
+
     icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
-    box.setIconPixmap(make_button_icon(icon_kind, 30).pixmap(30, 30))
+    icon = icon_label(icon_kind, 28)
+    icon.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+    body.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+
+    rich = "<" in text and ">" in text
+    label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.RichText if rich else Qt.TextFormat.PlainText)
+    label.setWordWrap(True)
+    label.setMinimumWidth(420 if rich else 260)
+    label.setMaximumWidth(520 if rich else 360)
+    body.addWidget(label, 1)
+    outer.addLayout(body)
+
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
     if question:
-        ok = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
-        ok.setIcon(make_button_icon("check"))
-        cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        cancel = QPushButton("Cancel")
         cancel.setIcon(make_button_icon("error"))
         cancel.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER).replace("3px 8px", "6px 12px"))
-        ok.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
-        exec_centered_dialog(box, parent)
-        return box.clickedButton() == ok
-    box.setStandardButtons(QMessageBox.StandardButton.Ok)
-    ok = box.button(QMessageBox.StandardButton.Ok)
-    if ok:
+        ok = QPushButton("OK")
         ok.setIcon(make_button_icon("check"))
         ok.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
-    exec_centered_dialog(box, parent)
+        cancel.clicked.connect(dialog.reject)
+        ok.clicked.connect(dialog.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        outer.addLayout(buttons)
+        return exec_centered_dialog(dialog, parent) == QDialog.DialogCode.Accepted
+
+    ok = QPushButton("OK")
+    ok.setIcon(make_button_icon("check"))
+    ok.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
+    ok.clicked.connect(dialog.accept)
+    buttons.addWidget(ok)
+    outer.addLayout(buttons)
+    exec_centered_dialog(dialog, parent)
     return True
 
 
@@ -1055,9 +1078,11 @@ class Main(QWidget):
         self.password = QLineEdit("")
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.setPlaceholderText("Required")
+        self.password.setMinimumHeight(32)
         self.root_password = QLineEdit("")
         self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.root_password.setPlaceholderText("Same as user password")
+        self.root_password.setMinimumHeight(32)
         self.root_password.setReadOnly(True)
         self.add_password_toggle(self.password)
         self.add_password_toggle(self.root_password)
@@ -1541,13 +1566,13 @@ class Main(QWidget):
         self.update_required_field_highlights()
 
     def add_password_toggle(self, field: QLineEdit):
-        action = field.addAction(make_button_icon("eye", 18), QLineEdit.ActionPosition.TrailingPosition)
+        action = field.addAction(make_button_icon("eye", 16), QLineEdit.ActionPosition.TrailingPosition)
         action.setToolTip("Show password")
 
         def toggle():
             show = field.echoMode() == QLineEdit.EchoMode.Password
             field.setEchoMode(QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password)
-            action.setIcon(make_button_icon("eye_off" if show else "eye", 18))
+            action.setIcon(make_button_icon("eye_off" if show else "eye", 16))
             action.setToolTip("Hide password" if show else "Show password")
 
         action.triggered.connect(toggle)
