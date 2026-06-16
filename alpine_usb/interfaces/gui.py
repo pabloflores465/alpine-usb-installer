@@ -239,7 +239,7 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    scale = pixel_size / 20
+    scale = size / 20
     pen = QPen(QColor("#ffffff"), max(2, int(2 * scale)))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -302,6 +302,11 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
         p.drawRect(xy(3), xy(4), xy(14), xy(12))
         p.drawLine(xy(6), xy(8), xy(9), xy(10))
         p.drawLine(xy(6), xy(12), xy(12), xy(12))
+    elif kind in {"eye", "eye_off"}:
+        p.drawEllipse(xy(3), xy(6), xy(14), xy(8))
+        p.drawEllipse(xy(8), xy(8), xy(4), xy(4))
+        if kind == "eye_off":
+            p.drawLine(xy(4), xy(17), xy(16), xy(3))
     elif kind == "folder":
         p.drawPolyline(
             pts(
@@ -446,7 +451,7 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
         f"QLabel {{ color:{BREEZE_TEXT}; min-width:{420 if wide else 260}px; max-width:{520 if wide else 360}px; font-weight:400; }}"
     )
     icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
-    box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
+    box.setIconPixmap(make_button_icon(icon_kind, 30).pixmap(30, 30))
     if question:
         ok = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
         ok.setIcon(make_button_icon("check"))
@@ -1054,15 +1059,12 @@ class Main(QWidget):
         self.root_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.root_password.setPlaceholderText("Same as user password")
         self.root_password.setReadOnly(True)
+        self.add_password_toggle(self.password)
+        self.add_password_toggle(self.root_password)
         self.separate_root_password_label = "Use separate root password"
         self.separate_root_password = QCheckBox()
         self.separate_root_password.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.separate_root_password.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
-        self.show_passwords_label = "Show passwords"
-        self.show_passwords = QCheckBox()
-        self.show_passwords.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.show_passwords.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
-        self.show_passwords.stateChanged.connect(self.toggle_password_visibility)
         self.timezone = QComboBox()
         self.timezone.setEditable(True)
         add_combo_items(
@@ -1451,12 +1453,10 @@ class Main(QWidget):
     def restore_defaults(self):
         user_password = self.password.text()
         root_password = self.root_password.text()
-        show_passwords = self.show_passwords.isChecked()
         self.saved_config_snapshot = dict(self.default_config)
         self.apply_config(dict(self.default_config))
         self.password.setText(user_password)
         self.root_password.setText(root_password if self.separate_root_password.isChecked() else user_password)
-        self.show_passwords.setChecked(show_passwords)
         self.sync_root_password_state()
         self.write_saved_config(self.saved_config_snapshot)
         self.refresh_build_summary()
@@ -1540,10 +1540,17 @@ class Main(QWidget):
         )
         self.update_required_field_highlights()
 
-    def toggle_password_visibility(self):
-        mode = QLineEdit.EchoMode.Normal if self.show_passwords.isChecked() else QLineEdit.EchoMode.Password
-        self.password.setEchoMode(mode)
-        self.root_password.setEchoMode(mode)
+    def add_password_toggle(self, field: QLineEdit):
+        action = field.addAction(make_button_icon("eye", 18), QLineEdit.ActionPosition.TrailingPosition)
+        action.setToolTip("Show password")
+
+        def toggle():
+            show = field.echoMode() == QLineEdit.EchoMode.Password
+            field.setEchoMode(QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password)
+            action.setIcon(make_button_icon("eye_off" if show else "eye", 18))
+            action.setToolTip("Hide password" if show else "Show password")
+
+        action.triggered.connect(toggle)
 
     def build(self):
         layout = QVBoxLayout(self)
@@ -1787,7 +1794,6 @@ class Main(QWidget):
                 ),
             ),
             ("root_password", "Root password:", self.root_password),
-            ("show_passwords", "", self.checkbox_row(self.show_passwords, self.show_passwords_label)),
             ("timezone", "Timezone:", self.timezone),
             ("locale", "Locale:", self.locale),
             ("console_keymap", "Console keymap:", self.console_keymap),

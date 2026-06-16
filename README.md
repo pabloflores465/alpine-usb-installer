@@ -434,7 +434,7 @@ scripts/build-macos-dmg.sh
 Build all release assets with:
 
 ```sh
-scripts/package-release-assets.sh 0.1.12
+scripts/package-release-assets.sh 0.1.13
 ```
 
 The release packager creates separate GUI and terminal assets:
