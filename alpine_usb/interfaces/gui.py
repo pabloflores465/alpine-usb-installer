@@ -169,6 +169,7 @@ BREEZE_BLUE = "#1f5f85"
 BREEZE_BLUE_HOVER = "#26729f"
 BREEZE_RED = "#8f2731"
 BREEZE_RED_HOVER = "#a8323d"
+BREEZE_DANGER_TEXT = "#ff6b7a"
 BREEZE_GREEN = "#1f6f43"
 BREEZE_GREEN_HOVER = "#268452"
 BREEZE_YELLOW = "#fdbc4b"
@@ -205,7 +206,7 @@ def apply_breeze_theme(app: QApplication):
     palette.setColor(QPalette.ColorRole.Text, QColor(BREEZE_TEXT))
     palette.setColor(QPalette.ColorRole.Button, QColor(BREEZE_PANEL))
     palette.setColor(QPalette.ColorRole.ButtonText, QColor(BREEZE_TEXT))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor(BREEZE_RED))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(BREEZE_DANGER_TEXT))
     palette.setColor(QPalette.ColorRole.Highlight, QColor(BREEZE_BLUE))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
     app.setPalette(palette)
@@ -231,11 +232,14 @@ def make_app_icon() -> QIcon:
 
 
 def make_button_icon(kind: str, size: int = 20) -> QIcon:
-    pix = QPixmap(size, size)
+    dpr = 2
+    pixel_size = max(size, int(size * dpr))
+    pix = QPixmap(pixel_size, pixel_size)
+    pix.setDevicePixelRatio(dpr)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    scale = size / 20
+    scale = pixel_size / 20
     pen = QPen(QColor("#ffffff"), max(2, int(2 * scale)))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -294,6 +298,10 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
         p.drawLine(xy(3), xy(6), xy(10), xy(10))
         p.drawLine(xy(17), xy(6), xy(10), xy(10))
         p.drawLine(xy(10), xy(10), xy(10), xy(18))
+    elif kind == "console":
+        p.drawRect(xy(3), xy(4), xy(14), xy(12))
+        p.drawLine(xy(6), xy(8), xy(9), xy(10))
+        p.drawLine(xy(6), xy(12), xy(12), xy(12))
     elif kind == "folder":
         p.drawPolyline(
             pts(
@@ -351,6 +359,10 @@ def make_button_icon(kind: str, size: int = 20) -> QIcon:
         p.drawLine(xy(13), xy(7), xy(7), xy(13))
     p.end()
     return QIcon(pix)
+
+
+def html_soft_break(value: object) -> str:
+    return html.escape(str(value)).replace("/", "/<wbr>").replace("-", "-<wbr>")
 
 
 def icon_label(kind: str, size: int = 18) -> QLabel:
@@ -428,10 +440,10 @@ def modal(parent, kind: str, title: str, text: str, question: bool = False) -> b
     box.setWindowIcon(make_app_icon())
     wide = question and box.textFormat() == Qt.TextFormat.RichText
     if wide:
-        box.setMinimumWidth(620)
+        box.setMinimumWidth(500)
     box.setStyleSheet(
         f"QMessageBox {{ background:{BREEZE_WINDOW}; color:{BREEZE_TEXT}; }}"
-        f"QLabel {{ color:{BREEZE_TEXT}; min-width:{520 if wide else 300}px; font-weight:400; }}"
+        f"QLabel {{ color:{BREEZE_TEXT}; min-width:{420 if wide else 260}px; max-width:{520 if wide else 360}px; font-weight:400; }}"
     )
     icon_kind = {"info": "check", "question": "warn", "error": "error"}.get(kind, "warn")
     box.setIconPixmap(make_button_icon(icon_kind, 40).pixmap(40, 40))
@@ -546,8 +558,10 @@ class DeviceDialog(QDialog):
         btns = QHBoxLayout()
         self.use = QPushButton("Use selected")
         self.use.setIcon(make_button_icon("check"))
+        self.use.setStyleSheet(button_style(BREEZE_GREEN, BREEZE_GREEN_HOVER).replace("3px 8px", "6px 12px"))
         self.refresh = QPushButton("Refresh")
         self.refresh.setIcon(make_button_icon("refresh"))
+        self.refresh.setStyleSheet(button_style(BREEZE_BLUE, BREEZE_BLUE_HOVER).replace("3px 8px", "6px 12px"))
         self.cancel = QPushButton("Cancel")
         self.cancel.setIcon(make_button_icon("error"))
         self.cancel.setStyleSheet(button_style(BREEZE_RED, BREEZE_RED_HOVER).replace("3px 8px", "6px 12px"))
@@ -995,6 +1009,8 @@ class Main(QWidget):
         self.make_config_widgets()
 
         self.console_toggle = QPushButton("Console output  ▲")
+        self.console_toggle.setIcon(make_button_icon("console", 18))
+        self.console_toggle.setIconSize(QSize(18, 18))
         self.console_toggle.clicked.connect(self.toggle_console)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -1357,7 +1373,7 @@ class Main(QWidget):
                 f"font-size:15px;font-weight:bold;margin:6px 0px 2px 0px;padding:0px;color:{BREEZE_TEXT};"
             )
         if hasattr(self, "save_config_button"):
-            self.save_config_button.setText(("● " if any_dirty else "") + "Save configuration")
+            self.save_config_button.setText("Save configuration" + ("  ●" if any_dirty else ""))
 
     def write_saved_config(self, cfg: dict):
         save_config_file(SAVED_CONFIG_PATH, scrub_config(cfg))
@@ -1408,7 +1424,7 @@ class Main(QWidget):
             return
         self.refresh_build_summary()
         self.update_dirty_indicators()
-        modal(self, "info", APP_TITLE, f"Configuration saved:\n{path}")
+        modal(self, "info", APP_TITLE, f"<b>Configuration saved:</b><br>{html_soft_break(path)}")
 
     def load_config(self):
         path, _selected_filter = QFileDialog.getOpenFileName(
@@ -1595,7 +1611,7 @@ class Main(QWidget):
         self.img_title.setStyleSheet(
             f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:6px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(title_widget(self.img_title, "config"))
+        content_layout.addWidget(self.img_title)
         img_grid = QGridLayout()
         img_grid.setColumnStretch(1, 1)
         img_grid.setHorizontalSpacing(10)
@@ -1662,7 +1678,7 @@ class Main(QWidget):
         build_title.setStyleSheet(
             f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:10px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(title_widget(build_title, "build"))
+        content_layout.addWidget(build_title)
         build_box = QVBoxLayout()
         build_box.setSpacing(6)
         build_buttons = QHBoxLayout()
@@ -1681,7 +1697,7 @@ class Main(QWidget):
         usb_title.setStyleSheet(
             f"font-size:15px;font-weight:bold;color:{BREEZE_TEXT};margin:10px 0px 2px 0px;padding:0px;"
         )
-        content_layout.addWidget(title_widget(usb_title, "usb"))
+        content_layout.addWidget(usb_title)
         usb_box = QVBoxLayout()
         usb_box.setSpacing(6)
         usb_row = QHBoxLayout()
@@ -1707,7 +1723,7 @@ class Main(QWidget):
         flash_row.addStretch()
         usb_box.addLayout(flash_row)
         warn = QLabel("⚠ Flashing permanently erases the selected USB device.")
-        warn.setStyleSheet(f"color:{BREEZE_RED};font-weight:bold;margin:0px;padding:0px;font-size:12px;")
+        warn.setStyleSheet(f"color:{BREEZE_DANGER_TEXT};font-weight:bold;margin:0px;padding:0px;font-size:12px;")
         usb_box.addWidget(warn)
         usb_box.addWidget(self.status)
         self.flash_progress = QProgressBar()
@@ -2206,7 +2222,7 @@ class Main(QWidget):
             return html.escape(str(value))
 
         rows = [
-            ("Output", esc(output_path)),
+            ("Output", html_soft_break(output_path)),
             ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
             (
                 "System",
@@ -2235,7 +2251,7 @@ class Main(QWidget):
             f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
             for title, value in rows
         )
-        return f"<div style='min-width:560px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Alpine image?</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(
@@ -2243,11 +2259,11 @@ class Main(QWidget):
             for key, value in device_rows
         )
         return (
-            "<div style='min-width:560px;'>"
+            "<div style='min-width:440px; max-width:520px;'>"
             "<h2>Erase and flash this device?</h2>"
             f"{rows}"
-            f"<div style='margin:14px 0 4px 0;'><b>Image:</b> <span style='font-weight:400;'>{html.escape(image_path)}</span></div>"
-            f"<div style='margin-top:18px;color:{BREEZE_RED};font-weight:bold;'>This permanently erases the selected USB device.</div>"
+            f"<div style='margin:14px 0 4px 0;'><b>Image:</b> <span style='font-weight:400;'>{html_soft_break(image_path)}</span></div>"
+            f"<div style='margin-top:18px;color:{BREEZE_DANGER_TEXT};font-weight:bold;'>This permanently erases the selected USB device.</div>"
             "</div>"
         )
 
