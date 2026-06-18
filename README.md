@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or Arch Linux x86_64 USB images**. Alpine remains the default backend across the GUI/TUI/CLI; Arch is selected in the TUI or with CLI `--distro arch`.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,13 +27,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image or rolling Arch Linux USB image.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages or Arch `core`/`extra`/`multilib` packages from TUI/CLI.
+- Cache Alpine package indexes and Arch package search responses on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
 - Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
@@ -72,6 +72,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # CLI help/subcommands
 ./alpine-usb --help
 ./alpine-usb build --help
+
+# Arch dry-run validation
+./alpine-usb build --distro arch --dry-run --password changeme
+
+# Arch package search
+./alpine-usb search --distro arch firefox
 ```
 
 Default output path:
