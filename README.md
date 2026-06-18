@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or NixOS x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,13 +27,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image, or generate a NixOS USB image configuration/build with `--distro nixos`.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages or NixOS nixpkgs packages from TUI/CLI.
+- Cache package indexes/search responses on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
 - Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
@@ -45,11 +45,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 ### Build host
 
 - Python 3.
-- Docker Desktop on macOS. The build needs Linux/NBD support.
+- For Alpine builds: Docker Desktop on macOS. The build needs Linux/NBD support.
   - First macOS build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
   - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
   - Set `ALPINE_USB_REBUILD_BUILDER=1` to rebuild the cached builder image.
-- On native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- For Alpine builds on native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- For NixOS builds: `nix` plus `nixos-generate` from `nixos-generators` (`nix profile install nixpkgs#nixos-generators`). NixOS dry-run/config validation does not require these tools.
 
 ### Runtime tools
 
@@ -77,7 +78,7 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 Default output path:
 
 ```txt
-/tmp/alpine-usb-installer/alpine-usb.img
+/tmp/linux-usb-installer/linux-usb.img
 ```
 
 ## Interfaces
@@ -116,7 +117,7 @@ If USB auto-detection fails, type the whole-disk device manually, for example `/
 ./alpine-usb tui
 ```
 
-The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics. There is one terminal entrypoint, `alpine-usb`; `cli.py` and `tui.py` are import-only support modules.
+The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics. It exposes both Alpine and NixOS distro selection. There is one terminal entrypoint, `alpine-usb`; `cli.py` and `tui.py` are import-only support modules.
 
 ### CLI
 
@@ -130,15 +131,20 @@ Common commands:
 ```sh
 # Search packages
 ./alpine-usb search firefox
+./alpine-usb search --distro nixos firefox
 
 # Validate a profile without building
 ./alpine-usb build --dry-run --ask-password --desktop xfce --bootloader systemd-boot
+./alpine-usb build --distro nixos --dry-run --password 'change-me' --desktop plasma --bootloader systemd-boot
 
 # Build default profile without prompts (avoid shell history by using --ask-password instead)
 ./alpine-usb build --password 'change-me' -y
 
 # Build Plasma profile
 ./alpine-usb build --ask-password --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+
+# Build NixOS using nixos-generate
+./alpine-usb build --distro nixos --ask-password --nixos-channel nixos-24.11 -y
 
 # Build smaller/faster minimal profile defaults
 ./alpine-usb build --ask-password --profile minimal -y

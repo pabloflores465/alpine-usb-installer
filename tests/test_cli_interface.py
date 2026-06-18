@@ -10,13 +10,17 @@ from alpine_usb.interfaces import cli
 
 def namespace(**overrides) -> argparse.Namespace:
     values = {
+        "distro": "alpine",
         "profile": "compatibility",
         "image_size": "16G",
         "branch": "latest-stable",
+        "nixos_channel": "nixos-24.11",
         "arch": "x86_64",
+        "output": "/tmp/alpine.img",
         "user": "alpine",
         "password": "secret",
         "root_password": None,
+        "ask_password": False,
         "hostname": "alpine-usb",
         "timezone": "UTC",
         "locale": "en_US.UTF-8",
@@ -78,6 +82,24 @@ def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pyte
     assert Path(safe_env["ALPINE_USB_PASSWORD_FILE"]).read_text() == "pw"
     assert Path(safe_env["ALPINE_USB_ROOT_PASSWORD_FILE"]).read_text() == "rootpw"
     assert len(files) == 2
+
+
+def test_cmd_build_nixos_dry_run_renders_configuration(capsys: pytest.CaptureFixture[str]) -> None:
+    args = namespace(distro="nixos", dry_run=True, yes=True, output="/tmp/nixos.img")
+
+    assert cli.cmd_build(args) == 0
+    out = capsys.readouterr().out
+    assert "NixOS build profile" in out
+    assert "configuration.nix" in out
+    assert "services.xserver.desktopManager.xfce.enable = true;" in out
+
+
+def test_parser_exposes_nixos_selection() -> None:
+    parser = cli.build_parser()
+    args = parser.parse_args(["build", "--distro", "nixos", "--password", "secret", "--dry-run"])
+
+    assert args.distro == "nixos"
+    assert args.nixos_channel == "nixos-24.11"
 
 
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

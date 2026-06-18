@@ -21,10 +21,12 @@ from alpine_usb.apk_packages.index import (
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.nixos.config import config_from_args, generate_configuration_nix, generate_flake_nix
+from alpine_usb.nixos.packages import NIXOS_DEFAULT_CHANNEL, search_nix_packages, validate_nix_channel
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
-DEFAULT_IMAGE_NAME = "alpine-usb.img"
+APP_TITLE = "Linux USB Installer"
+DEFAULT_IMAGE_NAME = "linux-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -305,6 +307,65 @@ def run_config_dry_run(env: dict[str, str]) -> int:
         cleanup_secret_files(secret_files)
 
 
+def print_nixos_summary(config, output: Path) -> None:
+    rows = [
+        ("Output", str(output)),
+        ("NixOS", f"{config.channel} / {config.arch}"),
+        ("Desktop", config.desktop),
+        ("Window managers", " ".join(config.window_managers) or "none"),
+        ("Default session", config.default_session),
+        ("Display manager", config.display_manager),
+        ("Network", f"{config.network} wifi={int(config.wifi)} bluetooth={int(config.bluetooth)}"),
+        ("Audio / browser", f"{config.audio} / {config.browser}"),
+        ("Boot", f"{config.bootloader} linux-{config.kernel} firmware={config.firmware}"),
+        ("Auto-resize USB", str(int(config.auto_resize))),
+        ("Keyboard", f"console={config.console_keymap} xkb={config.xkb_layout}"),
+        ("Extra packages", " ".join(config.extra_packages) or "none"),
+    ]
+    print_panel("NixOS build profile", rows)
+
+
+def run_nixos_dry_run(config) -> int:
+    info("Dry-run only: generated NixOS flake and configuration follow.")
+    print_panel("flake.nix", [generate_flake_nix(config).rstrip()])
+    print_panel("configuration.nix", [generate_configuration_nix(config).rstrip()])
+    ok("NixOS configuration rendered successfully. Build requires nixos-generate on PATH.")
+    return 0
+
+
+def run_nixos_build(config, output: Path) -> int:
+    tool = shutil.which("nixos-generate")
+    if tool is None:
+        err("NixOS build requires nixos-generate. Install it with: nix profile install nixpkgs#nixos-generators")
+        return 1
+    with tempfile.TemporaryDirectory(prefix="linux-usb-nixos-") as tmp:
+        work = Path(tmp)
+        (work / "configuration.nix").write_text(generate_configuration_nix(config))
+        (work / "flake.nix").write_text(generate_flake_nix(config))
+        out_link = work / "result"
+        cmd = [tool, "--flake", f"{work}#usb", "--format", "raw", "--out-link", str(out_link)]
+        info("Starting NixOS image build with nixos-generate. This can take a while…")
+        code = subprocess.call(cmd)
+        if code != 0:
+            err(f"NixOS build failed with exit code {code}")
+            return code
+        candidates = [
+            out_link,
+            *out_link.glob("*.img"),
+            *out_link.glob("*.raw"),
+            *out_link.glob("**/*.img"),
+            *out_link.glob("**/*.raw"),
+        ]
+        image = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if image is None:
+            err(f"Build finished but no raw image was found under {out_link}")
+            return 1
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(image, output)
+    ok(f"Image ready: {output}")
+    return 0
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     if args.ask_password:
         args.password = getpass.getpass("User password: ")
@@ -313,12 +374,28 @@ def cmd_build(args: argparse.Namespace) -> int:
     if not args.password:
         err("User password is required. Use --ask-password or --password.")
         return 2
+    output = Path(args.output).expanduser().resolve()
+    if getattr(args, "distro", "alpine") == "nixos":
+        try:
+            config = config_from_args(args, split_packages(args.extra_package, args.extra_packages))
+        except ValueError as exc:
+            err(str(exc))
+            return 2
+        print_nixos_summary(config, output)
+        if args.dry_run:
+            return run_nixos_dry_run(config)
+        if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
+            warn("Cancelled.")
+            return 1
+        if not confirm("Build this NixOS USB image now?", args.yes):
+            warn("Cancelled.")
+            return 1
+        return run_nixos_build(config, output)
     try:
         env = env_from_build_args(args)
     except ValueError as exc:
         err(str(exc))
         return 2
-    output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
     if args.dry_run:
@@ -364,14 +441,22 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    distro = getattr(args, "distro", "alpine")
     try:
-        validate_branch(args.branch)
+        if distro == "nixos":
+            channel = args.nixos_channel or NIXOS_DEFAULT_CHANNEL
+            validate_nix_channel(channel)
+            info(f"Searching NixOS {channel} nixpkgs")
+            results = search_nix_packages(
+                channel, args.query, args.limit, cache_dir=repo_root() / ".work" / "nix-cache"
+            )
+        else:
+            validate_branch(args.branch)
+            info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+            results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
-    try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -387,7 +472,8 @@ def cmd_search(args: argparse.Namespace) -> int:
         rows.append((f"{idx:>2}. {name}", f"{version}  [{repo}]  {desc}"))
     print_panel(f"Top {len(results)} suggestions for '{args.query}'", rows)
     print("Add packages with:")
-    print(c(f"  {terminal_entrypoint_name()} build --extra-package {results[0]['name']}", C.dim))
+    distro_flag = " --distro nixos" if distro == "nixos" else ""
+    print(c(f"  {terminal_entrypoint_name()} build{distro_flag} --extra-package {results[0]['name']}", C.dim))
     return 0
 
 
@@ -485,6 +571,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def add_common_build_options(parser: argparse.ArgumentParser):
+    parser.add_argument("--distro", default="alpine", choices=["alpine", "nixos"], help="Linux distribution backend")
     parser.add_argument(
         "--profile",
         default="compatibility",
@@ -499,7 +586,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
     parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
-    parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
+    parser.add_argument(
+        "--nixos-channel", default=NIXOS_DEFAULT_CHANNEL, help="NixOS nixpkgs channel for --distro nixos"
+    )
+    parser.add_argument("--arch", default="x86_64", choices=["x86_64", "x86_64-linux"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
     parser.add_argument(
@@ -554,8 +644,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,24 +657,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Linux USB images (Alpine + NixOS, TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search distro packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "nixos"])
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--nixos-channel", default=NIXOS_DEFAULT_CHANNEL)
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
