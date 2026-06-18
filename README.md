@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux and RHEL-family (Rocky/Alma/CentOS Stream/RHEL-like) x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the default backend; Rocky Linux 9 is the default RHEL-family target when `--distro rhel`/`rocky` is selected.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,13 +27,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image, or a RHEL-family image foundation using `dnf --installroot` (Rocky Linux 9 default).
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages and RHEL-family packages through `dnf repoquery` when available.
+- Cache package indexes/searches on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
 - Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
@@ -72,12 +72,15 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # CLI help/subcommands
 ./alpine-usb --help
 ./alpine-usb build --help
+
+# RHEL-family dry-run (Rocky Linux 9 default mapping)
+./alpine-usb build --distro rocky --release 9 --dry-run --password 'change-me'
 ```
 
 Default output path:
 
 ```txt
-/tmp/alpine-usb-installer/alpine-usb.img
+/tmp/alpine-usb-installer/linux-usb.img
 ```
 
 ## Interfaces
@@ -150,7 +153,7 @@ Common commands:
 ./alpine-usb devices
 
 # Flash image to USB
-./alpine-usb flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
+./alpine-usb flash /tmp/alpine-usb-installer/linux-usb.img /dev/sdX
 ```
 
 Flash refuses partitions, non-removable/non-hotplug disks, missing images, truncated images, corrupt GPT images, and images without the expected EFI + Linux root partitions. Confirmation shows target model, size, serial/id, and device path before writing.
@@ -173,8 +176,10 @@ Defaults are generic and distro-like:
 | Option | Default |
 | --- | --- |
 | Image size | `16G` |
-| Output | `/tmp/alpine-usb-installer/alpine-usb.img` |
+| Output | `/tmp/alpine-usb-installer/linux-usb.img` |
+| Distro | `alpine`; use `--distro rocky`/`alma`/`centos-stream` for RHEL-family |
 | Alpine branch | `latest-stable` |
+| RHEL-family release | `9` |
 | Architecture | `x86_64` |
 | User/password | user `alpine` / password required before build |
 | Root password | same as user password unless configured separately |
@@ -210,11 +215,15 @@ Defaults are generic and distro-like:
 
 Explicit CLI options override profile defaults. Example: `--profile minimal --desktop xfce --wifi` keeps XFCE and Wi‑Fi while using other minimal defaults.
 
+### RHEL-family backend status
+
+The CLI/TUI expose `--distro rhel|rocky|alma|centos-stream` with release `9` as the documented default. The RHEL-family backend validates the same high-level profile, desktop/session, user, localization, network, firmware, browser, audio, extra package, dry-run, package mapping, and package-search concepts as Alpine where packages exist in common RHEL/EPEL-style repositories. The real build path is `build-rhel-usb.sh`, a Linux-host `dnf --installroot` raw-image flow with GRUB removable UEFI and first-boot root resize. Current gaps are explicit: macOS RHEL image builds require a Linux VM/container with loop/NBD support; systemd-boot and several Alpine-only WMs (Hyprland, AwesomeWM, bspwm, labwc) are rejected for RHEL-family until repository support is mapped.
+
 ## Configuration guide
 
 ### System, user, localization
 
-Configure image size, Alpine branch, hostname, username/passwords, timezone, locale, console keymap, and XKB layout.
+Configure image size, distro (`alpine` by default, or RHEL-family), Alpine branch/RHEL release, hostname, username/passwords, timezone, locale, console keymap, and XKB layout.
 
 ### Desktop/session
 

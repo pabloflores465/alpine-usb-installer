@@ -152,7 +152,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
@@ -1630,9 +1630,11 @@ class Main(QWidget):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0px; border:0; background:transparent; }}
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
         """)
-        title = QLabel("Alpine USB Installer")
+        title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
+        subtitle = QLabel(
+            "Build and flash customizable Alpine Linux images; RHEL-family builds are available from CLI/TUI."
+        )
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -2191,6 +2193,7 @@ class Main(QWidget):
         return {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
+            "LINUX_USB_DISTRO": "alpine",
             "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
             "ARCH": combo_value(self.arch) or "x86_64",
             "ALPINE_USB_USER": self.username.text().strip() or "alpine",

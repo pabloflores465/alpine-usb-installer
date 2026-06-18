@@ -12,7 +12,9 @@ def namespace(**overrides) -> argparse.Namespace:
     values = {
         "profile": "compatibility",
         "image_size": "16G",
+        "distro": "alpine",
         "branch": "latest-stable",
+        "release": "9",
         "arch": "x86_64",
         "user": "alpine",
         "password": "secret",
@@ -61,12 +63,26 @@ def test_split_packages_rejects_invalid_package() -> None:
 def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     env = cli.env_from_build_args(namespace())
 
+    assert env["LINUX_USB_DISTRO"] == "alpine"
     assert env["ALPINE_BRANCH"] == "latest-stable"
     assert env["ALPINE_USB_ROOT_PASSWORD"] == "secret"
     assert env["ALPINE_USB_TILING_WMS"] == "i3 sway openbox"
     assert env["ALPINE_USB_BLUETOOTH"] == "0"
     assert env["ALPINE_USB_LEGACY_X11_DRIVERS"] == "0"
     assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop neovim"
+
+
+def test_env_from_build_args_maps_rhel_environment() -> None:
+    env = cli.env_from_build_args(
+        namespace(distro="rocky", user="linux", hostname="linux-usb", wm=["i3"], tiling_wms="openbox")
+    )
+
+    assert env["LINUX_USB_DISTRO"] == "rocky"
+    assert env["RHEL_USB_RELEASE"] == "9"
+    assert env["RHEL_USB_USER"] == "linux"
+    assert "@core" in env["RHEL_USB_PACKAGE_LIST"]
+    assert "@xfce-desktop-environment" in env["RHEL_USB_PACKAGE_LIST"]
+    assert "i3" in env["RHEL_USB_PACKAGE_LIST"]
 
 
 def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

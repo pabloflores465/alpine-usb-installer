@@ -21,10 +21,18 @@ from alpine_usb.apk_packages.index import (
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.rhel_packages.packages import (
+    RHEL_DEFAULT_RELEASE,
+    RHEL_VALID_WMS,
+    normalize_rhel_distro,
+    resolve_rhel_packages,
+    search_rhel_packages,
+    validate_rhel_release,
+)
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
-DEFAULT_IMAGE_NAME = "alpine-usb.img"
+APP_TITLE = "Linux USB Installer"
+DEFAULT_IMAGE_NAME = "linux-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -32,6 +40,8 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "configure-rhel-usb.sh",
+    "build-rhel-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -179,8 +189,19 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
     return " ".join(deduped)
 
 
+def build_distro(args: argparse.Namespace) -> str:
+    raw = getattr(args, "distro", "alpine")
+    if raw == "alpine":
+        return "alpine"
+    return normalize_rhel_distro(raw)
+
+
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
-    validate_branch(args.branch)
+    distro = build_distro(args)
+    if distro == "alpine":
+        validate_branch(args.branch)
+    else:
+        validate_rhel_release(getattr(args, "release", RHEL_DEFAULT_RELEASE))
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
     wms = list(args.wm or [])
@@ -192,12 +213,71 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
         if wm not in ordered_wms:
             ordered_wms.append(wm)
 
-    return {
-        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
+    common = {
         "IMAGE_SIZE": args.image_size,
+        "ARCH": args.arch,
+    }
+    if distro != "alpine":
+        extra_packages = split_packages(args.extra_package, args.extra_packages)
+        unsupported_wms = [wm for wm in ordered_wms if wm not in RHEL_VALID_WMS]
+        if unsupported_wms:
+            supported = ", ".join(RHEL_VALID_WMS)
+            raise ValueError(f"RHEL-family builds currently support these WMs: {supported}")
+        packages = resolve_rhel_packages(
+            desktop=args.desktop,
+            display_manager=args.display_manager,
+            wms=ordered_wms,
+            network=args.network,
+            wifi=args.wifi,
+            bluetooth=args.bluetooth,
+            audio=args.audio,
+            browser=args.browser,
+            firmware=args.firmware,
+            auto_resize=args.auto_resize,
+            extra_packages=extra_packages,
+        )
+        return {
+            **common,
+            "IMAGE_NAME": f".rhel-usb-cli-{os.getpid()}.img",
+            "LINUX_USB_DISTRO": distro,
+            "RHEL_USB_DISTRO": distro,
+            "RHEL_USB_RELEASE": getattr(args, "release", RHEL_DEFAULT_RELEASE),
+            "RHEL_USB_PROFILE": getattr(args, "profile", "compatibility"),
+            "RHEL_USB_USER": args.user,
+            "RHEL_USB_PASSWORD": password,
+            "RHEL_USB_ROOT_PASSWORD": root_password,
+            "RHEL_USB_HOSTNAME": args.hostname,
+            "RHEL_USB_TIMEZONE": args.timezone,
+            "RHEL_USB_LOCALE": args.locale,
+            "RHEL_USB_LANGUAGE": args.language or "",
+            "RHEL_USB_CONSOLE_KEYMAP": args.console_keymap,
+            "RHEL_USB_XKB_LAYOUT": args.xkb_layout,
+            "RHEL_USB_XKB_VARIANT": args.xkb_variant,
+            "RHEL_USB_XKB_MODEL": args.xkb_model,
+            "RHEL_USB_DESKTOP": args.desktop,
+            "RHEL_USB_TILING_WMS": " ".join(ordered_wms),
+            "RHEL_USB_DEFAULT_SESSION": args.default_session,
+            "RHEL_USB_DISPLAY_MANAGER": args.display_manager,
+            "RHEL_USB_NETWORK": args.network,
+            "RHEL_USB_WIFI": bool_env(args.wifi),
+            "RHEL_USB_BLUETOOTH": bool_env(args.bluetooth),
+            "RHEL_USB_AUDIO": args.audio,
+            "RHEL_USB_BROWSER": args.browser,
+            "RHEL_USB_FIRMWARE": args.firmware,
+            "RHEL_USB_BOOTLOADER": args.bootloader,
+            "RHEL_USB_KERNEL_FLAVOR": args.kernel,
+            "RHEL_USB_BOOT_TIMEOUT": str(args.boot_timeout),
+            "RHEL_USB_AUTO_RESIZE": bool_env(args.auto_resize),
+            "RHEL_USB_EXTRA_PACKAGES": extra_packages,
+            "RHEL_USB_PACKAGE_LIST": " ".join(packages),
+        }
+
+    return {
+        **common,
+        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
+        "LINUX_USB_DISTRO": "alpine",
         "ALPINE_USB_PROFILE": getattr(args, "profile", "compatibility"),
         "ALPINE_BRANCH": args.branch,
-        "ARCH": args.arch,
         "ALPINE_USB_USER": args.user,
         "ALPINE_USB_PASSWORD": password,
         "ALPINE_USB_ROOT_PASSWORD": root_password,
@@ -230,28 +310,38 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
 
 
 def print_build_summary(env: dict[str, str], output: Path):
+    if env.get("LINUX_USB_DISTRO") == "alpine":
+        distro_row = ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}")
+        prefix = "ALPINE_USB"
+        profile = env.get("ALPINE_USB_PROFILE", "compatibility")
+        boot = f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}"
+        legacy_rows: list[tuple[str, str]] = [("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1"))]
+        extra = env["ALPINE_USB_EXTRA_PACKAGES"] or "none"
+    else:
+        distro_row = ("RHEL-family", f"{env['RHEL_USB_DISTRO']} {env['RHEL_USB_RELEASE']} / {env['ARCH']}")
+        prefix = "RHEL_USB"
+        profile = env.get("RHEL_USB_PROFILE", "compatibility")
+        boot = (
+            f"{env['RHEL_USB_BOOTLOADER']} kernel={env['RHEL_USB_KERNEL_FLAVOR']} firmware={env['RHEL_USB_FIRMWARE']}"
+        )
+        legacy_rows = [("Package list", f"{len(env['RHEL_USB_PACKAGE_LIST'].split())} resolved packages/groups")]
+        extra = env["RHEL_USB_EXTRA_PACKAGES"] or "none"
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
-        ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
-        ("Desktop", env["ALPINE_USB_DESKTOP"]),
-        ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
-        ("Default session", env["ALPINE_USB_DEFAULT_SESSION"]),
-        ("Display manager", env["ALPINE_USB_DISPLAY_MANAGER"]),
-        (
-            "Network",
-            f"{env['ALPINE_USB_NETWORK']} wifi={env['ALPINE_USB_WIFI']} bluetooth={env['ALPINE_USB_BLUETOOTH']}",
-        ),
-        ("Audio / browser", f"{env['ALPINE_USB_AUDIO']} / {env['ALPINE_USB_BROWSER']}"),
-        (
-            "Boot",
-            f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}",
-        ),
-        ("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1")),
-        ("Auto-resize USB", env["ALPINE_USB_AUTO_RESIZE"]),
-        ("Keyboard", f"console={env['ALPINE_USB_CONSOLE_KEYMAP']} xkb={env['ALPINE_USB_XKB_LAYOUT']}"),
-        ("Extra packages", env["ALPINE_USB_EXTRA_PACKAGES"] or "none"),
+        distro_row,
+        ("Profile", profile),
+        ("Desktop", env[f"{prefix}_DESKTOP"]),
+        ("Window managers", env[f"{prefix}_TILING_WMS"] or "none"),
+        ("Default session", env[f"{prefix}_DEFAULT_SESSION"]),
+        ("Display manager", env[f"{prefix}_DISPLAY_MANAGER"]),
+        ("Network", f"{env[f'{prefix}_NETWORK']} wifi={env[f'{prefix}_WIFI']} bluetooth={env[f'{prefix}_BLUETOOTH']}"),
+        ("Audio / browser", f"{env[f'{prefix}_AUDIO']} / {env[f'{prefix}_BROWSER']}"),
+        ("Boot", boot),
+        *legacy_rows,
+        ("Auto-resize USB", env[f"{prefix}_AUTO_RESIZE"]),
+        ("Keyboard", f"console={env[f'{prefix}_CONSOLE_KEYMAP']} xkb={env[f'{prefix}_XKB_LAYOUT']}"),
+        ("Extra packages", extra),
     ]
     print_panel("Build profile", rows)
 
@@ -266,6 +356,8 @@ def confirm(prompt: str, yes: bool = False) -> bool:
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "RHEL_USB_PASSWORD": "RHEL_USB_PASSWORD_FILE",
+    "RHEL_USB_ROOT_PASSWORD": "RHEL_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -276,6 +368,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -296,10 +390,15 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
+    if env.get("LINUX_USB_DISTRO") == "alpine":
+        script = "./configure-alpine-usb.sh"
+        dry_env["ALPINE_USB_DRY_RUN"] = "1"
+    else:
+        script = "./configure-rhel-usb.sh"
+        dry_env["RHEL_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        proc = subprocess.Popen([script], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -322,13 +421,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     print_build_summary(env, output)
 
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info("Dry-run only: validating generated Linux configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm("Build this Linux USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +445,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        script = "./build-alpine-usb.sh" if env.get("LINUX_USB_DISTRO") == "alpine" else "./build-rhel-usb.sh"
+        proc = subprocess.Popen([script], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -365,13 +465,18 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
-        validate_branch(args.branch)
+        distro = build_distro(args)
+        if distro == "alpine":
+            validate_branch(args.branch)
+            info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+            results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        else:
+            release = validate_rhel_release(args.release)
+            info(f"Searching RHEL-family packages for {distro} {release} with dnf repoquery")
+            results = search_rhel_packages(distro, release, args.query, args.limit)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
-    try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -498,7 +603,18 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         help="Final output image path",
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
+    parser.add_argument(
+        "--distro",
+        default="alpine",
+        choices=["alpine", "rhel", "rocky", "alma", "centos-stream"],
+        help="Linux distribution backend",
+    )
     parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
+    parser.add_argument(
+        "--release",
+        default=RHEL_DEFAULT_RELEASE,
+        help="RHEL-family major release (default: Rocky/Alma/CentOS Stream 9)",
+    )
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
@@ -554,8 +670,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,24 +683,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Alpine and RHEL-family Linux USB images (TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search Alpine or RHEL-family packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "rhel", "rocky", "alma", "centos-stream"])
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--release", default=RHEL_DEFAULT_RELEASE)
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
