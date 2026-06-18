@@ -21,9 +21,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
+from alpine_usb.apk_packages.index import BRANCH_RE, validate_extra_packages
 from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros.providers import get_provider
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
 
 
@@ -57,6 +58,8 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
     for name in [
         "build-alpine-usb.sh",
         "configure-alpine-usb.sh",
+        "build-gentoo-usb.sh",
+        "configure-gentoo-usb.sh",
         "README.md",
         "LICENSE",
         "scripts/Dockerfile.builder",
@@ -152,7 +155,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
@@ -541,19 +544,21 @@ class DeviceScanWorker(QThread):
         self.done.emit(list_devices())
 
 
-class ApkSearchWorker(QThread):
+class PackageSearchWorker(QThread):
     done = Signal(str, list)
     failed = Signal(str, str)
 
-    def __init__(self, branch: str, arch: str, query: str):
+    def __init__(self, branch: str, arch: str, query: str, distro: str = "alpine"):
         super().__init__()
         self.branch = branch
         self.arch = arch
         self.query = query
+        self.distro = distro
 
     def run(self):
         try:
-            self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
+            provider = get_provider(getattr(self, "distro", "alpine"))
+            self.done.emit(self.query, provider.search_packages(self.branch, self.arch, self.query, limit=10))
         except Exception as exc:
             self.failed.emit(self.query, str(exc))
 
@@ -844,11 +849,12 @@ class BuildWorker(QThread):
             env["OUTPUT_PATH"] = final
             if os.path.exists(final):
                 os.remove(final)
-            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            distro = self.config_env.get("ALPINE_USB_DISTRO", "alpine")
+            script = SCRIPT_DIR / ("build-gentoo-usb.sh" if distro == "gentoo" else "build-alpine-usb.sh")
             if not script.exists():
                 raise RuntimeError(f"Build script not found: {script}")
             script.chmod(0o755)
-            configure = SCRIPT_DIR / "configure-alpine-usb.sh"
+            configure = SCRIPT_DIR / ("configure-gentoo-usb.sh" if distro == "gentoo" else "configure-alpine-usb.sh")
             if configure.exists():
                 configure.chmod(0o755)
             cmd = [str(script)]
@@ -1097,9 +1103,11 @@ class Main(QWidget):
         self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
+        self.distro = QComboBox()
+        add_combo_items(self.distro, ["alpine", "gentoo"])
         self.alpine_branch = QComboBox()
         self.alpine_branch.setEditable(True)
-        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21", "stable", "testing"])
         self.arch = QComboBox()
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
@@ -1286,6 +1294,7 @@ class Main(QWidget):
         return {
             "image": self.image.text(),
             "image_size": self.image_size.currentText(),
+            "distro": combo_value(self.distro),
             "alpine_branch": self.alpine_branch.currentText(),
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
@@ -1320,6 +1329,7 @@ class Main(QWidget):
     def apply_config(self, cfg: dict):
         self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.set_combo_value(self.distro, str(cfg.get("distro", "alpine")))
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
@@ -1630,9 +1640,9 @@ class Main(QWidget):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0px; border:0; background:transparent; }}
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
         """)
-        title = QLabel("Alpine USB Installer")
+        title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
+        subtitle = QLabel("Build and flash customizable preinstalled Alpine or Gentoo Linux USB images.")
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -1827,7 +1837,8 @@ class Main(QWidget):
         form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size),
-            ("alpine_branch", "Alpine branch:", self.alpine_branch),
+            ("distro", "Distribution:", self.distro),
+            ("alpine_branch", "Branch/channel:", self.alpine_branch),
             ("arch", "Architecture:", self.arch),
             ("hostname", "Hostname:", self.hostname),
             ("username", "User:", self.username),
@@ -1916,7 +1927,7 @@ class Main(QWidget):
         boot.body_layout.addLayout(bform)
         parent_layout.addWidget(boot)
 
-        extra = CollapsibleSection("Extra APK packages", collapsed=True, icon_kind="package")
+        extra = CollapsibleSection("Extra packages", collapsed=True, icon_kind="package")
         self.sections["extra"] = extra
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
@@ -1980,8 +1991,9 @@ class Main(QWidget):
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
-        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        distro = combo_value(self.distro) or "alpine"
+        self.set_package_search_status(f"Searching {distro} {branch}/{arch}…")
+        self.package_search_worker = PackageSearchWorker(branch, arch, query, distro)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
         self.package_search_worker.finished.connect(self.package_search_finished)
@@ -2191,7 +2203,12 @@ class Main(QWidget):
         return {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
-            "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
+            "ALPINE_BRANCH": self.alpine_branch.currentText().strip()
+            or ("stable" if combo_value(self.distro) == "gentoo" else "latest-stable"),
+            "ALPINE_USB_DISTRO": combo_value(self.distro) or "alpine",
+            "GENTOO_STAGE3_BRANCH": self.alpine_branch.currentText().strip()
+            if combo_value(self.distro) == "gentoo"
+            else "",
             "ARCH": combo_value(self.arch) or "x86_64",
             "ALPINE_USB_USER": self.username.text().strip() or "alpine",
             "ALPINE_USB_PASSWORD": password,
@@ -2225,17 +2242,28 @@ class Main(QWidget):
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
-        if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
+        distro = env.get("ALPINE_USB_DISTRO", "alpine")
+        if distro == "alpine" and not BRANCH_RE.match(env["ALPINE_BRANCH"]):
             return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
+        if distro == "gentoo" and env["ALPINE_BRANCH"] not in {"stable", "testing"}:
+            return "Gentoo branch must be stable or testing."
         if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
             return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
         if not env["ALPINE_USB_PASSWORD"]:
             return "User password cannot be empty."
         if self.separate_root_password.isChecked() and not env["ALPINE_USB_ROOT_PASSWORD"]:
             return "Root password cannot be empty when separate root password is enabled."
-        package_error = validate_extra_packages(env["ALPINE_USB_EXTRA_PACKAGES"])
-        if package_error:
-            return package_error
+        if distro == "alpine":
+            package_error = validate_extra_packages(env["ALPINE_USB_EXTRA_PACKAGES"])
+            if package_error:
+                return package_error
+        else:
+            provider = get_provider(distro)
+            for package in env["ALPINE_USB_EXTRA_PACKAGES"].split():
+                try:
+                    provider.validate_package_name(package)
+                except ValueError as exc:
+                    return str(exc)
         if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env["ALPINE_USB_HOSTNAME"]):
             return "Hostname may contain only letters, numbers and dash; it cannot start/end with dash."
         if not env["ALPINE_USB_BOOT_TIMEOUT"].isdigit():
@@ -2259,7 +2287,7 @@ class Main(QWidget):
 
     def config_summary_text(self, env: dict[str, str]) -> str:
         return (
-            f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
+            f"Image: {env['IMAGE_SIZE']} | {env.get('ALPINE_USB_DISTRO', 'alpine')}: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
             f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
             f"Locale: {env['ALPINE_USB_LOCALE']} | TZ: {env['ALPINE_USB_TIMEZONE']} | console={env['ALPINE_USB_CONSOLE_KEYMAP']} | xkb={env['ALPINE_USB_XKB_LAYOUT']} {env['ALPINE_USB_XKB_VARIANT'] or ''} model={env['ALPINE_USB_XKB_MODEL']}\n"
             f"Desktop: {env['ALPINE_USB_DESKTOP']} | DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Session: {env['ALPINE_USB_DEFAULT_SESSION']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'}\n"
@@ -2275,7 +2303,10 @@ class Main(QWidget):
 
         rows = [
             ("Output", html_soft_break(output_path)),
-            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+            (
+                "Image",
+                f"{esc(env['IMAGE_SIZE'])} · {esc(env.get('ALPINE_USB_DISTRO', 'alpine'))} {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}",
+            ),
             (
                 "System",
                 f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
@@ -2303,7 +2334,7 @@ class Main(QWidget):
             f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
             for title, value in rows
         )
-        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Linux image?</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(

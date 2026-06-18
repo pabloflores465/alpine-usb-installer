@@ -11,6 +11,7 @@ from alpine_usb.interfaces import cli
 def namespace(**overrides) -> argparse.Namespace:
     values = {
         "profile": "compatibility",
+        "distro": "alpine",
         "image_size": "16G",
         "branch": "latest-stable",
         "arch": "x86_64",
@@ -53,6 +54,13 @@ def test_split_packages_dedupes_in_stable_order() -> None:
     assert cli.split_packages(["vim htop", "vim"], "neovim htop") == "vim htop neovim"
 
 
+def test_split_packages_accepts_gentoo_category_atoms() -> None:
+    assert (
+        cli.split_packages(["www-client/firefox vim"], "app-misc/ranger", "gentoo")
+        == "www-client/firefox vim app-misc/ranger"
+    )
+
+
 def test_split_packages_rejects_invalid_package() -> None:
     with pytest.raises(ValueError, match="Invalid package"):
         cli.split_packages(["valid bad/name"], None)
@@ -62,6 +70,7 @@ def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     env = cli.env_from_build_args(namespace())
 
     assert env["ALPINE_BRANCH"] == "latest-stable"
+    assert env["ALPINE_USB_DISTRO"] == "alpine"
     assert env["ALPINE_USB_ROOT_PASSWORD"] == "secret"
     assert env["ALPINE_USB_TILING_WMS"] == "i3 sway openbox"
     assert env["ALPINE_USB_BLUETOOTH"] == "0"
@@ -96,3 +105,13 @@ def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, mon
     assert (runtime / "scripts" / "Dockerfile.builder").read_text() == "FROM alpine"
     assert (runtime / "efi-fallback" / "BOOTX64.EFI").read_text() == "efi"
     assert (runtime / "build-alpine-usb.sh").exists()
+
+
+def test_env_from_build_args_accepts_gentoo_branch_and_atoms() -> None:
+    env = cli.env_from_build_args(
+        namespace(distro="gentoo", branch="stable", user="gentoo", extra_packages="www-client/firefox")
+    )
+
+    assert env["ALPINE_USB_DISTRO"] == "gentoo"
+    assert env["GENTOO_STAGE3_BRANCH"] == "stable"
+    assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop www-client/firefox"

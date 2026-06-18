@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** and plan **Gentoo Linux stage3-based USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,12 +27,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image; Gentoo currently supports provider-backed dry-run planning and package search.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
 - Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
+- Search Alpine `main` + `community` packages or Gentoo Portage package mappings/local metadata from GUI/TUI/CLI.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
@@ -72,6 +72,10 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # CLI help/subcommands
 ./alpine-usb --help
 ./alpine-usb build --help
+
+# Gentoo dry-run / package planning
+./alpine-usb build --distro gentoo --branch stable --dry-run --password gentoo
+./alpine-usb search --distro gentoo --branch stable firefox
 ```
 
 Default output path:
@@ -123,6 +127,10 @@ The TUI provides full-screen menus for configuration, package search, dry-run/bu
 ```sh
 ./alpine-usb --help
 ./alpine-usb build --help
+
+# Gentoo dry-run / package planning
+./alpine-usb build --distro gentoo --branch stable --dry-run --password gentoo
+./alpine-usb search --distro gentoo --branch stable firefox
 ```
 
 Common commands:
@@ -163,6 +171,10 @@ Extra packages can be repeated or space-separated:
   --extra-package "tmux htop" \
   --extra-package docker
 ```
+
+## Gentoo support
+
+Gentoo is selectable with `--distro gentoo` in the CLI and from GUI/TUI distribution controls. The current Gentoo backend validates a stage3/OpenRC image plan, maps feature options to Portage atoms, and supports package search/cache via curated mappings plus local `eix`/`pkgcore` when available. Full non-dry-run Gentoo image construction is not yet enabled; see [`docs/gentoo.md`](docs/gentoo.md) for exact scope, source-vs-binary tradeoffs, and gaps. Alpine behavior is unchanged and remains the complete image builder.
 
 ## Build profiles
 
