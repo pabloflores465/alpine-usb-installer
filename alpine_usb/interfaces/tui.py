@@ -12,8 +12,10 @@ from types import SimpleNamespace
 from alpine_usb.interfaces import cli as cli
 
 CHOICES = {
+    "distro": ["alpine", "slackware"],
     "image_size": ["8G", "16G", "24G", "32G", "64G", "128G"],
     "branch": ["latest-stable", "edge", "v3.22", "v3.21"],
+    "slackware_release": ["stable", "current", "15.0"],
     "arch": ["x86_64"],
     "timezone": ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"],
     "locale": ["en_US.UTF-8", "es_ES.UTF-8", "es_MX.UTF-8"],
@@ -50,8 +52,10 @@ WM_CHOICES = list(cli.VALID_WMS)
 
 DEFAULT_CONFIG = {
     "output": str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / cli.DEFAULT_IMAGE_NAME),
+    "distro": "alpine",
     "image_size": "16G",
     "branch": "latest-stable",
+    "slackware_release": "stable",
     "arch": "x86_64",
     "hostname": "alpine-usb",
     "user": "alpine",
@@ -141,7 +145,7 @@ class TuiApp:
 
     def draw_header(self, title: str):
         _h, w = self.stdscr.getmaxyx()
-        header = f" Alpine USB Installer TUI  ›  {title} "
+        header = f" Linux USB Installer TUI  ›  {title} "
         self.safe_addnstr(0, 0, header.ljust(w), w, self.color(5, True))
         subtitle = "Complete terminal UI: build, package search, USB devices and flashing"
         self.safe_addnstr(1, 2, subtitle, max(0, w - 4), self.color(1))
@@ -289,16 +293,16 @@ class TuiApp:
         while True:
             items = [
                 ("Current packages", self.config["extra_packages"] or "none"),
-                ("Edit manually", "space-separated APK package names"),
-                ("Search official Alpine packages", "top 10 suggestions from main + community"),
+                ("Edit manually", "space-separated distro package names"),
+                ("Search official distro packages", "top 10 suggestions from package indexes"),
                 ("Clear packages", "remove all extra packages"),
                 ("Back", "return"),
             ]
-            choice = self.menu("Extra APK packages", items)
+            choice = self.menu("Extra packages", items)
             if choice is None or choice == 4:
                 return
             if choice == 1:
-                value = self.prompt("Extra APK packages", self.config["extra_packages"])
+                value = self.prompt("Extra packages", self.config["extra_packages"])
                 if value is not None:
                     self.config["extra_packages"] = self.dedupe_packages(value)
             elif choice == 2:
@@ -316,13 +320,18 @@ class TuiApp:
         return " ".join(result)
 
     def package_search_screen(self):
-        query = self.prompt("Search Alpine packages", "")
+        query = self.prompt(f"Search {self.config['distro']} packages", "")
         if not query:
             return
         self.status = f"Searching official APK indexes for '{query}'…"
         self.draw_wait("Package search", self.status)
         try:
-            results = cli.search_official_apk_packages(self.config["branch"], self.config["arch"], query, 10)
+            if self.config["distro"] == "slackware":
+                results = cli.search_official_slackware_packages(
+                    self.config["slackware_release"], self.config["arch"], query, 10
+                )
+            else:
+                results = cli.search_official_apk_packages(self.config["branch"], self.config["arch"], query, 10)
         except Exception as exc:
             self.message("Package search failed", str(exc), error=True)
             return
@@ -402,8 +411,10 @@ class TuiApp:
     def namespace(self, dry_run: bool = False, yes: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
             output=self.config["output"],
+            distro=self.config["distro"],
             image_size=self.config["image_size"],
             branch=self.config["branch"],
+            slackware_release=self.config["slackware_release"],
             arch=self.config["arch"],
             hostname=self.config["hostname"],
             user=self.config["user"],
@@ -554,7 +565,7 @@ class TuiApp:
             items = [
                 (
                     "System, user, localization",
-                    f"{self.config['user']}@{self.config['hostname']}  {self.config['locale']}  {self.config['xkb_layout']}",
+                    f"{self.config['distro']}  {self.config['user']}@{self.config['hostname']}  {self.config['locale']}  {self.config['xkb_layout']}",
                 ),
                 (
                     "Desktop, sessions, WMs",
@@ -568,7 +579,7 @@ class TuiApp:
                     "Bootloader, kernel, firmware",
                     f"{self.config['bootloader']}  linux-{self.config['kernel']}  firmware={self.config['firmware']}  legacy-X11={'yes' if self.config['legacy_x11_drivers'] else 'no'}",
                 ),
-                ("Extra APK packages", self.config["extra_packages"] or "search/add packages"),
+                ("Extra packages", self.config["extra_packages"] or "search/add packages"),
                 ("Build image", self.config["output"]),
                 ("USB devices and flash", self.config["device"] or "select target USB"),
                 ("Doctor", "check host tools"),
@@ -576,15 +587,17 @@ class TuiApp:
             ]
             choice = self.menu("Main menu", items)
             if choice is None or choice == 8:
-                if self.confirm_curses("Quit Alpine USB Installer TUI?"):
+                if self.confirm_curses("Quit Linux USB Installer TUI?"):
                     raise TuiExit
             elif choice == 0:
                 self.edit_fields(
                     "System, user, localization",
                     [
                         ("Output image path", "output", "text"),
+                        ("Distribution", "distro", "choice"),
                         ("Minimum image size", "image_size", "choice"),
                         ("Alpine branch", "branch", "choice"),
+                        ("Slackware release", "slackware_release", "choice"),
                         ("Architecture", "arch", "choice"),
                         ("Hostname", "hostname", "text"),
                         ("User", "user", "text"),
@@ -661,8 +674,10 @@ def self_test() -> int:
     assert "systemd-boot" in CHOICES["bootloader"]
     ns = SimpleNamespace(
         output=app_config["output"],
+        distro=app_config["distro"],
         image_size=app_config["image_size"],
         branch=app_config["branch"],
+        slackware_release=app_config["slackware_release"],
         arch=app_config["arch"],
         hostname=app_config["hostname"],
         user=app_config["user"],
@@ -705,7 +720,7 @@ def self_test() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Curses TUI for Alpine USB Installer (launched by alpine-usb)")
+    parser = argparse.ArgumentParser(description="Curses TUI for Linux USB Installer (launched by alpine-usb)")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:

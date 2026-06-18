@@ -17,14 +17,26 @@ from alpine_usb.apk_packages.index import (
     APK_SEARCH_REPOS,
     search_official_apk_packages,
     validate_branch,
-    validate_package_name,
+)
+from alpine_usb.apk_packages.index import (
+    validate_package_name as validate_apk_package_name,
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.slackware_packages.index import (
+    search_official_slackware_packages,
+)
+from alpine_usb.slackware_packages.index import (
+    validate_package_name as validate_slackware_package_name,
+)
+from alpine_usb.slackware_packages.index import (
+    validate_release as validate_slackware_release,
+)
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
-DEFAULT_IMAGE_NAME = "alpine-usb.img"
+APP_TITLE = "Linux USB Installer"
+DEFAULT_IMAGE_NAME = "linux-usb.img"
+SUPPORTED_DISTROS = ("alpine", "slackware")
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -32,6 +44,8 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-slackware-usb.sh",
+    "configure-slackware-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -163,16 +177,17 @@ def bool_env(value: bool) -> str:
     return "1" if value else "0"
 
 
-def split_packages(values: list[str] | None, inline: str | None) -> str:
+def split_packages(values: list[str] | None, inline: str | None, distro: str = "alpine") -> str:
     packages: list[str] = []
     for item in values or []:
         packages.extend(part for part in re.split(r"\s+", item.strip()) if part)
     if inline:
         packages.extend(part for part in re.split(r"\s+", inline.strip()) if part)
+    validator = validate_slackware_package_name if distro == "slackware" else validate_apk_package_name
     deduped: list[str] = []
     seen: set[str] = set()
     for pkg in packages:
-        validate_package_name(pkg)
+        validator(pkg)
         if pkg not in seen:
             seen.add(pkg)
             deduped.append(pkg)
@@ -180,7 +195,11 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
 
 
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
-    validate_branch(args.branch)
+    distro = getattr(args, "distro", "alpine")
+    if distro == "slackware":
+        validate_slackware_release(args.slackware_release)
+    else:
+        validate_branch(args.branch)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
     wms = list(args.wm or [])
@@ -193,10 +212,12 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
             ordered_wms.append(wm)
 
     return {
-        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
+        "IMAGE_NAME": f".{distro}-usb-cli-{os.getpid()}.img",
         "IMAGE_SIZE": args.image_size,
+        "LINUX_USB_DISTRO": distro,
         "ALPINE_USB_PROFILE": getattr(args, "profile", "compatibility"),
         "ALPINE_BRANCH": args.branch,
+        "SLACKWARE_RELEASE": getattr(args, "slackware_release", "stable"),
         "ARCH": args.arch,
         "ALPINE_USB_USER": args.user,
         "ALPINE_USB_PASSWORD": password,
@@ -225,15 +246,17 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
         "ALPINE_USB_BOOT_TIMEOUT": str(args.boot_timeout),
         "ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
         "ALPINE_USB_AUTO_RESIZE": bool_env(args.auto_resize),
-        "ALPINE_USB_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages),
+        "ALPINE_USB_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages, distro),
     }
 
 
 def print_build_summary(env: dict[str, str], output: Path):
+    distro = env.get("LINUX_USB_DISTRO", "alpine")
+    release = env["ALPINE_BRANCH"] if distro == "alpine" else env["SLACKWARE_RELEASE"]
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
+        ("Distribution", f"{distro} {release} / {env['ARCH']}"),
         ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
         ("Desktop", env["ALPINE_USB_DESKTOP"]),
         ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
@@ -291,6 +314,18 @@ def cleanup_secret_files(paths: list[Path]):
             path.unlink()
 
 
+def config_script_for_distro(distro: str) -> str:
+    if distro == "slackware":
+        return "./configure-slackware-usb.sh"
+    return "./configure-alpine-usb.sh"
+
+
+def build_script_for_distro(distro: str) -> str:
+    if distro == "slackware":
+        return "./build-slackware-usb.sh"
+    return "./build-alpine-usb.sh"
+
+
 def run_config_dry_run(env: dict[str, str]) -> int:
     sys.stdout.flush()
     dry_env = os.environ.copy()
@@ -299,7 +334,9 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env["ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        proc = subprocess.Popen(
+            [config_script_for_distro(env.get("LINUX_USB_DISTRO", "alpine"))], cwd=repo_root(), env=dry_env
+        )
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -321,14 +358,15 @@ def cmd_build(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
+    distro = env.get("LINUX_USB_DISTRO", "alpine")
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info(f"Dry-run only: validating generated {distro} configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm(f"Build this {distro} USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +384,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        proc = subprocess.Popen([build_script_for_distro(distro)], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -365,13 +403,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
-        validate_branch(args.branch)
+        if args.distro == "slackware":
+            validate_slackware_release(args.slackware_release)
+            info(f"Searching Slackware {args.slackware_release}/{args.arch} official package index: PACKAGES.TXT")
+            results = search_official_slackware_packages(args.slackware_release, args.arch, args.query, args.limit)
+        else:
+            validate_branch(args.branch)
+            info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+            results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
-    try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -497,8 +539,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         default=str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / DEFAULT_IMAGE_NAME),
         help="Final output image path",
     )
+    parser.add_argument("--distro", default="alpine", choices=SUPPORTED_DISTROS, help="Linux distribution backend")
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
     parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
+    parser.add_argument("--slackware-release", default="stable", help="Slackware release: stable, current, 15.0, ...")
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
@@ -554,8 +598,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,24 +611,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Linux USB images (Alpine + Slackware; TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official Alpine or Slackware packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=SUPPORTED_DISTROS)
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--slackware-release", default="stable")
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)

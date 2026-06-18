@@ -11,8 +11,10 @@ from alpine_usb.interfaces import cli
 def namespace(**overrides) -> argparse.Namespace:
     values = {
         "profile": "compatibility",
+        "distro": "alpine",
         "image_size": "16G",
         "branch": "latest-stable",
+        "slackware_release": "stable",
         "arch": "x86_64",
         "user": "alpine",
         "password": "secret",
@@ -61,12 +63,25 @@ def test_split_packages_rejects_invalid_package() -> None:
 def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     env = cli.env_from_build_args(namespace())
 
+    assert env["LINUX_USB_DISTRO"] == "alpine"
     assert env["ALPINE_BRANCH"] == "latest-stable"
     assert env["ALPINE_USB_ROOT_PASSWORD"] == "secret"
     assert env["ALPINE_USB_TILING_WMS"] == "i3 sway openbox"
     assert env["ALPINE_USB_BLUETOOTH"] == "0"
     assert env["ALPINE_USB_LEGACY_X11_DRIVERS"] == "0"
     assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop neovim"
+
+
+def test_env_from_build_args_maps_slackware_release_and_packages() -> None:
+    env = cli.env_from_build_args(
+        namespace(
+            distro="slackware", slackware_release="current", extra_package=["mozilla-firefox"], extra_packages="vim"
+        )
+    )
+
+    assert env["LINUX_USB_DISTRO"] == "slackware"
+    assert env["SLACKWARE_RELEASE"] == "current"
+    assert env["ALPINE_USB_EXTRA_PACKAGES"] == "mozilla-firefox vim"
 
 
 def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
