@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or Debian Linux USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,13 +27,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux or Debian stable USB image.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages or Debian packages from GUI/TUI/CLI.
+- Cache package indexes on disk for fast repeated searches where supported.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
 - Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
@@ -131,14 +131,20 @@ Common commands:
 # Search packages
 ./alpine-usb search firefox
 
-# Validate a profile without building
+# Validate an Alpine profile without building
 ./alpine-usb build --dry-run --ask-password --desktop xfce --bootloader systemd-boot
+
+# Validate a Debian stable profile without building
+./alpine-usb build --distro debian --release stable --dry-run --ask-password --desktop xfce --bootloader grub
 
 # Build default profile without prompts (avoid shell history by using --ask-password instead)
 ./alpine-usb build --password 'change-me' -y
 
-# Build Plasma profile
+# Build Alpine Plasma profile
 ./alpine-usb build --ask-password --desktop plasma --display-manager sddm --bootloader systemd-boot -y
+
+# Build Debian GNOME profile
+./alpine-usb build --distro debian --release stable --ask-password --desktop gnome --display-manager gdm -y
 
 # Build smaller/faster minimal profile defaults
 ./alpine-usb build --ask-password --profile minimal -y
@@ -155,7 +161,7 @@ Common commands:
 
 Flash refuses partitions, non-removable/non-hotplug disks, missing images, truncated images, corrupt GPT images, and images without the expected EFI + Linux root partitions. Confirmation shows target model, size, serial/id, and device path before writing.
 
-Extra packages can be repeated or space-separated:
+Extra packages can be repeated or space-separated. Names are validated for the selected distro (`apk` names for Alpine, `apt` package names for Debian):
 
 ```sh
 ./alpine-usb build --ask-password \
@@ -163,6 +169,10 @@ Extra packages can be repeated or space-separated:
   --extra-package "tmux htop" \
   --extra-package docker
 ```
+
+### Debian backend status
+
+`--distro debian` uses Debian `stable` by default and maps the same UI/CLI profile choices to Debian packages where available. The build path is `debootstrap`/`apt` based, creates an EFI + ext4 GPT image, installs GRUB removable UEFI, configures users/localization/network/audio/browser/session packages, and adds a first-boot systemd grow-root service when auto-resize is enabled. Package search uses local `apt-cache search` when available and falls back to its on-disk cache; on non-Debian hosts without `apt-cache`, Debian package search may require Docker/build-host tooling or an existing cache.
 
 ## Build profiles
 

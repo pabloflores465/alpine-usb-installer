@@ -10,6 +10,8 @@ pytest
 bash -n \
   build-alpine-usb.sh \
   configure-alpine-usb.sh \
+  build-debian-usb.sh \
+  configure-debian-usb.sh \
   scripts/build-macos-dmg.sh \
   scripts/package-release-assets.sh \
   scripts/check-apk-solver.sh \

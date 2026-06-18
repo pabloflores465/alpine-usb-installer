@@ -12,7 +12,9 @@ def namespace(**overrides) -> argparse.Namespace:
     values = {
         "profile": "compatibility",
         "image_size": "16G",
+        "distro": "alpine",
         "branch": "latest-stable",
+        "release": "stable",
         "arch": "x86_64",
         "user": "alpine",
         "password": "secret",
@@ -61,12 +63,24 @@ def test_split_packages_rejects_invalid_package() -> None:
 def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     env = cli.env_from_build_args(namespace())
 
+    assert env["LINUX_USB_DISTRO"] == "alpine"
     assert env["ALPINE_BRANCH"] == "latest-stable"
     assert env["ALPINE_USB_ROOT_PASSWORD"] == "secret"
     assert env["ALPINE_USB_TILING_WMS"] == "i3 sway openbox"
     assert env["ALPINE_USB_BLUETOOTH"] == "0"
     assert env["ALPINE_USB_LEGACY_X11_DRIVERS"] == "0"
     assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop neovim"
+
+
+def test_env_from_build_args_maps_debian_namespace_to_build_environment() -> None:
+    env = cli.env_from_build_args(namespace(distro="debian", arch="x86_64", user="debian", hostname="debian-usb"))
+
+    assert env["LINUX_USB_DISTRO"] == "debian"
+    assert env["DEBIAN_RELEASE"] == "stable"
+    assert env["ARCH"] == "amd64"
+    assert env["DEBIAN_USB_USER"] == "debian"
+    assert env["DEBIAN_USB_TILING_WMS"] == "i3 sway openbox"
+    assert env["DEBIAN_USB_EXTRA_PACKAGES"] == "vim htop neovim"
 
 
 def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,10 +94,28 @@ def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pyte
     assert len(files) == 2
 
 
+def test_prepare_secret_env_moves_debian_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
+
+    safe_env, files = cli.prepare_secret_env({"DEBIAN_USB_PASSWORD": "pw", "DEBIAN_USB_ROOT_PASSWORD": "rootpw"})
+
+    assert "DEBIAN_USB_PASSWORD" not in safe_env
+    assert Path(safe_env["DEBIAN_USB_PASSWORD_FILE"]).read_text() == "pw"
+    assert Path(safe_env["DEBIAN_USB_ROOT_PASSWORD_FILE"]).read_text() == "rootpw"
+    assert len(files) == 2
+
+
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
+    for name in [
+        "build-alpine-usb.sh",
+        "configure-alpine-usb.sh",
+        "build-debian-usb.sh",
+        "configure-debian-usb.sh",
+        "README.md",
+        "LICENSE",
+    ]:
         (source / name).write_text(name)
     (source / "scripts").mkdir()
     (source / "scripts" / "Dockerfile.builder").write_text("FROM alpine")

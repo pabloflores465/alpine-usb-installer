@@ -17,14 +17,22 @@ from alpine_usb.apk_packages.index import (
     APK_SEARCH_REPOS,
     search_official_apk_packages,
     validate_branch,
-    validate_package_name,
+)
+from alpine_usb.apk_packages.index import (
+    validate_package_name as validate_apk_package_name,
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
+from alpine_usb.deb_packages.index import (
+    DEBIAN_SEARCH_REPOS,
+    search_official_deb_packages,
+    validate_release,
+)
 from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
+DEFAULT_DEBIAN_IMAGE_NAME = "debian-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -32,6 +40,8 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-debian-usb.sh",
+    "configure-debian-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -172,7 +182,7 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
     deduped: list[str] = []
     seen: set[str] = set()
     for pkg in packages:
-        validate_package_name(pkg)
+        validate_apk_package_name(pkg)
         if pkg not in seen:
             seen.add(pkg)
             deduped.append(pkg)
@@ -180,7 +190,11 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
 
 
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
-    validate_branch(args.branch)
+    distro = getattr(args, "distro", "alpine")
+    if distro == "debian":
+        validate_release(getattr(args, "release", "stable"))
+    else:
+        validate_branch(args.branch)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
     wms = list(args.wm or [])
@@ -192,12 +206,50 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
         if wm not in ordered_wms:
             ordered_wms.append(wm)
 
-    return {
-        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
+    extra_packages = split_packages(args.extra_package, args.extra_packages)
+    common = {
+        "IMAGE_NAME": f".{distro}-usb-cli-{os.getpid()}.img",
         "IMAGE_SIZE": args.image_size,
+        "LINUX_USB_DISTRO": distro,
+        "ARCH": "amd64" if distro == "debian" and args.arch == "x86_64" else args.arch,
+    }
+    if distro == "debian":
+        return {
+            **common,
+            "DEBIAN_RELEASE": getattr(args, "release", "stable"),
+            "DEBIAN_USB_PROFILE": getattr(args, "profile", "compatibility"),
+            "DEBIAN_USB_USER": args.user,
+            "DEBIAN_USB_PASSWORD": password,
+            "DEBIAN_USB_ROOT_PASSWORD": root_password,
+            "DEBIAN_USB_HOSTNAME": args.hostname,
+            "DEBIAN_USB_TIMEZONE": args.timezone,
+            "DEBIAN_USB_LOCALE": args.locale,
+            "DEBIAN_USB_LANGUAGE": args.language or "",
+            "DEBIAN_USB_CONSOLE_KEYMAP": args.console_keymap,
+            "DEBIAN_USB_XKB_LAYOUT": args.xkb_layout,
+            "DEBIAN_USB_XKB_VARIANT": args.xkb_variant,
+            "DEBIAN_USB_XKB_MODEL": args.xkb_model,
+            "DEBIAN_USB_DESKTOP": args.desktop,
+            "DEBIAN_USB_TILING_WMS": " ".join(ordered_wms),
+            "DEBIAN_USB_DEFAULT_SESSION": args.default_session,
+            "DEBIAN_USB_DISPLAY_MANAGER": args.display_manager,
+            "DEBIAN_USB_NETWORK": args.network,
+            "DEBIAN_USB_WIFI": bool_env(args.wifi),
+            "DEBIAN_USB_BLUETOOTH": bool_env(args.bluetooth),
+            "DEBIAN_USB_AUDIO": args.audio,
+            "DEBIAN_USB_BROWSER": args.browser,
+            "DEBIAN_USB_FIRMWARE": args.firmware,
+            "DEBIAN_USB_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
+            "DEBIAN_USB_BOOTLOADER": args.bootloader,
+            "DEBIAN_USB_KERNEL_FLAVOR": args.kernel,
+            "DEBIAN_USB_BOOT_TIMEOUT": str(args.boot_timeout),
+            "DEBIAN_USB_AUTO_RESIZE": bool_env(args.auto_resize),
+            "DEBIAN_USB_EXTRA_PACKAGES": extra_packages,
+        }
+    return {
+        **common,
         "ALPINE_USB_PROFILE": getattr(args, "profile", "compatibility"),
         "ALPINE_BRANCH": args.branch,
-        "ARCH": args.arch,
         "ALPINE_USB_USER": args.user,
         "ALPINE_USB_PASSWORD": password,
         "ALPINE_USB_ROOT_PASSWORD": root_password,
@@ -225,33 +277,45 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
         "ALPINE_USB_BOOT_TIMEOUT": str(args.boot_timeout),
         "ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
         "ALPINE_USB_AUTO_RESIZE": bool_env(args.auto_resize),
-        "ALPINE_USB_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages),
+        "ALPINE_USB_EXTRA_PACKAGES": extra_packages,
     }
 
 
+def _env_value(env: dict[str, str], key: str) -> str:
+    distro = env.get("LINUX_USB_DISTRO", "alpine")
+    prefix = "DEBIAN_USB" if distro == "debian" else "ALPINE_USB"
+    return env[f"{prefix}_{key}"]
+
+
 def print_build_summary(env: dict[str, str], output: Path):
+    distro = env.get("LINUX_USB_DISTRO", "alpine")
+    distro_row = (
+        f"Debian {env.get('DEBIAN_RELEASE', 'stable')} / {env['ARCH']}"
+        if distro == "debian"
+        else f"Alpine {env['ALPINE_BRANCH']} / {env['ARCH']}"
+    )
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
-        ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
-        ("Desktop", env["ALPINE_USB_DESKTOP"]),
-        ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
-        ("Default session", env["ALPINE_USB_DEFAULT_SESSION"]),
-        ("Display manager", env["ALPINE_USB_DISPLAY_MANAGER"]),
+        ("Distribution", distro_row),
+        ("Profile", _env_value(env, "PROFILE")),
+        ("Desktop", _env_value(env, "DESKTOP")),
+        ("Window managers", _env_value(env, "TILING_WMS") or "none"),
+        ("Default session", _env_value(env, "DEFAULT_SESSION")),
+        ("Display manager", _env_value(env, "DISPLAY_MANAGER")),
         (
             "Network",
-            f"{env['ALPINE_USB_NETWORK']} wifi={env['ALPINE_USB_WIFI']} bluetooth={env['ALPINE_USB_BLUETOOTH']}",
+            f"{_env_value(env, 'NETWORK')} wifi={_env_value(env, 'WIFI')} bluetooth={_env_value(env, 'BLUETOOTH')}",
         ),
-        ("Audio / browser", f"{env['ALPINE_USB_AUDIO']} / {env['ALPINE_USB_BROWSER']}"),
+        ("Audio / browser", f"{_env_value(env, 'AUDIO')} / {_env_value(env, 'BROWSER')}"),
         (
             "Boot",
-            f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}",
+            f"{_env_value(env, 'BOOTLOADER')} linux-{_env_value(env, 'KERNEL_FLAVOR')} firmware={_env_value(env, 'FIRMWARE')}",
         ),
-        ("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1")),
-        ("Auto-resize USB", env["ALPINE_USB_AUTO_RESIZE"]),
-        ("Keyboard", f"console={env['ALPINE_USB_CONSOLE_KEYMAP']} xkb={env['ALPINE_USB_XKB_LAYOUT']}"),
-        ("Extra packages", env["ALPINE_USB_EXTRA_PACKAGES"] or "none"),
+        ("Legacy X11 drivers", _env_value(env, "LEGACY_X11_DRIVERS")),
+        ("Auto-resize USB", _env_value(env, "AUTO_RESIZE")),
+        ("Keyboard", f"console={_env_value(env, 'CONSOLE_KEYMAP')} xkb={_env_value(env, 'XKB_LAYOUT')}"),
+        ("Extra packages", _env_value(env, "EXTRA_PACKAGES") or "none"),
     ]
     print_panel("Build profile", rows)
 
@@ -266,6 +330,8 @@ def confirm(prompt: str, yes: bool = False) -> bool:
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "DEBIAN_USB_PASSWORD": "DEBIAN_USB_PASSWORD_FILE",
+    "DEBIAN_USB_ROOT_PASSWORD": "DEBIAN_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -276,6 +342,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -296,10 +364,12 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
+    distro = env.get("LINUX_USB_DISTRO", "alpine")
+    dry_env["DEBIAN_USB_DRY_RUN" if distro == "debian" else "ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
+    script = "./configure-debian-usb.sh" if distro == "debian" else "./configure-alpine-usb.sh"
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        proc = subprocess.Popen([script], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -318,17 +388,22 @@ def cmd_build(args: argparse.Namespace) -> int:
     except ValueError as exc:
         err(str(exc))
         return 2
+    default_output = str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / DEFAULT_IMAGE_NAME)
+    if getattr(args, "distro", "alpine") == "debian" and args.output == default_output:
+        args.output = str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / DEFAULT_DEBIAN_IMAGE_NAME)
     output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        distro_name = "Debian" if env.get("LINUX_USB_DISTRO") == "debian" else "Alpine"
+        info(f"Dry-run only: validating generated {distro_name} configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    distro_name = "Debian" if env.get("LINUX_USB_DISTRO") == "debian" else "Alpine"
+    if not confirm(f"Build this {distro_name} USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +421,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        script = "./build-debian-usb.sh" if env.get("LINUX_USB_DISTRO") == "debian" else "./build-alpine-usb.sh"
+        proc = subprocess.Popen([script], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -365,13 +441,22 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
-        validate_branch(args.branch)
+        if args.distro == "debian":
+            validate_release(args.release)
+        else:
+            validate_branch(args.branch)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+    if args.distro == "debian":
+        info(f"Searching Debian {args.release}/{args.arch} packages via {', '.join(DEBIAN_SEARCH_REPOS)}")
+    else:
+        info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
     try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        if args.distro == "debian":
+            results = search_official_deb_packages(args.release, args.arch, args.query, args.limit)
+        else:
+            results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -485,6 +570,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def add_common_build_options(parser: argparse.ArgumentParser):
+    parser.add_argument("--distro", default="alpine", choices=["alpine", "debian"], help="Linux distribution backend")
     parser.add_argument(
         "--profile",
         default="compatibility",
@@ -499,7 +585,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
     parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
-    parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
+    parser.add_argument(
+        "--release", default="stable", help="Debian release: stable, testing, sid, bookworm, trixie, ..."
+    )
+    parser.add_argument("--arch", default="x86_64", choices=["x86_64", "amd64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
     parser.add_argument(
@@ -554,8 +643,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,24 +656,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Linux USB images (Debian + Alpine, TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official distro packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "debian"])
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--release", default="stable")
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
