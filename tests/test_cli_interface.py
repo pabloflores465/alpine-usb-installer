@@ -12,7 +12,9 @@ def namespace(**overrides) -> argparse.Namespace:
     values = {
         "profile": "compatibility",
         "image_size": "16G",
+        "distro": "alpine",
         "branch": "latest-stable",
+        "release": None,
         "arch": "x86_64",
         "user": "alpine",
         "password": "secret",
@@ -69,21 +71,49 @@ def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop neovim"
 
 
+def test_env_from_build_args_maps_ubuntu_namespace_to_build_environment() -> None:
+    env = cli.env_from_build_args(namespace(distro="ubuntu", release="24.04", user="ubuntu", hostname="ubuntu-usb"))
+
+    assert env["DISTRO"] == "ubuntu"
+    assert env["UBUNTU_RELEASE"] == "24.04"
+    assert env["UBUNTU_USB_USER"] == "ubuntu"
+    assert env["UBUNTU_USB_DESKTOP"] == "xfce"
+    assert env["UBUNTU_USB_EXTRA_PACKAGES"] == "vim htop neovim"
+    assert "ALPINE_BRANCH" not in env
+
+
 def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
 
-    safe_env, files = cli.prepare_secret_env({"ALPINE_USB_PASSWORD": "pw", "ALPINE_USB_ROOT_PASSWORD": "rootpw"})
+    safe_env, files = cli.prepare_secret_env(
+        {
+            "ALPINE_USB_PASSWORD": "pw",
+            "ALPINE_USB_ROOT_PASSWORD": "rootpw",
+            "UBUNTU_USB_PASSWORD": "upw",
+            "UBUNTU_USB_ROOT_PASSWORD": "urootpw",
+        }
+    )
 
     assert "ALPINE_USB_PASSWORD" not in safe_env
+    assert "UBUNTU_USB_PASSWORD" not in safe_env
     assert Path(safe_env["ALPINE_USB_PASSWORD_FILE"]).read_text() == "pw"
     assert Path(safe_env["ALPINE_USB_ROOT_PASSWORD_FILE"]).read_text() == "rootpw"
-    assert len(files) == 2
+    assert Path(safe_env["UBUNTU_USB_PASSWORD_FILE"]).read_text() == "upw"
+    assert Path(safe_env["UBUNTU_USB_ROOT_PASSWORD_FILE"]).read_text() == "urootpw"
+    assert len(files) == 4
 
 
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
+    for name in [
+        "build-alpine-usb.sh",
+        "configure-alpine-usb.sh",
+        "build-ubuntu-usb.sh",
+        "configure-ubuntu-usb.sh",
+        "README.md",
+        "LICENSE",
+    ]:
         (source / name).write_text(name)
     (source / "scripts").mkdir()
     (source / "scripts" / "Dockerfile.builder").write_text("FROM alpine")

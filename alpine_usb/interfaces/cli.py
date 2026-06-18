@@ -19,11 +19,13 @@ from alpine_usb.apk_packages.index import (
     validate_branch,
     validate_package_name,
 )
+from alpine_usb.apt_packages.index import search_official_apt_packages, validate_ubuntu_release
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros import get_provider
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +34,8 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-ubuntu-usb.sh",
+    "configure-ubuntu-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -179,8 +183,37 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
     return " ".join(deduped)
 
 
+def selected_distro(args: argparse.Namespace) -> str:
+    return getattr(args, "distro", "alpine") or "alpine"
+
+
+def option_was_passed(argv: list[str], names: tuple[str, ...]) -> bool:
+    return any(token == name or token.startswith(name + "=") for token in argv for name in names)
+
+
+def apply_distro_defaults(args: argparse.Namespace, argv: list[str]) -> None:
+    if getattr(args, "command", None) != "build" or selected_distro(args) != "ubuntu":
+        return
+    if not option_was_passed(argv, ("--user",)) and getattr(args, "user", "") == "alpine":
+        args.user = "ubuntu"
+    if not option_was_passed(argv, ("--hostname",)) and getattr(args, "hostname", "") == "alpine-usb":
+        args.hostname = "ubuntu-usb"
+
+
+def selected_release(args: argparse.Namespace) -> str:
+    distro = selected_distro(args)
+    if distro == "ubuntu":
+        release = getattr(args, "release", None)
+        if not release:
+            branch = getattr(args, "branch", None)
+            release = branch if branch and branch != "latest-stable" else "24.04"
+        return validate_ubuntu_release(release)
+    return validate_branch(getattr(args, "branch", "latest-stable"))
+
+
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
-    validate_branch(args.branch)
+    distro = selected_distro(args)
+    release = selected_release(args)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
     wms = list(args.wm or [])
@@ -192,66 +225,74 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
         if wm not in ordered_wms:
             ordered_wms.append(wm)
 
-    return {
-        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
+    prefix = "UBUNTU_USB" if distro == "ubuntu" else "ALPINE_USB"
+    image_prefix = "ubuntu" if distro == "ubuntu" else "alpine"
+    env = {
+        "DISTRO": distro,
+        "IMAGE_NAME": f".{image_prefix}-usb-cli-{os.getpid()}.img",
         "IMAGE_SIZE": args.image_size,
-        "ALPINE_USB_PROFILE": getattr(args, "profile", "compatibility"),
-        "ALPINE_BRANCH": args.branch,
         "ARCH": args.arch,
-        "ALPINE_USB_USER": args.user,
-        "ALPINE_USB_PASSWORD": password,
-        "ALPINE_USB_ROOT_PASSWORD": root_password,
-        "ALPINE_USB_HOSTNAME": args.hostname,
-        "ALPINE_USB_TIMEZONE": args.timezone,
-        "ALPINE_USB_LOCALE": args.locale,
-        "ALPINE_USB_LANGUAGE": args.language or "",
-        "ALPINE_USB_CONSOLE_KEYMAP": args.console_keymap,
-        "ALPINE_USB_XKB_LAYOUT": args.xkb_layout,
-        "ALPINE_USB_XKB_VARIANT": args.xkb_variant,
-        "ALPINE_USB_XKB_MODEL": args.xkb_model,
-        "ALPINE_USB_DESKTOP": args.desktop,
-        "ALPINE_USB_TILING_WMS": " ".join(ordered_wms),
-        "ALPINE_USB_DEFAULT_SESSION": args.default_session,
-        "ALPINE_USB_DISPLAY_MANAGER": args.display_manager,
-        "ALPINE_USB_NETWORK": args.network,
-        "ALPINE_USB_WIFI": bool_env(args.wifi),
-        "ALPINE_USB_BLUETOOTH": bool_env(args.bluetooth),
-        "ALPINE_USB_AUDIO": args.audio,
-        "ALPINE_USB_BROWSER": args.browser,
-        "ALPINE_USB_FIRMWARE": args.firmware,
-        "ALPINE_USB_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
-        "ALPINE_USB_BOOTLOADER": args.bootloader,
-        "ALPINE_USB_KERNEL_FLAVOR": args.kernel,
-        "ALPINE_USB_BOOT_TIMEOUT": str(args.boot_timeout),
-        "ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
-        "ALPINE_USB_AUTO_RESIZE": bool_env(args.auto_resize),
-        "ALPINE_USB_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages),
+        f"{prefix}_PROFILE": getattr(args, "profile", "compatibility"),
+        f"{prefix}_USER": args.user,
+        f"{prefix}_PASSWORD": password,
+        f"{prefix}_ROOT_PASSWORD": root_password,
+        f"{prefix}_HOSTNAME": args.hostname,
+        f"{prefix}_TIMEZONE": args.timezone,
+        f"{prefix}_LOCALE": args.locale,
+        f"{prefix}_LANGUAGE": args.language or "",
+        f"{prefix}_CONSOLE_KEYMAP": args.console_keymap,
+        f"{prefix}_XKB_LAYOUT": args.xkb_layout,
+        f"{prefix}_XKB_VARIANT": args.xkb_variant,
+        f"{prefix}_XKB_MODEL": args.xkb_model,
+        f"{prefix}_DESKTOP": args.desktop,
+        f"{prefix}_TILING_WMS": " ".join(ordered_wms),
+        f"{prefix}_DEFAULT_SESSION": args.default_session,
+        f"{prefix}_DISPLAY_MANAGER": args.display_manager,
+        f"{prefix}_NETWORK": args.network,
+        f"{prefix}_WIFI": bool_env(args.wifi),
+        f"{prefix}_BLUETOOTH": bool_env(args.bluetooth),
+        f"{prefix}_AUDIO": args.audio,
+        f"{prefix}_BROWSER": args.browser,
+        f"{prefix}_FIRMWARE": args.firmware,
+        f"{prefix}_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
+        f"{prefix}_BOOTLOADER": args.bootloader,
+        f"{prefix}_KERNEL_FLAVOR": args.kernel,
+        f"{prefix}_BOOT_TIMEOUT": str(args.boot_timeout),
+        f"{prefix}_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
+        f"{prefix}_AUTO_RESIZE": bool_env(args.auto_resize),
+        f"{prefix}_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages),
     }
+    if distro == "ubuntu":
+        env["UBUNTU_RELEASE"] = release
+    else:
+        env["ALPINE_BRANCH"] = release
+    return env
 
 
 def print_build_summary(env: dict[str, str], output: Path):
+    distro = env.get("DISTRO", "alpine")
+    prefix = "UBUNTU_USB" if distro == "ubuntu" else "ALPINE_USB"
+    release_label = "Ubuntu" if distro == "ubuntu" else "Alpine"
+    release_value = env.get("UBUNTU_RELEASE") if distro == "ubuntu" else env.get("ALPINE_BRANCH")
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
-        ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
-        ("Desktop", env["ALPINE_USB_DESKTOP"]),
-        ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
-        ("Default session", env["ALPINE_USB_DEFAULT_SESSION"]),
-        ("Display manager", env["ALPINE_USB_DISPLAY_MANAGER"]),
-        (
-            "Network",
-            f"{env['ALPINE_USB_NETWORK']} wifi={env['ALPINE_USB_WIFI']} bluetooth={env['ALPINE_USB_BLUETOOTH']}",
-        ),
-        ("Audio / browser", f"{env['ALPINE_USB_AUDIO']} / {env['ALPINE_USB_BROWSER']}"),
+        (release_label, f"{release_value} / {env['ARCH']}"),
+        ("Profile", env.get(f"{prefix}_PROFILE", "compatibility")),
+        ("Desktop", env[f"{prefix}_DESKTOP"]),
+        ("Window managers", env[f"{prefix}_TILING_WMS"] or "none"),
+        ("Default session", env[f"{prefix}_DEFAULT_SESSION"]),
+        ("Display manager", env[f"{prefix}_DISPLAY_MANAGER"]),
+        ("Network", f"{env[f'{prefix}_NETWORK']} wifi={env[f'{prefix}_WIFI']} bluetooth={env[f'{prefix}_BLUETOOTH']}"),
+        ("Audio / browser", f"{env[f'{prefix}_AUDIO']} / {env[f'{prefix}_BROWSER']}"),
         (
             "Boot",
-            f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}",
+            f"{env[f'{prefix}_BOOTLOADER']} linux-{env[f'{prefix}_KERNEL_FLAVOR']} firmware={env[f'{prefix}_FIRMWARE']}",
         ),
-        ("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1")),
-        ("Auto-resize USB", env["ALPINE_USB_AUTO_RESIZE"]),
-        ("Keyboard", f"console={env['ALPINE_USB_CONSOLE_KEYMAP']} xkb={env['ALPINE_USB_XKB_LAYOUT']}"),
-        ("Extra packages", env["ALPINE_USB_EXTRA_PACKAGES"] or "none"),
+        ("Legacy X11 drivers", env.get(f"{prefix}_LEGACY_X11_DRIVERS", "1")),
+        ("Auto-resize USB", env[f"{prefix}_AUTO_RESIZE"]),
+        ("Keyboard", f"console={env[f'{prefix}_CONSOLE_KEYMAP']} xkb={env[f'{prefix}_XKB_LAYOUT']}"),
+        ("Extra packages", env[f"{prefix}_EXTRA_PACKAGES"] or "none"),
     ]
     print_panel("Build profile", rows)
 
@@ -266,6 +307,8 @@ def confirm(prompt: str, yes: bool = False) -> bool:
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "UBUNTU_USB_PASSWORD": "UBUNTU_USB_PASSWORD_FILE",
+    "UBUNTU_USB_ROOT_PASSWORD": "UBUNTU_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -296,10 +339,12 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
+    distro = env.get("DISTRO", "alpine")
+    provider = get_provider(distro)
+    dry_env[f"{provider.env_prefix}_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        proc = subprocess.Popen([provider.configure_script], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -321,14 +366,15 @@ def cmd_build(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
+    provider = get_provider(env.get("DISTRO", "alpine"))
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info(f"Dry-run only: validating generated {provider.name} configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm(f"Build this {provider.name} USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +392,7 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        proc = subprocess.Popen([provider.build_script], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -364,14 +410,19 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    distro = selected_distro(args)
     try:
-        validate_branch(args.branch)
+        release = selected_release(args)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
     try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        if distro == "ubuntu":
+            info(f"Searching Ubuntu {release}/{args.arch} official apt package names")
+            results = search_official_apt_packages(release, args.arch, args.query, args.limit)
+        else:
+            info(f"Searching Alpine {release}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+            results = search_official_apk_packages(release, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -491,6 +542,7 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         choices=["compatibility", "minimal"],
         help="Build preset. minimal changes defaults unless explicitly overridden.",
     )
+    parser.add_argument("--distro", default="alpine", choices=["alpine", "ubuntu"], help="Linux distribution to build")
     parser.add_argument(
         "-o",
         "--output",
@@ -498,7 +550,14 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         help="Final output image path",
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
-    parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
+    parser.add_argument(
+        "--branch",
+        default="latest-stable",
+        help="Alpine branch (kept for compatibility): latest-stable, edge, v3.22, ...",
+    )
+    parser.add_argument(
+        "--release", default=None, help="Ubuntu release/codename when --distro ubuntu: 24.04, noble, 22.04, jammy"
+    )
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
@@ -554,8 +613,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,24 +626,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Alpine and Ubuntu Linux USB images (TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official Alpine/Ubuntu packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "ubuntu"])
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--release", default=None)
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
@@ -618,6 +681,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 0
     args = parser.parse_args(argv)
+    apply_distro_defaults(args, argv)
     apply_profile_defaults(args, argv)
     if args.command != "tui":
         print(c(f"\n{APP_TITLE}", C.bold + C.cyan))

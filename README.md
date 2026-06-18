@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or Ubuntu LTS x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the default for backward compatibility; pass `--distro ubuntu` for Ubuntu 24.04 LTS (Noble) by default.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,13 +27,13 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux or Ubuntu LTS USB image.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages and Ubuntu apt package names from CLI/TUI.
+- Cache package indexes/search results on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
 - Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
@@ -49,7 +49,8 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
   - First macOS build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
   - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
   - Set `ALPINE_USB_REBUILD_BUILDER=1` to rebuild the cached builder image.
-- On native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- On native Linux for Alpine: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- On native Linux for Ubuntu: `debootstrap`, `gdisk`, `parted`, `dosfstools`, `e2fsprogs`, `util-linux`, `grub-install`, and `rsync`.
 
 ### Runtime tools
 
@@ -78,6 +79,21 @@ Default output path:
 
 ```txt
 /tmp/alpine-usb-installer/alpine-usb.img
+```
+
+The default output filename is kept for Alpine compatibility; pass `-o /tmp/ubuntu-usb.img` for an Ubuntu-specific name.
+
+Ubuntu quick examples:
+
+```sh
+# Validate an Ubuntu 24.04 (Noble) XFCE image configuration and package list
+./alpine-usb build --distro ubuntu --password changeme --dry-run -y
+
+# Build Ubuntu 24.04 LTS; use --release 22.04 for Jammy
+./alpine-usb build --distro ubuntu --release 24.04 --password changeme -o /tmp/ubuntu-usb.img
+
+# Search apt package names (uses apt-cache when available and caches results)
+./alpine-usb search --distro ubuntu firefox
 ```
 
 ## Interfaces
