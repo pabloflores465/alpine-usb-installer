@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or openSUSE x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the default backend; openSUSE defaults to Tumbleweed.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,12 +27,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image, plus an experimental openSUSE backend with zypper/rootfs package planning.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra packages.
+- Search official Alpine `main` + `community` packages or openSUSE OSS repository metadata from GUI/TUI/CLI.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
@@ -72,6 +72,10 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # CLI help/subcommands
 ./alpine-usb --help
 ./alpine-usb build --help
+
+# openSUSE dry-run/package validation (Tumbleweed default)
+./alpine-usb build --distro opensuse --release tumbleweed --dry-run --password changeme
+./alpine-usb search --distro opensuse --release tumbleweed firefox
 ```
 
 Default output path:

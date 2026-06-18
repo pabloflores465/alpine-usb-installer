@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
 from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros.opensuse import search_official_opensuse_packages, validate_opensuse_release
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
 
 
@@ -152,7 +153,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
@@ -545,15 +546,21 @@ class ApkSearchWorker(QThread):
     done = Signal(str, list)
     failed = Signal(str, str)
 
-    def __init__(self, branch: str, arch: str, query: str):
+    def __init__(self, branch: str, arch: str, query: str, distro: str = "alpine"):
         super().__init__()
         self.branch = branch
         self.arch = arch
         self.query = query
+        self.distro = distro
 
     def run(self):
         try:
-            self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
+            if self.distro == "opensuse":
+                self.done.emit(
+                    self.query, search_official_opensuse_packages(self.branch, self.arch, self.query, limit=10)
+                )
+            else:
+                self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
         except Exception as exc:
             self.failed.emit(self.query, str(exc))
 
@@ -741,6 +748,8 @@ class PackageSuggestionList(QListWidget):
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "OPENSUSE_USB_PASSWORD": "OPENSUSE_USB_PASSWORD_FILE",
+    "OPENSUSE_USB_ROOT_PASSWORD": "OPENSUSE_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -751,6 +760,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -844,11 +855,15 @@ class BuildWorker(QThread):
             env["OUTPUT_PATH"] = final
             if os.path.exists(final):
                 os.remove(final)
-            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            script = SCRIPT_DIR / (
+                "build-opensuse-usb.sh" if "OPENSUSE_RELEASE" in self.config_env else "build-alpine-usb.sh"
+            )
             if not script.exists():
                 raise RuntimeError(f"Build script not found: {script}")
             script.chmod(0o755)
-            configure = SCRIPT_DIR / "configure-alpine-usb.sh"
+            configure = SCRIPT_DIR / (
+                "configure-opensuse-usb.sh" if "OPENSUSE_RELEASE" in self.config_env else "configure-alpine-usb.sh"
+            )
             if configure.exists():
                 configure.chmod(0o755)
             cmd = [str(script)]
@@ -1097,9 +1112,13 @@ class Main(QWidget):
         self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
+        self.distro = QComboBox()
+        add_combo_items(self.distro, ["alpine", "opensuse"])
         self.alpine_branch = QComboBox()
         self.alpine_branch.setEditable(True)
-        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        add_combo_items(
+            self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21", "tumbleweed", "leap-15.6", "leap-16.0"]
+        )
         self.arch = QComboBox()
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
@@ -1286,6 +1305,7 @@ class Main(QWidget):
         return {
             "image": self.image.text(),
             "image_size": self.image_size.currentText(),
+            "distro": self.distro.currentText(),
             "alpine_branch": self.alpine_branch.currentText(),
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
@@ -1320,6 +1340,7 @@ class Main(QWidget):
     def apply_config(self, cfg: dict):
         self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.distro.setCurrentText(str(cfg.get("distro", "alpine")))
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
@@ -1527,6 +1548,7 @@ class Main(QWidget):
 
         for widget in [
             self.image_size,
+            self.distro,
             self.alpine_branch,
             self.arch,
             self.timezone,
@@ -1630,9 +1652,9 @@ class Main(QWidget):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0px; border:0; background:transparent; }}
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
         """)
-        title = QLabel("Alpine USB Installer")
+        title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
+        subtitle = QLabel("Build and flash customizable preinstalled Alpine or openSUSE Linux USB images.")
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -1827,7 +1849,8 @@ class Main(QWidget):
         form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size),
-            ("alpine_branch", "Alpine branch:", self.alpine_branch),
+            ("distro", "Distro:", self.distro),
+            ("alpine_branch", "Branch/release:", self.alpine_branch),
             ("arch", "Architecture:", self.arch),
             ("hostname", "Hostname:", self.hostname),
             ("username", "User:", self.username),
@@ -1916,7 +1939,7 @@ class Main(QWidget):
         boot.body_layout.addLayout(bform)
         parent_layout.addWidget(boot)
 
-        extra = CollapsibleSection("Extra APK packages", collapsed=True, icon_kind="package")
+        extra = CollapsibleSection("Extra packages", collapsed=True, icon_kind="package")
         self.sections["extra"] = extra
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
@@ -1976,12 +1999,13 @@ class Main(QWidget):
             self.package_search_pending = True
             self.set_package_search_status("Search running; queued latest text…")
             return
-        branch = self.alpine_branch.currentText().strip() or "latest-stable"
+        distro = combo_value(self.distro) or "alpine"
+        branch = self.alpine_branch.currentText().strip() or ("tumbleweed" if distro == "opensuse" else "latest-stable")
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
-        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        self.set_package_search_status(f"Searching {distro} {branch}/{arch}…")
+        self.package_search_worker = ApkSearchWorker(branch, arch, query, distro)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
         self.package_search_worker.finished.connect(self.package_search_finished)
@@ -2188,10 +2212,13 @@ class Main(QWidget):
     def collect_build_env(self) -> dict[str, str]:
         password = self.password.text()
         root_password = self.root_password.text() if self.separate_root_password.isChecked() else password
-        return {
+        distro = combo_value(self.distro) or "alpine"
+        branch = self.alpine_branch.currentText().strip() or ("tumbleweed" if distro == "opensuse" else "latest-stable")
+        prefix = "OPENSUSE_USB" if distro == "opensuse" else "ALPINE_USB"
+        env = {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
-            "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
+            "ALPINE_BRANCH": branch,
             "ARCH": combo_value(self.arch) or "x86_64",
             "ALPINE_USB_USER": self.username.text().strip() or "alpine",
             "ALPINE_USB_PASSWORD": password,
@@ -2220,53 +2247,75 @@ class Main(QWidget):
             "ALPINE_USB_AUTO_RESIZE": "1" if self.auto_resize.isChecked() else "0",
             "ALPINE_USB_EXTRA_PACKAGES": self.extra_packages.text().strip(),
         }
+        if distro == "opensuse":
+            env["OPENSUSE_RELEASE"] = branch
+            for key in list(env):
+                if key.startswith("ALPINE_USB_"):
+                    env[key.replace("ALPINE_USB", prefix, 1)] = env.pop(key)
+        return env
 
     def validate_build_config(self, env: dict[str, str]) -> str | None:
+        prefix = "OPENSUSE_USB" if "OPENSUSE_RELEASE" in env else "ALPINE_USB"
+
+        def cfg(name: str) -> str:
+            return env[f"{prefix}_{name}"]
+
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
-        if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
+        if "OPENSUSE_RELEASE" in env:
+            try:
+                validate_opensuse_release(env["OPENSUSE_RELEASE"])
+            except ValueError as exc:
+                return str(exc)
+        elif not BRANCH_RE.match(env["ALPINE_BRANCH"]):
             return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
-        if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
+        if not re.match(r"^[a-z_][a-z0-9_-]*$", cfg("USER")):
             return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
-        if not env["ALPINE_USB_PASSWORD"]:
+        if not cfg("PASSWORD"):
             return "User password cannot be empty."
-        if self.separate_root_password.isChecked() and not env["ALPINE_USB_ROOT_PASSWORD"]:
+        if self.separate_root_password.isChecked() and not cfg("ROOT_PASSWORD"):
             return "Root password cannot be empty when separate root password is enabled."
-        package_error = validate_extra_packages(env["ALPINE_USB_EXTRA_PACKAGES"])
+        package_error = validate_extra_packages(cfg("EXTRA_PACKAGES"))
         if package_error:
             return package_error
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env["ALPINE_USB_HOSTNAME"]):
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", cfg("HOSTNAME")):
             return "Hostname may contain only letters, numbers and dash; it cannot start/end with dash."
-        if not env["ALPINE_USB_BOOT_TIMEOUT"].isdigit():
+        if not cfg("BOOT_TIMEOUT").isdigit():
             return "Boot menu timeout must be a number."
         if (
-            env["ALPINE_USB_DESKTOP"] == "none"
-            and not env["ALPINE_USB_TILING_WMS"]
-            and env["ALPINE_USB_DISPLAY_MANAGER"] not in {"auto", "none", "greetd"}
+            cfg("DESKTOP") == "none"
+            and not cfg("TILING_WMS")
+            and cfg("DISPLAY_MANAGER") not in {"auto", "none", "greetd"}
         ):
             return "Select a desktop/WM or use display manager Auto/None/greetd."
-        session = env["ALPINE_USB_DEFAULT_SESSION"]
+        session = cfg("DEFAULT_SESSION")
         if session == "auto":
-            session = (
-                env["ALPINE_USB_DESKTOP"]
-                if env["ALPINE_USB_DESKTOP"] != "none"
-                else (env["ALPINE_USB_TILING_WMS"].split() or ["shell"])[0]
-            )
-        if session in {"sway", "hyprland", "labwc"} and env["ALPINE_USB_DISPLAY_MANAGER"] in {"lightdm", "lxdm"}:
+            session = cfg("DESKTOP") if cfg("DESKTOP") != "none" else (cfg("TILING_WMS").split() or ["shell"])[0]
+        if session in {"sway", "hyprland", "labwc"} and cfg("DISPLAY_MANAGER") in {"lightdm", "lxdm"}:
             return "Wayland sessions (Sway/Hyprland/labwc) need Auto, greetd, SDDM, GDM or no display manager; LightDM/LXDM are X11-only here."
         return None
 
     def config_summary_text(self, env: dict[str, str]) -> str:
+        prefix = "OPENSUSE_USB" if "OPENSUSE_RELEASE" in env else "ALPINE_USB"
+
+        def cfg(name: str) -> str:
+            return env[f"{prefix}_{name}"]
+
         return (
-            f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
-            f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
-            f"Locale: {env['ALPINE_USB_LOCALE']} | TZ: {env['ALPINE_USB_TIMEZONE']} | console={env['ALPINE_USB_CONSOLE_KEYMAP']} | xkb={env['ALPINE_USB_XKB_LAYOUT']} {env['ALPINE_USB_XKB_VARIANT'] or ''} model={env['ALPINE_USB_XKB_MODEL']}\n"
-            f"Desktop: {env['ALPINE_USB_DESKTOP']} | DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Session: {env['ALPINE_USB_DEFAULT_SESSION']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'}\n"
-            f"Apps: browser={env['ALPINE_USB_BROWSER']} | audio={env['ALPINE_USB_AUDIO']}\n"
-            f"Hardware/network: network={env['ALPINE_USB_NETWORK']} | Wi‑Fi={env['ALPINE_USB_WIFI']} | Bluetooth={env['ALPINE_USB_BLUETOOTH']}\n"
-            f"Boot: {env['ALPINE_USB_BOOTLOADER']} | linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | firmware={env['ALPINE_USB_FIRMWARE']} | legacy-X11={env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1')} | timeout={env['ALPINE_USB_BOOT_TIMEOUT']} | auto-resize={env['ALPINE_USB_AUTO_RESIZE']}\n"
-            f"Extra packages: {env['ALPINE_USB_EXTRA_PACKAGES'] or 'none'}"
+            f"Image: {env['IMAGE_SIZE']} | Linux: {env.get('OPENSUSE_RELEASE', env['ALPINE_BRANCH'])} | "
+            f"Arch: {env['ARCH']}\n"
+            f"System: hostname={cfg('HOSTNAME')} | user={cfg('USER')} | passwords hidden\n"
+            f"Locale: {cfg('LOCALE')} | TZ: {cfg('TIMEZONE')} | console={cfg('CONSOLE_KEYMAP')} | "
+            f"xkb={cfg('XKB_LAYOUT')} {cfg('XKB_VARIANT') or ''} model={cfg('XKB_MODEL')}\n"
+            f"Desktop: {cfg('DESKTOP')} | DM: {cfg('DISPLAY_MANAGER')} | Session: {cfg('DEFAULT_SESSION')} | "
+            f"WMs: {cfg('TILING_WMS') or 'none'}\n"
+            f"Apps: browser={cfg('BROWSER')} | audio={cfg('AUDIO')}\n"
+            f"Hardware/network: network={cfg('NETWORK')} | Wi‑Fi={cfg('WIFI')} | Bluetooth={cfg('BLUETOOTH')}\n"
+            f"Boot: {cfg('BOOTLOADER')} | linux-{cfg('KERNEL_FLAVOR')} | firmware={cfg('FIRMWARE')} | "
+            f"legacy-X11={env.get(f'{prefix}_LEGACY_X11_DRIVERS', '1')} | timeout={cfg('BOOT_TIMEOUT')} | "
+            f"auto-resize={cfg('AUTO_RESIZE')}\n"
+            f"Extra packages: {cfg('EXTRA_PACKAGES') or 'none'}"
         )
 
     def config_summary_html(self, output_path: str, env: dict[str, str]) -> str:
@@ -2275,7 +2324,10 @@ class Main(QWidget):
 
         rows = [
             ("Output", html_soft_break(output_path)),
-            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+            (
+                "Image",
+                f"{esc(env['IMAGE_SIZE'])} · Linux {esc(env.get('OPENSUSE_RELEASE', env['ALPINE_BRANCH']))} · Arch {esc(env['ARCH'])}",
+            ),
             (
                 "System",
                 f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
@@ -2368,7 +2420,7 @@ class Main(QWidget):
         wms = e.get("wms", "").strip() or "none"
         self.build_summary.setText(
             f"<b>Output:</b> {e['image']}<br>"
-            f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
+            f"<b>Image:</b> size {e['image_size']} · Linux {e['alpine_branch']} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
             f"<b>Locale:</b> {e['locale']} · timezone {e['timezone']} · console keymap {e['console_keymap']} · XKB {e['xkb_layout']} · variant {e['xkb_variant'] or 'none'} · model {e['xkb_model']}<br>"
             f"<b>Desktop:</b> {e['desktop']} · display manager {e['display_manager']} · session {e['default_session']} · WMs {wms}<br>"

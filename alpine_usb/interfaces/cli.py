@@ -21,10 +21,16 @@ from alpine_usb.apk_packages.index import (
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros.opensuse import (
+    OPENSUSE_SEARCH_REPOS,
+    opensuse_package_plan,
+    search_official_opensuse_packages,
+    validate_opensuse_release,
+)
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
-DEFAULT_IMAGE_NAME = "alpine-usb.img"
+APP_TITLE = "Linux USB Installer"
+DEFAULT_IMAGE_NAME = "linux-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -32,6 +38,8 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-opensuse-usb.sh",
+    "configure-opensuse-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -180,6 +188,9 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
 
 
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    distro = getattr(args, "distro", "alpine")
+    if distro == "opensuse":
+        return opensuse_env_from_build_args(args)
     validate_branch(args.branch)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
@@ -229,29 +240,97 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def opensuse_env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    release = validate_opensuse_release(getattr(args, "release", None) or args.branch)
+    password = args.password
+    root_password = args.root_password if args.root_password is not None else password
+    wms = list(args.wm or [])
+    if args.tiling_wms:
+        wms.extend(part for part in re.split(r"[\s,]+", args.tiling_wms.strip()) if part)
+    ordered_wms: list[str] = []
+    for wm in wms:
+        if wm not in ordered_wms:
+            ordered_wms.append(wm)
+    extra_packages = split_packages(args.extra_package, args.extra_packages)
+    env = {
+        "IMAGE_NAME": f".opensuse-usb-cli-{os.getpid()}.img",
+        "IMAGE_SIZE": args.image_size,
+        "OPENSUSE_USB_PROFILE": getattr(args, "profile", "compatibility"),
+        "OPENSUSE_RELEASE": release,
+        "ARCH": args.arch,
+        "OPENSUSE_USB_USER": args.user,
+        "OPENSUSE_USB_PASSWORD": password,
+        "OPENSUSE_USB_ROOT_PASSWORD": root_password,
+        "OPENSUSE_USB_HOSTNAME": args.hostname,
+        "OPENSUSE_USB_TIMEZONE": args.timezone,
+        "OPENSUSE_USB_LOCALE": args.locale,
+        "OPENSUSE_USB_LANGUAGE": args.language or "",
+        "OPENSUSE_USB_CONSOLE_KEYMAP": args.console_keymap,
+        "OPENSUSE_USB_XKB_LAYOUT": args.xkb_layout,
+        "OPENSUSE_USB_XKB_VARIANT": args.xkb_variant,
+        "OPENSUSE_USB_XKB_MODEL": args.xkb_model,
+        "OPENSUSE_USB_DESKTOP": args.desktop,
+        "OPENSUSE_USB_TILING_WMS": " ".join(ordered_wms),
+        "OPENSUSE_USB_DEFAULT_SESSION": args.default_session,
+        "OPENSUSE_USB_DISPLAY_MANAGER": args.display_manager,
+        "OPENSUSE_USB_NETWORK": args.network,
+        "OPENSUSE_USB_WIFI": bool_env(args.wifi),
+        "OPENSUSE_USB_BLUETOOTH": bool_env(args.bluetooth),
+        "OPENSUSE_USB_AUDIO": args.audio,
+        "OPENSUSE_USB_BROWSER": args.browser,
+        "OPENSUSE_USB_FIRMWARE": args.firmware,
+        "OPENSUSE_USB_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
+        "OPENSUSE_USB_BOOTLOADER": args.bootloader,
+        "OPENSUSE_USB_KERNEL_FLAVOR": args.kernel,
+        "OPENSUSE_USB_BOOT_TIMEOUT": str(args.boot_timeout),
+        "OPENSUSE_USB_AUTO_RESIZE": bool_env(args.auto_resize),
+        "OPENSUSE_USB_EXTRA_PACKAGES": extra_packages,
+    }
+    env["OPENSUSE_USB_PACKAGE_PLAN"] = " ".join(
+        opensuse_package_plan(
+            {
+                "desktop": args.desktop,
+                "tiling_wms": env["OPENSUSE_USB_TILING_WMS"],
+                "display_manager": args.display_manager,
+                "network": args.network,
+                "wifi": args.wifi,
+                "bluetooth": args.bluetooth,
+                "audio": args.audio,
+                "browser": args.browser,
+                "firmware": args.firmware,
+                "bootloader": args.bootloader,
+                "extra_packages": extra_packages,
+            }
+        )
+    )
+    return env
+
+
 def print_build_summary(env: dict[str, str], output: Path):
+    distro = "openSUSE" if "OPENSUSE_RELEASE" in env else "Alpine"
+    prefix = "OPENSUSE_USB" if distro == "openSUSE" else "ALPINE_USB"
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
-        ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
-        ("Desktop", env["ALPINE_USB_DESKTOP"]),
-        ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
-        ("Default session", env["ALPINE_USB_DEFAULT_SESSION"]),
-        ("Display manager", env["ALPINE_USB_DISPLAY_MANAGER"]),
+        ("Distro", f"{distro} {env.get('OPENSUSE_RELEASE', env.get('ALPINE_BRANCH'))} / {env['ARCH']}"),
+        ("Profile", env.get(f"{prefix}_PROFILE", "compatibility")),
+        ("Desktop", env[f"{prefix}_DESKTOP"]),
+        ("Window managers", env[f"{prefix}_TILING_WMS"] or "none"),
+        ("Default session", env[f"{prefix}_DEFAULT_SESSION"]),
+        ("Display manager", env[f"{prefix}_DISPLAY_MANAGER"]),
         (
             "Network",
-            f"{env['ALPINE_USB_NETWORK']} wifi={env['ALPINE_USB_WIFI']} bluetooth={env['ALPINE_USB_BLUETOOTH']}",
+            f"{env[f'{prefix}_NETWORK']} wifi={env[f'{prefix}_WIFI']} bluetooth={env[f'{prefix}_BLUETOOTH']}",
         ),
-        ("Audio / browser", f"{env['ALPINE_USB_AUDIO']} / {env['ALPINE_USB_BROWSER']}"),
+        ("Audio / browser", f"{env[f'{prefix}_AUDIO']} / {env[f'{prefix}_BROWSER']}"),
         (
             "Boot",
-            f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}",
+            f"{env[f'{prefix}_BOOTLOADER']} linux-{env[f'{prefix}_KERNEL_FLAVOR']} firmware={env[f'{prefix}_FIRMWARE']}",
         ),
-        ("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1")),
-        ("Auto-resize USB", env["ALPINE_USB_AUTO_RESIZE"]),
-        ("Keyboard", f"console={env['ALPINE_USB_CONSOLE_KEYMAP']} xkb={env['ALPINE_USB_XKB_LAYOUT']}"),
-        ("Extra packages", env["ALPINE_USB_EXTRA_PACKAGES"] or "none"),
+        ("Legacy X11 drivers", env.get(f"{prefix}_LEGACY_X11_DRIVERS", "1")),
+        ("Auto-resize USB", env[f"{prefix}_AUTO_RESIZE"]),
+        ("Keyboard", f"console={env[f'{prefix}_CONSOLE_KEYMAP']} xkb={env[f'{prefix}_XKB_LAYOUT']}"),
+        ("Extra packages", env[f"{prefix}_EXTRA_PACKAGES"] or "none"),
     ]
     print_panel("Build profile", rows)
 
@@ -266,6 +345,8 @@ def confirm(prompt: str, yes: bool = False) -> bool:
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "OPENSUSE_USB_PASSWORD": "OPENSUSE_USB_PASSWORD_FILE",
+    "OPENSUSE_USB_ROOT_PASSWORD": "OPENSUSE_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -276,6 +357,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -296,10 +379,11 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
+    script = "./configure-opensuse-usb.sh" if "OPENSUSE_RELEASE" in env else "./configure-alpine-usb.sh"
+    dry_env["OPENSUSE_USB_DRY_RUN" if "OPENSUSE_RELEASE" in env else "ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        proc = subprocess.Popen([script], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -322,13 +406,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     print_build_summary(env, output)
 
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info("Dry-run only: validating generated Linux configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm("Build this Linux USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +430,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        script = "./build-opensuse-usb.sh" if "OPENSUSE_RELEASE" in env else "./build-alpine-usb.sh"
+        proc = subprocess.Popen([script], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -365,13 +450,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
-        validate_branch(args.branch)
+        if args.distro == "opensuse":
+            release = validate_opensuse_release(args.release or args.branch)
+            info(f"Searching openSUSE {release}/{args.arch} official repos: {', '.join(OPENSUSE_SEARCH_REPOS)}")
+            results = search_official_opensuse_packages(release, args.arch, args.query, args.limit)
+        else:
+            validate_branch(args.branch)
+            info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+            results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
-    try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -485,6 +574,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def add_common_build_options(parser: argparse.ArgumentParser):
+    parser.add_argument("--distro", default="alpine", choices=["alpine", "opensuse"], help="Linux distribution backend")
     parser.add_argument(
         "--profile",
         default="compatibility",
@@ -498,7 +588,12 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         help="Final output image path",
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
-    parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
+    parser.add_argument(
+        "--branch",
+        default="latest-stable",
+        help="Alpine branch (backwards compatible) or openSUSE release with --distro opensuse",
+    )
+    parser.add_argument("--release", default=None, help="openSUSE release: tumbleweed, leap-15.6, leap-16.0")
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
@@ -565,24 +660,26 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Linux USB images (Alpine/openSUSE TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official Alpine/openSUSE packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "opensuse"])
     search.add_argument("--branch", default="latest-stable")
+    search.add_argument("--release", default=None)
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
