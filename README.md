@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or Void Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,12 +27,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux or Void Linux (glibc x86_64) USB image.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages and Void packages from terminal interfaces.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
@@ -74,11 +74,23 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 ./alpine-usb build --help
 ```
 
-Default output path:
+Default output path (Alpine; Void CLI uses the same directory with a Void image name when selected):
 
 ```txt
 /tmp/alpine-usb-installer/alpine-usb.img
 ```
+
+
+### Void Linux support
+
+Void Linux is selectable from the CLI and TUI:
+
+```sh
+./alpine-usb build --distro void --password secret --dry-run
+./alpine-usb search --distro void firefox
+```
+
+The Void backend targets glibc `x86_64` and uses the official `current` repository by default. It validates the same profile/session/network/audio/browser/firmware/user options and maps them to XBPS package names. Full image builds use `xbps-install -r` on native Linux; USB flashing and image validation are shared with Alpine.
 
 ## Interfaces
 
@@ -244,14 +256,15 @@ PipeWire is the recommended default. On Alpine/OpenRC there is no `systemd --use
 - Full firmware is recommended for laptops and Wi‑Fi/Bluetooth hardware.
 - Disable broad legacy X11 video drivers (`--no-legacy-x11-drivers`) for smaller/faster graphical images on modern hardware.
 
-### Extra APK packages
+### Extra distro packages
 
-Use official Alpine package names. Package search queries Alpine `main` and `community` indexes.
+Use official package names for the selected distribution. Alpine search queries `main` and `community` APK indexes. Void search uses `xbps-query` when available and the official `current` glibc repository/cache path for `--distro void`.
 
 Search results are cached on disk under:
 
 ```txt
 ${XDG_CACHE_HOME:-~/.cache}/alpine-usb-installer/apkindex
+${XDG_CACHE_HOME:-~/.cache}/alpine-usb-installer/void-xbps
 ```
 
 Cache controls:
@@ -259,12 +272,15 @@ Cache controls:
 ```sh
 # Disable cache for one command
 ALPINE_USB_APK_CACHE=0 ./alpine-usb search firefox
+ALPINE_USB_VOID_CACHE=0 ./alpine-usb search --distro void firefox
 
 # Use custom cache dir
 ALPINE_USB_APK_CACHE_DIR=/tmp/alpine-apk-cache ./alpine-usb search firefox
+ALPINE_USB_VOID_CACHE_DIR=/tmp/void-xbps-cache ./alpine-usb search --distro void firefox
 
 # Override TTL in seconds
 ALPINE_USB_APK_CACHE_TTL=3600 ./alpine-usb search firefox
+ALPINE_USB_VOID_CACHE_TTL=3600 ./alpine-usb search --distro void firefox
 ```
 
 If network fetch fails and a stale cache exists, search uses the stale cache instead of failing.
