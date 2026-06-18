@@ -1,6 +1,6 @@
-# Alpine USB Installer
+# Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux or Fedora Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,12 +27,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
+- Build a bootable, installed Alpine Linux USB image, or validate/build a Fedora Linux image on Linux hosts with dnf.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages.
+- Search official Alpine `main` + `community` packages, or Fedora packages via `dnf repoquery`/cache, from GUI/TUI/CLI.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
 - Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
@@ -45,6 +45,7 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 ### Build host
 
 - Python 3.
+- Fedora backend: a Linux host/VM with `dnf`, `parted`, `dosfstools`, `e2fsprogs`, loop-device tools, and GRUB2 EFI tools for full image builds. Fedora `--dry-run` works without those tools.
 - Docker Desktop on macOS. The build needs Linux/NBD support.
   - First macOS build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
   - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
@@ -130,9 +131,11 @@ Common commands:
 ```sh
 # Search packages
 ./alpine-usb search firefox
+./alpine-usb search --distro fedora firefox
 
 # Validate a profile without building
 ./alpine-usb build --dry-run --ask-password --desktop xfce --bootloader systemd-boot
+./alpine-usb build --distro fedora --dry-run --ask-password --desktop xfce
 
 # Build default profile without prompts (avoid shell history by using --ask-password instead)
 ./alpine-usb build --password 'change-me' -y
@@ -164,6 +167,19 @@ Extra packages can be repeated or space-separated:
   --extra-package docker
 ```
 
+
+### Fedora support
+
+Fedora is selectable in the CLI/TUI/GUI with `--distro fedora` (or the Distribution selector). The default Fedora release is `stable`; numeric releases such as `41` and `rawhide` are also accepted through the existing `--branch` option for backward-compatible CLI shape. Fedora dry-run uses the same profile, desktop/session, display-manager, network, firmware, bootloader, localization, user/password, browser, audio, Bluetooth, Wi‑Fi, auto-resize, and extra-package options as Alpine, then maps them to DNF packages/groups and systemd services.
+
+```sh
+./alpine-usb build --distro fedora --dry-run --ask-password --desktop plasma --display-manager sddm
+./alpine-usb build --distro fedora --branch 41 --dry-run --password 'change-me' -y
+./alpine-usb search --distro fedora networkmanager
+```
+
+Full Fedora image builds are implemented for rootful Linux hosts with DNF and loop-device/filesystem tooling. macOS Fedora builds currently require a Linux VM/container path supplied by the user; Alpine keeps its existing Docker-backed macOS flow. Fedora package search uses `dnf repoquery`, `dnf5 repoquery`, or `repoquery` when available and caches results under the normal user cache directory.
+
 ## Build profiles
 
 ### Default compatibility profile
@@ -174,7 +190,7 @@ Defaults are generic and distro-like:
 | --- | --- |
 | Image size | `16G` |
 | Output | `/tmp/alpine-usb-installer/alpine-usb.img` |
-| Alpine branch | `latest-stable` |
+| Alpine branch / Fedora release | `latest-stable` for Alpine, `stable` for Fedora |
 | Architecture | `x86_64` |
 | User/password | user `alpine` / password required before build |
 | Root password | same as user password unless configured separately |

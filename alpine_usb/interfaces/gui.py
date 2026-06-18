@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 # This module can be executed directly after the dev GUI bootstrap re-execs into
 # .qtvenv. In that path, sys.path[0] is alpine_usb/interfaces, so add project
@@ -23,7 +24,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
 from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
+from alpine_usb.fedora_packages.index import search_fedora_packages
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.interfaces import cli
+from alpine_usb.linux_distros.fedora import FEDORA_RELEASE_RE
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
 
 
@@ -57,6 +61,7 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
     for name in [
         "build-alpine-usb.sh",
         "configure-alpine-usb.sh",
+        "build-fedora-usb.sh",
         "README.md",
         "LICENSE",
         "scripts/Dockerfile.builder",
@@ -152,8 +157,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
+DEFAULT_FEDORA_IMAGE_NAME = "fedora-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
 SAVED_CONFIG_PATH = Path.home() / ".config" / "alpine-usb-installer" / "gui-config.json"
@@ -545,15 +551,19 @@ class ApkSearchWorker(QThread):
     done = Signal(str, list)
     failed = Signal(str, str)
 
-    def __init__(self, branch: str, arch: str, query: str):
+    def __init__(self, distro: str, branch: str, arch: str, query: str):
         super().__init__()
+        self.distro = distro
         self.branch = branch
         self.arch = arch
         self.query = query
 
     def run(self):
         try:
-            self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
+            if self.distro == "fedora":
+                self.done.emit(self.query, search_fedora_packages(self.branch, self.arch, self.query, limit=10))
+            else:
+                self.done.emit(self.query, search_official_apk_packages(self.branch, self.arch, self.query, limit=10))
         except Exception as exc:
             self.failed.emit(self.query, str(exc))
 
@@ -741,6 +751,8 @@ class PackageSuggestionList(QListWidget):
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "FEDORA_USB_PASSWORD": "FEDORA_USB_PASSWORD_FILE",
+    "FEDORA_USB_ROOT_PASSWORD": "FEDORA_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -751,6 +763,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -837,14 +851,15 @@ class BuildWorker(QThread):
             env = os.environ.copy()
             safe_config_env, secret_files = prepare_secret_env({k: str(v) for k, v in self.config_env.items()})
             env.update(safe_config_env)
-            env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
+            fedora_build = self.config_env.get("LINUX_USB_DISTRO") == "fedora"
+            env.setdefault("IMAGE_NAME", DEFAULT_FEDORA_IMAGE_NAME if fedora_build else DEFAULT_IMAGE_NAME)
             env["ALPINE_USB_DOCKER_NAME"] = self.docker_container_name
             final = str(Path(self.output_path).expanduser().resolve())
             Path(final).parent.mkdir(parents=True, exist_ok=True)
             env["OUTPUT_PATH"] = final
             if os.path.exists(final):
                 os.remove(final)
-            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            script = SCRIPT_DIR / ("build-fedora-usb.sh" if fedora_build else "build-alpine-usb.sh")
             if not script.exists():
                 raise RuntimeError(f"Build script not found: {script}")
             script.chmod(0o755)
@@ -1097,9 +1112,11 @@ class Main(QWidget):
         self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
+        self.distro = QComboBox()
+        add_combo_items(self.distro, [("Alpine Linux", "alpine"), ("Fedora Linux", "fedora")])
         self.alpine_branch = QComboBox()
         self.alpine_branch.setEditable(True)
-        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21", "stable", "rawhide", "41"])
         self.arch = QComboBox()
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
@@ -1286,6 +1303,7 @@ class Main(QWidget):
         return {
             "image": self.image.text(),
             "image_size": self.image_size.currentText(),
+            "distro": combo_value(self.distro),
             "alpine_branch": self.alpine_branch.currentText(),
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
@@ -1320,6 +1338,7 @@ class Main(QWidget):
     def apply_config(self, cfg: dict):
         self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.set_combo_value(self.distro, str(cfg.get("distro", "alpine")))
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
@@ -1630,9 +1649,9 @@ class Main(QWidget):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width:0px; border:0; background:transparent; }}
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:transparent; }}
         """)
-        title = QLabel("Alpine USB Installer")
+        title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash a customizable preinstalled Alpine Linux USB image.")
+        subtitle = QLabel("Build and flash customizable preinstalled Alpine or Fedora Linux USB images.")
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -1827,7 +1846,8 @@ class Main(QWidget):
         form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size),
-            ("alpine_branch", "Alpine branch:", self.alpine_branch),
+            ("distro", "Distribution:", self.distro),
+            ("alpine_branch", "Branch / release:", self.alpine_branch),
             ("arch", "Architecture:", self.arch),
             ("hostname", "Hostname:", self.hostname),
             ("username", "User:", self.username),
@@ -1976,12 +1996,15 @@ class Main(QWidget):
             self.package_search_pending = True
             self.set_package_search_status("Search running; queued latest text…")
             return
-        branch = self.alpine_branch.currentText().strip() or "latest-stable"
+        distro = combo_value(self.distro) or "alpine"
+        branch = self.alpine_branch.currentText().strip() or ("stable" if distro == "fedora" else "latest-stable")
+        if distro == "fedora" and branch == "latest-stable":
+            branch = "stable"
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
-        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        self.set_package_search_status(f"Searching {distro} {branch}/{arch} packages…")
+        self.package_search_worker = ApkSearchWorker(distro, branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
         self.package_search_worker.finished.connect(self.package_search_finished)
@@ -2188,6 +2211,49 @@ class Main(QWidget):
     def collect_build_env(self) -> dict[str, str]:
         password = self.password.text()
         root_password = self.root_password.text() if self.separate_root_password.isChecked() else password
+        if combo_value(self.distro) == "fedora":
+            branch = self.alpine_branch.currentText().strip() or "stable"
+            if branch == "latest-stable":
+                branch = "stable"
+            return cli.env_from_build_args(
+                SimpleNamespace(
+                    distro="fedora",
+                    profile="compatibility",
+                    image_size=self.image_size.currentText().strip() or "16G",
+                    branch=branch,
+                    arch=combo_value(self.arch) or "x86_64",
+                    user=self.username.text().strip() or "fedora",
+                    password=password,
+                    root_password=root_password,
+                    hostname=self.hostname.text().strip() or "fedora-usb",
+                    timezone=self.timezone.currentText().strip() or "UTC",
+                    locale=self.locale.currentText().strip() or "en_US.UTF-8",
+                    language="",
+                    console_keymap=self.console_keymap.currentText().strip() or "us",
+                    xkb_layout=combo_value(self.xkb_layout) or "us",
+                    xkb_variant=self.xkb_variant.text().strip(),
+                    xkb_model=self.xkb_model.text().strip() or "pc105",
+                    desktop=combo_value(self.desktop),
+                    display_manager=combo_value(self.display_manager),
+                    default_session=combo_value(self.default_session),
+                    wm=self.selected_wms(),
+                    tiling_wms="",
+                    browser=combo_value(self.browser),
+                    audio=combo_value(self.audio),
+                    network=combo_value(self.network),
+                    wifi=self.wifi.isChecked(),
+                    bluetooth=self.bluetooth.isChecked(),
+                    bootloader=combo_value(self.bootloader),
+                    kernel=combo_value(self.kernel),
+                    firmware=combo_value(self.firmware),
+                    legacy_x11_drivers=self.legacy_x11_drivers.isChecked(),
+                    boot_timeout=int(self.boot_timeout.text().strip() or 3),
+                    systemd_boot_console_mode="max",
+                    auto_resize=self.auto_resize.isChecked(),
+                    extra_package=None,
+                    extra_packages=self.extra_packages.text().strip(),
+                )
+            )
         return {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
@@ -2225,6 +2291,19 @@ class Main(QWidget):
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
+        if env.get("LINUX_USB_DISTRO") == "fedora":
+            if not FEDORA_RELEASE_RE.match(env["FEDORA_RELEASE"]):
+                return "Fedora release must be stable, rawhide, or a numeric release such as 41."
+            if not re.match(r"^[a-z_][a-z0-9_-]*$", env["FEDORA_USB_USER"]):
+                return (
+                    "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
+                )
+            if not env["FEDORA_USB_PASSWORD"]:
+                return "User password cannot be empty."
+            package_error = validate_extra_packages(env["FEDORA_USB_EXTRA_PACKAGES"])
+            if package_error:
+                return package_error
+            return None
         if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
             return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
         if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):

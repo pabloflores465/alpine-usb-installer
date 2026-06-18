@@ -13,7 +13,8 @@ from alpine_usb.interfaces import cli as cli
 
 CHOICES = {
     "image_size": ["8G", "16G", "24G", "32G", "64G", "128G"],
-    "branch": ["latest-stable", "edge", "v3.22", "v3.21"],
+    "distro": ["alpine", "fedora"],
+    "branch": ["latest-stable", "edge", "v3.22", "v3.21", "stable", "rawhide", "41"],
     "arch": ["x86_64"],
     "timezone": ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"],
     "locale": ["en_US.UTF-8", "es_ES.UTF-8", "es_MX.UTF-8"],
@@ -49,6 +50,7 @@ CHOICES = {
 WM_CHOICES = list(cli.VALID_WMS)
 
 DEFAULT_CONFIG = {
+    "distro": "alpine",
     "output": str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / cli.DEFAULT_IMAGE_NAME),
     "image_size": "16G",
     "branch": "latest-stable",
@@ -316,13 +318,18 @@ class TuiApp:
         return " ".join(result)
 
     def package_search_screen(self):
-        query = self.prompt("Search Alpine packages", "")
+        distro = self.config.get("distro", "alpine")
+        query = self.prompt(f"Search {distro.title()} packages", "")
         if not query:
             return
-        self.status = f"Searching official APK indexes for '{query}'…"
+        self.status = f"Searching {distro} package indexes for '{query}'…"
         self.draw_wait("Package search", self.status)
         try:
-            results = cli.search_official_apk_packages(self.config["branch"], self.config["arch"], query, 10)
+            if distro == "fedora":
+                branch = "stable" if self.config["branch"] == "latest-stable" else self.config["branch"]
+                results = cli.search_fedora_packages(branch, self.config["arch"], query, 10)
+            else:
+                results = cli.search_official_apk_packages(self.config["branch"], self.config["arch"], query, 10)
         except Exception as exc:
             self.message("Package search failed", str(exc), error=True)
             return
@@ -401,9 +408,12 @@ class TuiApp:
 
     def namespace(self, dry_run: bool = False, yes: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
+            distro=self.config["distro"],
             output=self.config["output"],
             image_size=self.config["image_size"],
-            branch=self.config["branch"],
+            branch="stable"
+            if self.config["distro"] == "fedora" and self.config["branch"] == "latest-stable"
+            else self.config["branch"],
             arch=self.config["arch"],
             hostname=self.config["hostname"],
             user=self.config["user"],
@@ -568,7 +578,7 @@ class TuiApp:
                     "Bootloader, kernel, firmware",
                     f"{self.config['bootloader']}  linux-{self.config['kernel']}  firmware={self.config['firmware']}  legacy-X11={'yes' if self.config['legacy_x11_drivers'] else 'no'}",
                 ),
-                ("Extra APK packages", self.config["extra_packages"] or "search/add packages"),
+                ("Extra distro packages", self.config["extra_packages"] or "search/add packages"),
                 ("Build image", self.config["output"]),
                 ("USB devices and flash", self.config["device"] or "select target USB"),
                 ("Doctor", "check host tools"),
@@ -584,7 +594,8 @@ class TuiApp:
                     [
                         ("Output image path", "output", "text"),
                         ("Minimum image size", "image_size", "choice"),
-                        ("Alpine branch", "branch", "choice"),
+                        ("Distribution", "distro", "choice"),
+                        ("Branch / release", "branch", "choice"),
                         ("Architecture", "arch", "choice"),
                         ("Hostname", "hostname", "text"),
                         ("User", "user", "text"),

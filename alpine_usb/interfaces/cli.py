@@ -20,11 +20,14 @@ from alpine_usb.apk_packages.index import (
     validate_package_name,
 )
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
+from alpine_usb.fedora_packages.index import search_fedora_packages
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros.fedora import plan_from_options, validate_release
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
+APP_TITLE = "Linux USB Installer"
 DEFAULT_IMAGE_NAME = "alpine-usb.img"
+DEFAULT_FEDORA_IMAGE_NAME = "fedora-usb.img"
 TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
@@ -32,6 +35,7 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-fedora-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
@@ -180,6 +184,9 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
 
 
 def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    distro = getattr(args, "distro", "alpine")
+    if distro == "fedora":
+        return fedora_env_from_build_args(args)
     validate_branch(args.branch)
     password = args.password
     root_password = args.root_password if args.root_password is not None else password
@@ -229,7 +236,117 @@ def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def fedora_env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    release = validate_release(args.branch)
+    password = args.password
+    root_password = args.root_password if args.root_password is not None else password
+    wms = list(args.wm or [])
+    if args.tiling_wms:
+        wms.extend(part for part in re.split(r"[\s,]+", args.tiling_wms.strip()) if part)
+    extra = split_packages(args.extra_package, args.extra_packages)
+    plan = plan_from_options(
+        release=release,
+        arch=args.arch,
+        desktop=args.desktop,
+        display_manager=args.display_manager,
+        default_session=args.default_session,
+        wms=wms,
+        network=args.network,
+        wifi=args.wifi,
+        bluetooth=args.bluetooth,
+        audio=args.audio,
+        browser=args.browser,
+        firmware=args.firmware,
+        kernel=args.kernel,
+        bootloader=args.bootloader,
+        auto_resize=args.auto_resize,
+        legacy_x11_drivers=getattr(args, "legacy_x11_drivers", True),
+        extra_packages=extra,
+    )
+    return {
+        "IMAGE_NAME": f".fedora-usb-cli-{os.getpid()}.img",
+        "IMAGE_SIZE": args.image_size,
+        "LINUX_USB_DISTRO": "fedora",
+        "FEDORA_USB_PROFILE": getattr(args, "profile", "compatibility"),
+        "FEDORA_RELEASE": release,
+        "ARCH": args.arch,
+        "FEDORA_USB_USER": args.user,
+        "FEDORA_USB_PASSWORD": password,
+        "FEDORA_USB_ROOT_PASSWORD": root_password,
+        "FEDORA_USB_HOSTNAME": args.hostname,
+        "FEDORA_USB_TIMEZONE": args.timezone,
+        "FEDORA_USB_LOCALE": args.locale,
+        "FEDORA_USB_LANGUAGE": args.language or "",
+        "FEDORA_USB_CONSOLE_KEYMAP": args.console_keymap,
+        "FEDORA_USB_XKB_LAYOUT": args.xkb_layout,
+        "FEDORA_USB_XKB_VARIANT": args.xkb_variant,
+        "FEDORA_USB_XKB_MODEL": args.xkb_model,
+        "FEDORA_USB_DESKTOP": args.desktop,
+        "FEDORA_USB_TILING_WMS": " ".join(wms),
+        "FEDORA_USB_DEFAULT_SESSION": plan.default_session,
+        "FEDORA_USB_DISPLAY_MANAGER": plan.display_manager,
+        "FEDORA_USB_NETWORK": args.network,
+        "FEDORA_USB_WIFI": bool_env(args.wifi),
+        "FEDORA_USB_BLUETOOTH": bool_env(args.bluetooth),
+        "FEDORA_USB_AUDIO": args.audio,
+        "FEDORA_USB_BROWSER": args.browser,
+        "FEDORA_USB_FIRMWARE": args.firmware,
+        "FEDORA_USB_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
+        "FEDORA_USB_BOOTLOADER": args.bootloader,
+        "FEDORA_USB_KERNEL_FLAVOR": args.kernel,
+        "FEDORA_USB_BOOT_TIMEOUT": str(args.boot_timeout),
+        "FEDORA_USB_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
+        "FEDORA_USB_AUTO_RESIZE": bool_env(args.auto_resize),
+        "FEDORA_USB_EXTRA_PACKAGES": extra,
+        "FEDORA_USB_PACKAGES": " ".join(plan.packages),
+        "FEDORA_USB_GROUPS": " ".join(plan.groups),
+        "FEDORA_USB_SERVICES": " ".join(plan.enabled_services),
+        "FEDORA_USB_DEFAULT_TARGET": plan.default_target,
+        "FEDORA_USB_WARNINGS": "\n".join(plan.warnings),
+        "_FEDORA_PLAN": json_dumps_plan(plan.packages, plan.groups, plan.enabled_services, plan.warnings),
+    }
+
+
+def json_dumps_plan(
+    packages: tuple[str, ...], groups: tuple[str, ...], services: tuple[str, ...], warnings: tuple[str, ...]
+) -> str:
+    import json
+
+    return json.dumps(
+        {"packages": packages, "groups": groups, "services": services, "warnings": warnings}, sort_keys=True
+    )
+
+
 def print_build_summary(env: dict[str, str], output: Path):
+    if env.get("LINUX_USB_DISTRO") == "fedora":
+        rows = [
+            ("Output", str(output)),
+            ("Minimum image size", env["IMAGE_SIZE"]),
+            ("Fedora", f"{env['FEDORA_RELEASE']} / {env['ARCH']}"),
+            ("Profile", env.get("FEDORA_USB_PROFILE", "compatibility")),
+            ("Desktop", env["FEDORA_USB_DESKTOP"]),
+            ("Window managers", env["FEDORA_USB_TILING_WMS"] or "none"),
+            ("Default session", env["FEDORA_USB_DEFAULT_SESSION"]),
+            ("Display manager", env["FEDORA_USB_DISPLAY_MANAGER"]),
+            (
+                "Network",
+                f"{env['FEDORA_USB_NETWORK']} wifi={env['FEDORA_USB_WIFI']} bluetooth={env['FEDORA_USB_BLUETOOTH']}",
+            ),
+            ("Audio / browser", f"{env['FEDORA_USB_AUDIO']} / {env['FEDORA_USB_BROWSER']}"),
+            (
+                "Boot",
+                f"{env['FEDORA_USB_BOOTLOADER']} kernel={env['FEDORA_USB_KERNEL_FLAVOR']} firmware={env['FEDORA_USB_FIRMWARE']}",
+            ),
+            ("DNF groups", env["FEDORA_USB_GROUPS"] or "none"),
+            ("Fedora packages", f"{len(env['FEDORA_USB_PACKAGES'].split())} selected"),
+            ("Auto-resize USB", env["FEDORA_USB_AUTO_RESIZE"]),
+            ("Keyboard", f"console={env['FEDORA_USB_CONSOLE_KEYMAP']} xkb={env['FEDORA_USB_XKB_LAYOUT']}"),
+            ("Extra packages", env["FEDORA_USB_EXTRA_PACKAGES"] or "none"),
+        ]
+        if env.get("FEDORA_USB_WARNINGS"):
+            rows.append(("Warnings", env["FEDORA_USB_WARNINGS"].replace("\n", "; ")))
+        print_panel("Build profile", rows)
+        return
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
@@ -266,6 +383,8 @@ def confirm(prompt: str, yes: bool = False) -> bool:
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "FEDORA_USB_PASSWORD": "FEDORA_USB_PASSWORD_FILE",
+    "FEDORA_USB_ROOT_PASSWORD": "FEDORA_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -276,6 +395,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -296,10 +417,14 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        if env.get("LINUX_USB_DISTRO") == "fedora":
+            dry_env["FEDORA_USB_DRY_RUN"] = "1"
+            proc = subprocess.Popen(["./build-fedora-usb.sh", "--dry-run"], cwd=repo_root(), env=dry_env)
+        else:
+            dry_env["ALPINE_USB_DRY_RUN"] = "1"
+            proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -321,14 +446,15 @@ def cmd_build(args: argparse.Namespace) -> int:
     output = Path(args.output).expanduser().resolve()
     print_build_summary(env, output)
 
+    distro_label = "Fedora" if env.get("LINUX_USB_DISTRO") == "fedora" else "Alpine"
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info(f"Dry-run only: validating generated {distro_label} configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm(f"Build this {distro_label} USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
@@ -346,7 +472,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             output.unlink()
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        script = "./build-fedora-usb.sh" if env.get("LINUX_USB_DISTRO") == "fedora" else "./build-alpine-usb.sh"
+        proc = subprocess.Popen([script], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -365,13 +492,23 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
-        validate_branch(args.branch)
+        if args.distro == "fedora":
+            validate_release(args.branch)
+        else:
+            validate_branch(args.branch)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+    if args.distro == "fedora":
+        info(f"Searching Fedora {args.branch}/{args.arch} packages via dnf/repoquery cache")
+    else:
+        info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
     try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        results = (
+            search_fedora_packages(args.branch, args.arch, args.query, args.limit)
+            if args.distro == "fedora"
+            else search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        )
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -485,6 +622,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def add_common_build_options(parser: argparse.ArgumentParser):
+    parser.add_argument("--distro", default="alpine", choices=["alpine", "fedora"], help="Target Linux distribution")
     parser.add_argument(
         "--profile",
         default="compatibility",
@@ -498,7 +636,11 @@ def add_common_build_options(parser: argparse.ArgumentParser):
         help="Final output image path",
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
-    parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
+    parser.add_argument(
+        "--branch",
+        default="latest-stable",
+        help="Alpine branch (latest-stable, edge, v3.22, ...) or Fedora release (stable, rawhide, 41, ...)",
+    )
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
@@ -554,8 +696,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,23 +709,24 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description="Unified terminal interface for Linux USB images (Fedora + Alpine; TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official Alpine or Fedora packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=["alpine", "fedora"])
     search.add_argument("--branch", default="latest-stable")
     search.add_argument("--arch", default="x86_64")
     search.add_argument("--limit", type=int, default=10)
@@ -618,6 +763,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 0
     args = parser.parse_args(argv)
+    if getattr(args, "distro", "alpine") == "fedora" and getattr(args, "branch", None) == "latest-stable":
+        args.branch = "stable"
+    if getattr(args, "distro", "alpine") == "fedora" and getattr(args, "output", "").endswith(DEFAULT_IMAGE_NAME):
+        args.output = str(Path(args.output).with_name(DEFAULT_FEDORA_IMAGE_NAME))
     apply_profile_defaults(args, argv)
     if args.command != "tui":
         print(c(f"\n{APP_TITLE}", C.bold + C.cyan))

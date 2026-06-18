@@ -10,6 +10,7 @@ from alpine_usb.interfaces import cli
 
 def namespace(**overrides) -> argparse.Namespace:
     values = {
+        "distro": "alpine",
         "profile": "compatibility",
         "image_size": "16G",
         "branch": "latest-stable",
