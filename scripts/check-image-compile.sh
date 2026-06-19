@@ -17,7 +17,7 @@ run_logged() {
   "$@" >"$logfile" 2>&1 || {
     local code=$?
     printf 'Command failed with exit code %s: %s\n' "$code" "$*" >&2
-    printf '--- %s ---\n' "$logfile" >&2
+    printf '%s\n' "--- $logfile ---" >&2
     tail -n 80 "$logfile" >&2 || true
     exit "$code"
   }
@@ -29,7 +29,7 @@ assert_log_contains() {
   local message="$3"
   if ! grep -Eq "$pattern" "$logfile"; then
     printf 'Missing expected marker in %s: %s\n' "$logfile" "$message" >&2
-    printf '--- %s ---\n' "$logfile" >&2
+    printf '%s\n' "--- $logfile ---" >&2
     tail -n 80 "$logfile" >&2 || true
     exit 1
   fi
@@ -88,36 +88,41 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
   full_log="$WORK_DIR/opensuse-full.log"
   full_image="$(pwd)/$WORK_DIR/opensuse-full.img"
   log "Full image compile gate enabled"
-  if [ "$(uname -s)" != "Linux" ]; then
-    log "SKIP: full openSUSE image compile requires Linux with zypper/loop image tools."
-  elif [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    log "SKIP: full openSUSE image compile requires root privileges for zypper --root/image setup."
-  else
-    missing=()
-    for tool in zypper qemu-img parted mkfs.ext4 grub2-install; do
-      have "$tool" || missing+=("$tool")
-    done
-    if [ "${#missing[@]}" -gt 0 ]; then
-      log "SKIP: full openSUSE image compile missing tools: ${missing[*]}"
-    else
-      rm -f "$full_image"
-      run_logged "$full_log" \
-        ./alpine-usb build \
-          --distro opensuse \
-          --release tumbleweed \
-          --output "$full_image" \
-          --password testpass \
-          --desktop none \
-          --display-manager none \
-          --no-wifi \
-          --no-bluetooth \
-          --audio none \
-          --browser none \
-          -y
-      [ -s "$full_image" ] || fail "full openSUSE image build did not create a non-empty image at $full_image"
-      assert_log_contains "$full_log" 'Image ready:|openSUSE rootfs populated' 'full openSUSE image build success marker'
-    fi
-  fi
+  case "$(uname -s)" in
+    Darwin)
+      have docker || fail "full openSUSE image compile on macOS requires Docker"
+      docker info >/dev/null 2>&1 || fail "Docker is not running; start Docker Desktop for full openSUSE image compile"
+      ;;
+    Linux)
+      missing=()
+      for tool in zypper qemu-img parted mkfs.ext4 grub2-install; do
+        have "$tool" || missing+=("$tool")
+      done
+      if [ "${#missing[@]}" -gt 0 ]; then
+        fail "full openSUSE image compile missing tools: ${missing[*]}"
+      fi
+      ;;
+    *)
+      fail "full openSUSE image compile requires Linux, or macOS with Docker"
+      ;;
+  esac
+  rm -f "$full_image"
+  run_logged "$full_log" \
+    ./alpine-usb build \
+      --distro opensuse \
+      --release tumbleweed \
+      --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
+      --output "$full_image" \
+      --password testpass \
+      --desktop none \
+      --display-manager none \
+      --no-wifi \
+      --no-bluetooth \
+      --audio none \
+      --browser none \
+      -y
+  [ -s "$full_image" ] || fail "full openSUSE image build did not create a non-empty image at $full_image"
+  assert_log_contains "$full_log" 'Image ready:|openSUSE rootfs populated' 'full openSUSE image build success marker'
 fi
 
 log "Image compile check passed. Logs: $WORK_DIR"
