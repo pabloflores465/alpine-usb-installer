@@ -453,10 +453,16 @@ The terminal binary is shipped as `.tar.gz` because raw GitHub asset downloads d
 
 ## Validation and tests
 
-Full project compile/lint/test/smoke check:
+Full project compile/lint/test/smoke check (includes image configuration compile dry-runs unless `SKIP_IMAGE_COMPILE_CHECK=1`):
 
 ```sh
 scripts/check-project.sh
+```
+
+Compile image configurations into concrete Arch/Alpine dry-run build plans without requiring root, Docker, or a full image build:
+
+```sh
+scripts/check-image-compile.sh
 ```
 
 Unit tests and linter:

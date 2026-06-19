@@ -13,14 +13,16 @@ bash -n \
   scripts/build-macos-dmg.sh \
   scripts/package-release-assets.sh \
   scripts/check-apk-solver.sh \
+  scripts/check-image-compile.sh \
   scripts/test-cli.sh \
   scripts/validate-config-matrix.sh
 
 ./alpine-usb --help >/dev/null
 ./alpine-usb tui --self-test >/dev/null
-./alpine-usb build --dry-run --password testpass --profile minimal -y >/tmp/alpine-usb-check-minimal.out
-grep -q 'DRY RUN OK' /tmp/alpine-usb-check-minimal.out
-grep -q 'desktop=none' /tmp/alpine-usb-check-minimal.out
+
+if [ "${SKIP_IMAGE_COMPILE_CHECK:-0}" != "1" ]; then
+  scripts/check-image-compile.sh
+fi
 
 if [ "${SKIP_NETWORK_TESTS:-0}" != "1" ]; then
   ./alpine-usb search firefox --limit 3 >/tmp/alpine-usb-check-search.out
