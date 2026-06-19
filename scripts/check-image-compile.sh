@@ -78,6 +78,7 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
     --release 24.04 \
     --password testpass \
     --profile minimal \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     --output "$PWD/$WORK_DIR/ubuntu-full.img" \
     -y >"$WORK_DIR/ubuntu-full.log" 2>&1 || fail "full Ubuntu image compile failed (see $WORK_DIR/ubuntu-full.log)"
   test -s "$WORK_DIR/ubuntu-full.img" || fail "full image compile did not create $WORK_DIR/ubuntu-full.img"

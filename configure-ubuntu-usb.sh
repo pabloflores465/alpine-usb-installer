@@ -108,7 +108,7 @@ case "$DEFAULT_SESSION" in shell) case "$DISPLAY_MANAGER" in none|greetd) ;; *) 
 
 append_packages ubuntu-minimal linux-generic systemd-sysv dbus dbus-user-session sudo bash zsh curl wget git nano vim htop less ca-certificates tzdata locales console-setup keyboard-configuration e2fsprogs dosfstools util-linux udev policykit-1 fonts-noto-color-emoji fonts-dejavu-core
 [ "$KERNEL_FLAVOR" = "lts" ] && append_packages linux-generic || append_packages linux-generic-hwe-24.04
-is_enabled "$AUTO_RESIZE" && append_packages cloud-guest-utils growpart initramfs-tools
+is_enabled "$AUTO_RESIZE" && append_packages cloud-guest-utils initramfs-tools
 [ "$FIRMWARE" = "full" ] && append_packages linux-firmware
 case "$BOOTLOADER" in grub) append_packages grub-efi-amd64 grub-pc-bin efibootmgr ;; systemd-boot) append_packages systemd-boot efibootmgr ;; esac
 GRAPHICAL=0; if [ "$DESKTOP" != "none" ] || [ -n "$TILING_WMS" ]; then GRAPHICAL=1; fi; case "$DISPLAY_MANAGER" in lightdm|sddm|gdm|lxdm) GRAPHICAL=1 ;; esac
