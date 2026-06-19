@@ -27,7 +27,65 @@ cleanup_mounts() {
   set +e
   if mountpoint -q "$ROOTFS/dev/pts"; then run_sudo umount "$ROOTFS/dev/pts"; fi
   for mp in dev proc sys; do if mountpoint -q "$ROOTFS/$mp"; then run_sudo umount "$ROOTFS/$mp"; fi; done
+  if [ -n "${LOOPDEV:-}" ] && [ "${MAPPED_WITH_KPARTX:-0}" = "1" ]; then run_sudo kpartx -d "$LOOPDEV" >/dev/null 2>&1 || true; fi
   if [ -n "${LOOPDEV:-}" ]; then run_sudo losetup -d "$LOOPDEV"; fi
+}
+udev_settle() { command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=5 >/dev/null 2>&1 || true; }
+usable_block_node() { [ -b "$1" ] && run_sudo blockdev --getsize64 "$1" >/dev/null 2>&1 && run_sudo dd if="$1" of=/dev/null bs=512 count=1 status=none >/dev/null 2>&1; }
+mapper_partition_node() { printf '/dev/mapper/%sp%s\n' "$(basename "$1")" "$2"; }
+partition_node() {
+  case "$1" in
+    *[0-9]) printf '%sp%s\n' "$1" "$2" ;;
+    *) printf '%s%s\n' "$1" "$2" ;;
+  esac
+}
+refresh_partition_table() {
+  local disk="$1"
+  run_sudo partprobe "$disk" >/dev/null 2>&1 || true
+  run_sudo losetup -c "$disk" >/dev/null 2>&1 || true
+  run_sudo partx -u "$disk" >/dev/null 2>&1 || run_sudo partx -a "$disk" >/dev/null 2>&1 || true
+  udev_settle
+}
+synthesize_partition_node() {
+  local disk="$1" part="$2" node sysname devno major minor
+  node="$(partition_node "$disk" "$part")"
+  sysname="$(basename "$node")"
+  [ -r "/sys/class/block/$sysname/dev" ] || return 1
+  devno="$(cat "/sys/class/block/$sysname/dev")"
+  major="${devno%:*}"; minor="${devno#*:}"
+  if [ -e "$node" ] && ! usable_block_node "$node"; then run_sudo rm -f "$node"; fi
+  if [ ! -e "$node" ]; then run_sudo mknod -m 660 "$node" b "$major" "$minor" >/dev/null 2>&1 || true; fi
+  usable_block_node "$node"
+}
+set_partition_nodes() {
+  local disk="$1" efi root efi_mapper root_mapper
+  efi="$(partition_node "$disk" 1)"; root="$(partition_node "$disk" 2)"
+  efi_mapper="$(mapper_partition_node "$disk" 1)"; root_mapper="$(mapper_partition_node "$disk" 2)"
+  refresh_partition_table "$disk"
+  for _ in $(seq 1 35); do
+    if usable_block_node "$efi" && usable_block_node "$root"; then EFI_PART="$efi"; ROOT_PART="$root"; return 0; fi
+    sleep 0.2
+    udev_settle
+  done
+  if command -v kpartx >/dev/null 2>&1; then
+    run_sudo kpartx -avs "$disk" >/dev/null 2>&1 || true
+    MAPPED_WITH_KPARTX=1
+    udev_settle
+    for _ in $(seq 1 20); do
+      if usable_block_node "$efi_mapper" && usable_block_node "$root_mapper"; then EFI_PART="$efi_mapper"; ROOT_PART="$root_mapper"; return 0; fi
+      sleep 0.2
+      udev_settle
+    done
+  fi
+  for _ in $(seq 1 10); do
+    synthesize_partition_node "$disk" 1 >/dev/null 2>&1 || true
+    synthesize_partition_node "$disk" 2 >/dev/null 2>&1 || true
+    if usable_block_node "$efi" && usable_block_node "$root"; then EFI_PART="$efi"; ROOT_PART="$root"; return 0; fi
+    sleep 0.2
+    udev_settle
+  done
+  echo "Partition devices not found: $efi/$root or $efi_mapper/$root_mapper" >&2
+  return 1
 }
 trap cleanup_mounts EXIT
 
@@ -47,24 +105,23 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${DEBIAN_USB_BUILD_IN_DOCKER:-0}" != "1" ]
     docker_env+=( -e "$name=$value" )
   done
   exec docker run --rm --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work "$DOCKER_IMAGE" sh -ceu '
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update >/dev/null
-    apt-get install -y --no-install-recommends bash ca-certificates debootstrap dosfstools e2fsprogs fdisk grub-efi-amd64-bin mtools parted util-linux xz-utils >/dev/null
+    apt-get install -y --no-install-recommends bash ca-certificates debootstrap dosfstools e2fsprogs fdisk grub2-common grub-efi-amd64-bin kpartx mtools parted udev util-linux xz-utils >/dev/null
     chmod +x build-debian-usb.sh configure-debian-usb.sh
     exec ./build-debian-usb.sh
   '
 fi
 
-need debootstrap; need parted; need losetup; need mkfs.vfat; need mkfs.ext4; need grub-install
+need debootstrap; need parted; need losetup; need partx; need mkfs.vfat; need mkfs.ext4; need grub-install
 mkdir -p "$WORK_DIR"; chmod 700 "$WORK_DIR" 2>/dev/null || true
 rm -rf "$ROOTFS"
 rm -f "$IMAGE_PATH"
 truncate -s "$IMAGE_SIZE" "$IMAGE_PATH"
 parted -s "$IMAGE_PATH" mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on mkpart root ext4 513MiB 100%
 LOOPDEV="$(run_sudo losetup --find --partscan --show "$IMAGE_PATH")"
-sleep 1
-EFI_PART="${LOOPDEV}p1"; ROOT_PART="${LOOPDEV}p2"
-if [ ! -b "$EFI_PART" ]; then EFI_PART="${LOOPDEV}1"; ROOT_PART="${LOOPDEV}2"; fi
-run_sudo mkfs.vfat -F32 -n DEBIANUSBEFI "$EFI_PART"
+set_partition_nodes "$LOOPDEV"
+run_sudo mkfs.vfat -F32 -n DEBIANUEFI "$EFI_PART"
 run_sudo mkfs.ext4 -F -L DEBIANUSBROOT "$ROOT_PART"
 mkdir -p "$ROOTFS"
 run_sudo mount "$ROOT_PART" "$ROOTFS"

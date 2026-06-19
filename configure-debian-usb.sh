@@ -90,7 +90,7 @@ fi
 GRAPHICAL=0; if [ "$DESKTOP" != "none" ] || [ -n "$TILING_WMS" ]; then GRAPHICAL=1; fi
 case "$DISPLAY_MANAGER" in lightdm|sddm|gdm|lxdm) GRAPHICAL=1 ;; esac
 
-append_packages ca-certificates locales tzdata sudo bash zsh curl wget git nano vim htop less dbus dbus-user-session udev policykit-1 keyboard-configuration console-setup e2fsprogs dosfstools util-linux fonts-noto fonts-noto-color-emoji
+append_packages ca-certificates locales tzdata sudo bash zsh curl wget git nano vim htop less dbus dbus-user-session udev polkitd pkexec keyboard-configuration console-setup e2fsprogs dosfstools util-linux fonts-noto fonts-noto-color-emoji
 if [ "$KERNEL_FLAVOR" = "lts" ]; then append_packages linux-image-amd64; else append_packages linux-image-amd64; fi
 if is_enabled "$AUTO_RESIZE"; then append_packages cloud-guest-utils; fi
 if [ "$FIRMWARE" = "full" ]; then append_packages firmware-linux firmware-linux-free firmware-linux-nonfree firmware-misc-nonfree; fi
@@ -100,7 +100,7 @@ if [ "$GRAPHICAL" = "1" ]; then
   if is_enabled "$LEGACY_X11_DRIVERS"; then append_packages xserver-xorg-video-amdgpu xserver-xorg-video-ati xserver-xorg-video-intel xserver-xorg-video-nouveau xserver-xorg-video-vesa xserver-xorg-video-fbdev; fi
 fi
 case "$DESKTOP" in
-  xfce) append_packages task-xfce-desktop xfce4-terminal thunar-volman gvfs policykit-1-gnome ;;
+  xfce) append_packages task-xfce-desktop xfce4-terminal thunar-volman gvfs lxpolkit ;;
   gnome) append_packages task-gnome-desktop gnome-terminal ;;
   plasma) append_packages task-kde-desktop konsole dolphin ;;
   mate) append_packages task-mate-desktop mate-terminal gvfs ;;
@@ -109,13 +109,13 @@ case "$DESKTOP" in
 esac
 for wm in $TILING_WMS; do
   case "$wm" in
-    i3) append_packages i3-wm i3status i3lock suckless-tools xterm feh picom policykit-1-gnome ;;
-    sway) append_packages sway swaybg swayidle swaylock foot waybar mako-notifier grim slurp xwayland xdg-desktop-portal xdg-desktop-portal-wlr policykit-1-gnome ;;
-    hyprland) append_packages hyprland foot waybar mako-notifier xwayland xdg-desktop-portal policykit-1-gnome ;;
-    awesome) append_packages awesome xterm rofi picom policykit-1-gnome ;;
-    bspwm) append_packages bspwm sxhkd polybar xterm suckless-tools feh picom policykit-1-gnome ;;
-    openbox) append_packages openbox tint2 xterm suckless-tools feh picom policykit-1-gnome ;;
-    labwc) append_packages labwc foot swaybg waybar mako-notifier xdg-desktop-portal xdg-desktop-portal-wlr policykit-1-gnome ;;
+    i3) append_packages i3-wm i3status i3lock suckless-tools xterm feh picom lxpolkit ;;
+    sway) append_packages sway swaybg swayidle swaylock foot waybar mako-notifier grim slurp xwayland xdg-desktop-portal xdg-desktop-portal-wlr lxpolkit ;;
+    hyprland) append_packages hyprland foot waybar mako-notifier xwayland xdg-desktop-portal lxpolkit ;;
+    awesome) append_packages awesome xterm rofi picom lxpolkit ;;
+    bspwm) append_packages bspwm sxhkd polybar xterm suckless-tools feh picom lxpolkit ;;
+    openbox) append_packages openbox tint2 xterm suckless-tools feh picom lxpolkit ;;
+    labwc) append_packages labwc foot swaybg waybar mako-notifier xdg-desktop-portal xdg-desktop-portal-wlr lxpolkit ;;
   esac
 done
 case "$DISPLAY_MANAGER" in lightdm) append_packages lightdm lightdm-gtk-greeter accountsservice ;; sddm) append_packages sddm accountsservice ;; gdm) append_packages gdm3 accountsservice ;; lxdm) append_packages lxdm ;; greetd) append_packages greetd tuigreet ;; none) ;; esac
@@ -148,6 +148,24 @@ cat >"$ROOT_MOUNT/tmp/debian-usb-configure-inside.sh" <<'INSIDE'
 #!/bin/sh
 set -eu
 export DEBIAN_FRONTEND=noninteractive
+ensure_apt_components() {
+  for file in /etc/apt/sources.list.d/*.sources; do
+    [ -f "$file" ] || continue
+    sed -i '/^Components:/ {
+      / contrib/! s/$/ contrib/
+      / non-free/! s/$/ non-free/
+      / non-free-firmware/! s/$/ non-free-firmware/
+    }' "$file"
+  done
+  if [ -f /etc/apt/sources.list ]; then
+    sed -i '/^[[:space:]]*deb[[:space:]]/ {
+      / contrib/! s/$/ contrib/
+      / non-free/! s/$/ non-free/
+      / non-free-firmware/! s/$/ non-free-firmware/
+    }' /etc/apt/sources.list
+  fi
+}
+ensure_apt_components
 apt-get update
 xargs -r apt-get install -y --no-install-recommends </tmp/debian-usb-packages.list
 INSIDE
