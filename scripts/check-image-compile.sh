@@ -106,7 +106,15 @@ run_full_image_compile() {
     --distro fedora \
     --release latest \
     --password testpass \
-    --desktop xfce \
+    --profile minimal \
+    --desktop none \
+    --display-manager none \
+    --no-wifi \
+    --no-bluetooth \
+    --audio none \
+    --browser none \
+    --firmware none \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     --output "$output" \
     -y >"$full_log" 2>&1
   [[ -s "$output" ]] || die "Full Fedora image compile did not create $output; see $full_log"

@@ -156,7 +156,9 @@ settle_loop_partitions() {
   local mapper_boot="${mapper_base}p1"
   local mapper_root="${mapper_base}p2"
 
-  partprobe "$loopdev" >/dev/null 2>&1 || true
+  if [[ "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]]; then
+    partprobe "$loopdev" >/dev/null 2>&1 || true
+  fi
   blockdev --rereadpt "$loopdev" >/dev/null 2>&1 || true
   partx -a "$loopdev" >/dev/null 2>&1 || partx -u "$loopdev" >/dev/null 2>&1 || true
   if wait_for_device "$direct_boot" && wait_for_device "$direct_root"; then
