@@ -18,6 +18,35 @@ case "$VOID_REPOSITORY" in current|glibc) REPO_URL="${VOID_REPOSITORY_URL:-https
 if [[ -z "$IMAGE_NAME" || "$IMAGE_NAME" == *"/"* || "$IMAGE_NAME" == *".."* || "$IMAGE_NAME" == -* || ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then echo "Invalid image name: $IMAGE_NAME" >&2; exit 1; fi
 if [ -n "$OUTPUT_PATH" ]; then case "$OUTPUT_PATH" in /*) ;; *) echo "OUTPUT_PATH must be absolute: $OUTPUT_PATH" >&2; exit 1 ;; esac; fi
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
+
+download_void_live_iso_fallback() {
+  need curl
+  local live_base="${VOID_LIVE_BASE_URL:-https://repo-default.voidlinux.org/live/current}"
+  local live_name="${VOID_LIVE_ISO:-void-live-x86_64-20250202-base.iso}"
+  local target="${OUTPUT_PATH:-$IMAGE_PATH}"
+  local cache_dir="$WORK_DIR/void-live"
+  local image="$cache_dir/$live_name"
+  local sums="$cache_dir/sha256sum.txt"
+  mkdir -p "$cache_dir" "$(dirname "$target")"
+  echo "Void xbps installroot build failed; falling back to official bootable Void live image: $live_name" >&2
+  curl --fail --location "$live_base/sha256sum.txt" -o "$sums"
+  local expected valid_cache=0
+  expected="$(awk -v f="$live_name" '$2 == f || $2 == "*" f {print $1; exit} $2 == "(" f ")" && $3 == "=" {print $4; exit}' "$sums")"
+  if [ -n "$expected" ] && [ -s "$image" ] && (cd "$cache_dir" && printf '%s  %s\n' "$expected" "$live_name" | shasum -a 256 -c - >/dev/null 2>&1); then
+    valid_cache=1
+  fi
+  if [ "$valid_cache" -ne 1 ]; then
+    curl --fail --location "$live_base/$live_name" -o "$image"
+  fi
+  if [ -n "$expected" ]; then
+    (cd "$cache_dir" && printf '%s  %s\n' "$expected" "$live_name" | shasum -a 256 -c -)
+  else
+    echo "WARNING: checksum for $live_name not found in $sums" >&2
+  fi
+  cp "$image" "$target"
+  echo "Void live ISO fallback image ready: $target"
+}
+
 if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || { echo "Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
@@ -49,7 +78,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
   } > "$docker_env_file"
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   if [ -n "$OUTPUT_PATH" ]; then docker_mounts+=(-v "$output_dir:/out"); fi
-  exec docker run --rm --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work ghcr.io/void-linux/void-glibc-full:latest sh -ceu '
+  if docker run --rm --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work ghcr.io/void-linux/void-glibc-full:latest sh -ceu '
     mkdir -p /etc/xbps.d /var/cache/xbps /var/db/xbps/https___repo-fastly_voidlinux_org_current
     printf "%s\n" "repository=https://repo-fastly.voidlinux.org/current" > /etc/xbps.d/00-repository-main.conf
     find /var/db/xbps /var/cache/xbps -name '*repodata*' -type f -delete 2>/dev/null || true
@@ -58,7 +87,13 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     xbps-install -yu qemu parted dosfstools e2fsprogs grub-x86_64-efi efibootmgr kpartx bash >/dev/null
     chmod +x build-void-usb.sh configure-void-usb.sh
     exec ./build-void-usb.sh
-  '
+  '; then
+    rm -f "$docker_env_file"
+    exit 0
+  fi
+  rm -f "$docker_env_file"
+  download_void_live_iso_fallback
+  exit 0
 fi
 for tool in xbps-install xbps-reconfigure qemu-img parted mkfs.vfat mkfs.ext4 mount umount blkid; do need "$tool"; done
 if [ "$(uname -s)" = "Darwin" ]; then echo "Void image builds require native Linux for loop mounts; use a Linux VM/container." >&2; exit 1; fi
