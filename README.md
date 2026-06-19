@@ -1,6 +1,6 @@
 # Linux USB Installer
 
-Build and flash configurable, preinstalled **Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the fully implemented image builder; Slackware support is available as a selectable backend with package search/cache and dry-run configuration/package planning.
+Build and flash configurable, preinstalled **Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the fully implemented installed-image builder; Slackware support is selectable with package search/cache, dry-run planning, and a verified official `usbboot.img` full-compile artifact.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -172,7 +172,7 @@ Extra packages can be repeated or space-separated:
 
 Slackware is selectable with `--distro slackware` in CLI, and from the GUI/TUI distribution controls. The backend validates the same high-level options as Alpine where feasible: profiles, desktop/session/window-manager choices, display manager, bootloader/kernel/firmware, localization/users/passwords, network/Wi‑Fi/Bluetooth/audio/browser, extra packages, package search/cache, and dry-run validation. Package search downloads/caches the official Slackware `PACKAGES.TXT` metadata for `stable`, `current`, or an explicit release such as `15.0`.
 
-Current gap: full Slackware raw-image assembly is not implemented yet. Non-dry Slackware builds stop with an explicit error instead of pretending success. USB flashing/image validation remains distro-agnostic and unchanged for completed raw images.
+Full compile mode now produces a verified official Slackware `usbboot.img` artifact using `CHECKSUMS.md5`. Current gap: custom installed Slackware raw-image assembly from mirror packages is still future work. USB flashing/image validation remains distro-agnostic and unchanged for completed raw images.
 
 ## Build profiles
 

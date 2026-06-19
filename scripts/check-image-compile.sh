@@ -77,48 +77,15 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" != "1" ]; then
   exit 0
 fi
 
+echo "== Gated full Slackware image compile probe =="
 SLACKWARE_FULL_LOG="$WORK_DIR/slackware-full.log"
-set +e
+SLACKWARE_FULL_IMG="$(pwd)/$WORK_DIR/slackware-full.img"
 run_logged "$SLACKWARE_FULL_LOG" \
   ./alpine-usb build \
   --distro slackware \
   --slackware-release stable \
-  --output "$(pwd)/$WORK_DIR/slackware-full.img" \
+  --output "$SLACKWARE_FULL_IMG" \
   --password testpass \
-  --extra-package vim \
-  --wm i3 \
-  -y
-slackware_code=$?
-set -e
-if [ "$slackware_code" -eq 0 ]; then
-  fail "Slackware full image compile unexpectedly succeeded; unsupported builds must not pretend success."
-fi
-assert_log_contains "$SLACKWARE_FULL_LOG" 'Slackware full image assembly is not implemented yet; use --dry-run for validated package/config planning\.' "Slackware unsupported-build message missing"
-fail "Slackware full image compile is intentionally unsupported; see $SLACKWARE_FULL_LOG"
-
-echo "== Gated full image compile probe =="
-case "$(uname -s)" in
-  Darwin)
-    command -v docker >/dev/null 2>&1 || fail "Full image compile on macOS requires Docker Desktop; docker command not found."
-    docker info >/dev/null 2>&1 || fail "Full image compile on macOS requires Docker Desktop to be running."
-    ;;
-  Linux)
-    for tool in mtools grub-mkstandalone qemu-nbd parted rsync mkfs.vfat; do
-      command -v "$tool" >/dev/null 2>&1 || fail "Full image compile on Linux requires '$tool'. Install build dependencies or unset LINUX_USB_FULL_IMAGE_COMPILE."
-    done
-    ;;
-  *)
-    fail "Full image compile is only supported on macOS with Docker or native Linux."
-    ;;
-esac
-
-ALPINE_FULL_LOG="$WORK_DIR/alpine-full.log"
-ALPINE_FULL_IMG="$(pwd)/$WORK_DIR/alpine-full.img"
-run_logged "$ALPINE_FULL_LOG" \
-  ./alpine-usb build \
-  --output "$ALPINE_FULL_IMG" \
-  --password testpass \
-  --profile minimal \
   --desktop none \
   --display-manager none \
   --network none \
@@ -126,26 +93,9 @@ run_logged "$ALPINE_FULL_LOG" \
   --no-bluetooth \
   --audio none \
   --browser none \
-  --firmware none \
-  --image-size 2G \
-  -y
-[ -s "$ALPINE_FULL_IMG" ] || fail "Alpine full image compile did not create a non-empty image at $ALPINE_FULL_IMG"
-
-SLACKWARE_FULL_LOG="$WORK_DIR/slackware-full.log"
-set +e
-run_logged "$SLACKWARE_FULL_LOG" \
-  ./alpine-usb build \
-  --distro slackware \
-  --slackware-release stable \
-  --output "$(pwd)/$WORK_DIR/slackware-full.img" \
-  --password testpass \
   --extra-package vim \
   --wm i3 \
   -y
-slackware_code=$?
-set -e
-if [ "$slackware_code" -eq 0 ]; then
-  fail "Slackware full image compile unexpectedly succeeded; unsupported builds must not pretend success."
-fi
-assert_log_contains "$SLACKWARE_FULL_LOG" 'Slackware full image assembly is not implemented yet; use --dry-run for validated package/config planning\.' "Slackware unsupported-build message missing"
-fail "Slackware full image compile is intentionally unsupported; see $SLACKWARE_FULL_LOG"
+[ -s "$SLACKWARE_FULL_IMG" ] || fail "Slackware full image compile did not create a non-empty image at $SLACKWARE_FULL_IMG"
+assert_log_contains "$SLACKWARE_FULL_LOG" 'Slackware image written' "Slackware full image success marker missing"
+echo "Image compile check passed (full Slackware artifact mode)."
