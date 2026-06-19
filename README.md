@@ -469,6 +469,12 @@ Full project compile/lint/test/smoke check:
 scripts/check-project.sh
 ```
 
+Image configuration compile check (Python/shell compile plus Alpine and Ubuntu dry-run build plans):
+
+```sh
+scripts/check-image-compile.sh
+```
+
 Unit tests and linter:
 
 ```sh
