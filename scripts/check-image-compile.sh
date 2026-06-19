@@ -59,33 +59,40 @@ assert_log_contains "$ALPINE_LOG" '^ desktop=none' 'Alpine minimal no-desktop pl
 
 if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
   log "Full image compile requested"
-  if [ "$(uname -s)" != "Linux" ]; then
-    skip "full image compile requires a Linux host; current host is $(uname -s)"
-    exit 0
-  fi
-  if [ "$(id -u)" -ne 0 ] && ! sudo -n true >/dev/null 2>&1; then
-    skip "full image compile requires root or passwordless sudo"
-    exit 0
-  fi
-  missing_tools=()
-  for tool in debootstrap parted losetup partx mkfs.vfat mkfs.ext4 grub-install; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      missing_tools+=("$tool")
-    fi
-  done
-  if [ "${#missing_tools[@]}" -gt 0 ]; then
-    skip "full Debian image compile requires missing host tools: ${missing_tools[*]}"
-    exit 0
-  fi
+  case "$(uname -s)" in
+    Darwin)
+      command -v docker >/dev/null 2>&1 || fail "full Debian image compile on macOS requires Docker"
+      docker info >/dev/null 2>&1 || fail "Docker is not running; start Docker Desktop for full Debian image compile"
+      ;;
+    Linux)
+      if [ "$(id -u)" -ne 0 ] && ! sudo -n true >/dev/null 2>&1; then
+        fail "full image compile requires root or passwordless sudo"
+      fi
+      missing_tools=()
+      for tool in debootstrap parted losetup partx mkfs.vfat mkfs.ext4 grub-install; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+          missing_tools+=("$tool")
+        fi
+      done
+      if [ "${#missing_tools[@]}" -gt 0 ]; then
+        fail "full Debian image compile requires missing host tools: ${missing_tools[*]}"
+      fi
+      ;;
+    *)
+      fail "full Debian image compile requires Linux, or macOS with Docker"
+      ;;
+  esac
 
   FULL_LOG="$WORK_DIR/debian-full.log"
   FULL_OUTPUT="$PWD/$WORK_DIR/debian-full.img"
+  rm -f "$FULL_OUTPUT"
   log "Building Debian image -> $FULL_OUTPUT (log: $FULL_LOG)"
   ./alpine-usb build \
     --distro debian \
     --release stable \
     --password testpass \
     --profile minimal \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     --output "$FULL_OUTPUT" \
     -y >"$FULL_LOG" 2>&1 || {
       tail -n 120 "$FULL_LOG" >&2 || true
