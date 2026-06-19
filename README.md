@@ -489,6 +489,12 @@ Dry-run option matrix (parallel by default; override with `JOBS=4`):
 scripts/validate-config-matrix.sh
 ```
 
+Image configuration compile check (Python compile, shell syntax, and real CLI dry-runs for Void and Alpine build plans):
+
+```sh
+scripts/check-image-compile.sh
+```
+
 Check representative profiles with Alpine APK dependency solver inside Docker:
 
 ```sh
