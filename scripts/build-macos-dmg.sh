@@ -41,10 +41,13 @@ mkdir -p "$STAGE_DIR"
   --name "$APP_NAME" \
   --hidden-import "alpine_usb.interfaces.gui" \
   --hidden-import "alpine_usb.apk_packages.index" \
+  --hidden-import "alpine_usb.arch_packages.index" \
   --hidden-import "alpine_usb.build_profiles.config_files" \
   --hidden-import "alpine_usb.images.validation" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
+  --add-data "build-arch-usb.sh:." \
+  --add-data "configure-arch-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
