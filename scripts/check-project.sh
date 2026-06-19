@@ -15,8 +15,13 @@ bash -n \
   scripts/build-macos-dmg.sh \
   scripts/package-release-assets.sh \
   scripts/check-apk-solver.sh \
+  scripts/check-image-compile.sh \
   scripts/test-cli.sh \
   scripts/validate-config-matrix.sh
+
+if [ "${SKIP_IMAGE_COMPILE_CHECK:-0}" != "1" ]; then
+  scripts/check-image-compile.sh
+fi
 
 ./alpine-usb --help >/dev/null
 ./alpine-usb tui --self-test >/dev/null

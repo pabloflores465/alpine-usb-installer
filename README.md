@@ -477,6 +477,12 @@ Unified terminal smoke tests:
 scripts/test-cli.sh
 ```
 
+Image configuration compile check (Python/shell syntax plus real Alpine and Debian CLI dry-runs that emit concrete package/build plans):
+
+```sh
+scripts/check-image-compile.sh
+```
+
 Dry-run option matrix (parallel by default; override with `JOBS=4`):
 
 ```sh
