@@ -65,38 +65,42 @@ need_file_nonempty "$alpine_plan"
 grep -q '^alpine-base$' "$alpine_plan" || die "Alpine package plan missing alpine-base"
 
 run_full_image_compile() {
-  full_log="$work_dir/full-image.log"
-  full_image="$PWD/$work_dir/alpine-full-compile.img"
+  full_log="$work_dir/arch-full.log"
+  full_image="$PWD/$work_dir/arch-full.img"
   rm -f "$full_log" "$full_image"
 
   case "$(uname -s)" in
     Darwin)
-      command -v docker >/dev/null 2>&1 || { log "Skipping full image compile: Docker not installed on macOS"; return 0; }
-      docker info >/dev/null 2>&1 || { log "Skipping full image compile: Docker is not running"; return 0; }
+      command -v docker >/dev/null 2>&1 || die "Full Arch image compile on macOS requires Docker"
+      docker info >/dev/null 2>&1 || die "Docker is not running; start Docker Desktop for full Arch image compile"
       ;;
     Linux)
       if [ "$(id -u)" != "0" ]; then
-        log "Skipping full image compile: Linux build needs root for image/loop setup"
-        return 0
+        die "Full Arch image compile requires root on Linux for image/loop setup"
       fi
-      for tool in curl sudo python3 mmd mcopy mdir; do
-        command -v "$tool" >/dev/null 2>&1 || { log "Skipping full image compile: missing $tool"; return 0; }
+      for tool in python3 pacstrap arch-chroot sfdisk losetup mkfs.fat mkfs.ext4 mount umount; do
+        command -v "$tool" >/dev/null 2>&1 || die "Full Arch image compile missing $tool"
       done
       ;;
     *)
-      log "Skipping full image compile: unsupported host $(uname -s)"
-      return 0
+      die "Full Arch image compile unsupported host $(uname -s)"
       ;;
   esac
 
-  log "Running gated full Alpine image compile"
+  log "Running gated full Arch image compile"
   ./alpine-usb build \
+    --distro arch \
     --output "$full_image" \
     --password testpass \
     --profile minimal \
     --desktop none \
+    --display-manager none \
     --no-bluetooth \
     --no-wifi \
+    --audio none \
+    --browser none \
+    --firmware none \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     -y >"$full_log" 2>&1
   need_file_nonempty "$full_image"
 }

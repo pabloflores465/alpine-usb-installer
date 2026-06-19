@@ -54,10 +54,10 @@ def arch_packages_from_env(env: dict[str, str]) -> list[str]:
     packages = list(BASE_PACKAGES)
 
     if kernel == "lts":
-        _append(packages, "linux-lts", "linux-lts-headers")
+        _append(packages, "linux-lts")
         packages.remove("linux")
     elif kernel == "stable":
-        _append(packages, "linux-headers")
+        pass
     else:
         raise ValueError(f"Unsupported Arch kernel flavor: {kernel}")
 
