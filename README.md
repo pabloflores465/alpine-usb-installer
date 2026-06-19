@@ -473,6 +473,12 @@ Unified terminal smoke tests:
 scripts/test-cli.sh
 ```
 
+Image configuration compile checks (Python compileall, shell syntax, NixOS/Alpine CLI dry-run build plans; set `LINUX_USB_FULL_IMAGE_COMPILE=1` for a gated real NixOS image build when host tools are available):
+
+```sh
+scripts/check-image-compile.sh
+```
+
 Dry-run option matrix (parallel by default; override with `JOBS=4`):
 
 ```sh
