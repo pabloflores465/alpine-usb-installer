@@ -1225,7 +1225,12 @@ class Main(QWidget):
 
         self.bootloader = QComboBox()
         add_combo_items(
-            self.bootloader, [("GRUB removable UEFI", "grub"), ("systemd-boot removable UEFI", "systemd-boot")]
+            self.bootloader,
+            [
+                ("generic extlinux (NixOS sd-image)", "extlinux"),
+                ("GRUB removable UEFI", "grub"),
+                ("systemd-boot removable UEFI", "systemd-boot"),
+            ],
         )
         self.kernel = QComboBox()
         add_combo_items(self.kernel, [("linux-lts", "lts"), ("linux-stable", "stable")])

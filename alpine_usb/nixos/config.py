@@ -12,7 +12,7 @@ NIXOS_SESSIONS = ("auto", *NIXOS_DESKTOPS[:-1], *VALID_WMS, "shell")
 NIXOS_BROWSERS = ("firefox", "chromium", "none")
 NIXOS_AUDIO = ("pipewire", "alsa", "none")
 NIXOS_KERNELS = ("lts", "stable")
-NIXOS_BOOTLOADERS = ("grub", "systemd-boot")
+NIXOS_BOOTLOADERS = ("extlinux", "grub", "systemd-boot")
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class NixosBuildConfig:
     network: str = "networkmanager"
     wifi: bool = True
     bluetooth: bool = True
-    bootloader: str = "grub"
+    bootloader: str = "extlinux"
     kernel: str = "lts"
     firmware: str = "full"
     auto_resize: bool = True
@@ -104,7 +104,7 @@ def config_from_args(args: argparse.Namespace, extra_packages: str) -> NixosBuil
         network=getattr(args, "network", "networkmanager"),
         wifi=bool(getattr(args, "wifi", True)),
         bluetooth=bool(getattr(args, "bluetooth", True)),
-        bootloader=getattr(args, "bootloader", "grub"),
+        bootloader=getattr(args, "bootloader", "extlinux"),
         kernel=getattr(args, "kernel", "lts"),
         firmware=getattr(args, "firmware", "full"),
         auto_resize=bool(getattr(args, "auto_resize", True)),
@@ -160,9 +160,9 @@ def _desktop_lines(config: NixosBuildConfig) -> list[str]:
 def generate_configuration_nix(config: NixosBuildConfig) -> str:
     package_exprs = " ".join(f"pkgs.{package}" for package in _package_exprs(config))
     desktop_lines = [] if config.desktop == "none" and not config.window_managers else _desktop_lines(config)
-    kernel = "pkgs.linuxPackages_lts" if config.kernel == "lts" else "pkgs.linuxPackages_latest"
+    kernel = "pkgs.linuxPackages" if config.kernel == "lts" else "pkgs.linuxPackages_latest"
     lines = [
-        "{ config, pkgs, modulesPath, ... }:",
+        "{ config, lib, pkgs, modulesPath, ... }:",
         "{",
         '  imports = [ (modulesPath + "/installer/sd-card/sd-image-x86_64.nix") ];',
         f"  networking.hostName = {_quote(config.hostname)};",
@@ -175,10 +175,13 @@ def generate_configuration_nix(config: NixosBuildConfig) -> str:
         f"    model = {_quote(config.xkb_model)};",
         "  };",
         f"  boot.kernelPackages = {kernel};",
-        f"  hardware.enableRedistributableFirmware = {_nix_bool(config.firmware == 'full')};",
+        f"  hardware.enableRedistributableFirmware = lib.mkForce {_nix_bool(config.firmware == 'full')};",
         f"  boot.growPartition = {_nix_bool(config.auto_resize)};",
-        "  boot.loader.grub.enable = " + _nix_bool(config.bootloader == "grub") + ";",
-        "  boot.loader.systemd-boot.enable = " + _nix_bool(config.bootloader == "systemd-boot") + ";",
+        "  boot.loader.grub.enable = lib.mkForce " + _nix_bool(config.bootloader == "grub") + ";",
+        "  boot.loader.systemd-boot.enable = lib.mkForce " + _nix_bool(config.bootloader == "systemd-boot") + ";",
+        "  boot.loader.generic-extlinux-compatible.enable = lib.mkDefault "
+        + _nix_bool(config.bootloader == "extlinux")
+        + ";",
         "  boot.loader.efi.canTouchEfiVariables = false;",
         "  networking.networkmanager.enable = " + _nix_bool(config.network == "networkmanager") + ";",
         "  networking.wireless.enable = " + _nix_bool(config.wifi and config.network != "networkmanager") + ";",

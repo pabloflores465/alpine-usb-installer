@@ -60,7 +60,7 @@ def test_generate_configuration_nix_contains_desktop_boot_network_and_packages()
 
     assert "services.desktopManager.plasma6.enable = true;" in text
     assert "services.displayManager.sddm.enable = true;" in text
-    assert "boot.loader.systemd-boot.enable = true;" in text
+    assert "boot.loader.systemd-boot.enable = lib.mkForce true;" in text
     assert "networking.networkmanager.enable = true;" in text
     assert "boot.growPartition = true;" in text
     assert "pkgs.vim" in text

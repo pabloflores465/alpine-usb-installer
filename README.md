@@ -50,7 +50,7 @@ Build and flash configurable, preinstalled **Alpine Linux or NixOS x86_64 USB im
   - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
   - Set `ALPINE_USB_REBUILD_BUILDER=1` to rebuild the cached builder image.
 - For Alpine builds on native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
-- For NixOS builds: `nix` plus `nixos-generate` from `nixos-generators` (`nix profile install nixpkgs#nixos-generators`). NixOS dry-run/config validation does not require these tools.
+- For NixOS builds: `nix` plus `nixos-generate` from `nixos-generators` on Linux, or Docker on macOS. NixOS dry-run/config validation does not require these tools.
 
 ### Runtime tools
 
@@ -143,7 +143,7 @@ Common commands:
 # Build Plasma profile
 ./alpine-usb build --ask-password --desktop plasma --display-manager sddm --bootloader systemd-boot -y
 
-# Build NixOS using nixos-generate
+# Build NixOS using nixos-generate on Linux, or Docker on macOS
 ./alpine-usb build --distro nixos --ask-password --nixos-channel nixos-24.11 -y
 
 # Build smaller/faster minimal profile defaults

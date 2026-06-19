@@ -51,7 +51,7 @@ require_in_file "NixOS configuration rendered successfully" "$nixos_log"
 require_in_file "flake.nix" "$nixos_log"
 require_in_file "configuration.nix" "$nixos_log"
 require_in_file "nixosConfigurations.usb" "$nixos_log"
-require_in_file "boot.loader.systemd-boot.enable = true;" "$nixos_log"
+require_in_file "boot.loader.systemd-boot.enable = lib.mkForce true;" "$nixos_log"
 require_in_file "services.xserver.desktopManager.xfce.enable = true;" "$nixos_log"
 require_in_file "environment.systemPackages = with pkgs; [ pkgs.htop" "$nixos_log"
 if ! awk '/configuration\.nix/{seen=1; next} seen && /system\.stateVersion =/{found=1} END{exit found ? 0 : 1}' "$nixos_log"; then
@@ -71,19 +71,22 @@ require_in_file "display_manager=none" "$alpine_log"
 
 if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
   log "Running gated full NixOS image compile"
-  if [ "$(uname -s)" != "Linux" ]; then
-    fail "LINUX_USB_FULL_IMAGE_COMPILE=1 requires a Linux host for x86_64-linux NixOS image builds"
-  fi
-  if ! command -v nixos-generate >/dev/null 2>&1; then
-    fail "LINUX_USB_FULL_IMAGE_COMPILE=1 requested but nixos-generate is not on PATH; install nixpkgs#nixos-generators"
-  fi
-  if ! command -v nix >/dev/null 2>&1; then
-    fail "LINUX_USB_FULL_IMAGE_COMPILE=1 requested but nix is not on PATH"
+  if ! command -v nixos-generate >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+    fail "LINUX_USB_FULL_IMAGE_COMPILE=1 requested but neither nixos-generate nor Docker is on PATH"
   fi
   ./alpine-usb build \
     --distro nixos \
     --profile minimal \
     --password testpass \
+    --desktop none \
+    --display-manager none \
+    --network none \
+    --no-wifi \
+    --no-bluetooth \
+    --audio none \
+    --browser none \
+    --firmware none \
+    --bootloader extlinux \
     --output "$work_dir/nixos-full.img" \
     -y >"$work_dir/nixos-full.log" 2>&1
   require_in_file "NixOS image written" "$work_dir/nixos-full.log"

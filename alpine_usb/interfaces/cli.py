@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from alpine_usb.apk_packages.index import (
@@ -329,14 +330,89 @@ def run_nixos_dry_run(config) -> int:
     info("Dry-run only: generated NixOS flake and configuration follow.")
     print_panel("flake.nix", [generate_flake_nix(config).rstrip()])
     print_panel("configuration.nix", [generate_configuration_nix(config).rstrip()])
-    ok("NixOS configuration rendered successfully. Build requires nixos-generate on PATH.")
+    ok("NixOS configuration rendered successfully. Build requires nixos-generate or Docker.")
+    return 0
+
+
+def effective_nixos_image_config(config):
+    if config.bootloader == "extlinux":
+        return config
+    warn("NixOS sd-image builds use extlinux; overriding selected bootloader for image compile.")
+    return replace(config, bootloader="extlinux")
+
+
+def run_nixos_docker_build(config, output: Path) -> int:
+    docker = shutil.which("docker")
+    if docker is None:
+        err("NixOS Docker build requires Docker on PATH.")
+        return 1
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".nixos-build-", dir=output.parent) as tmp:
+        work = Path(tmp)
+        (work / "configuration.nix").write_text(generate_configuration_nix(config))
+        (work / "flake.nix").write_text(generate_flake_nix(config))
+        script = f"""
+          nix --extra-experimental-features 'nix-command flakes' --option filter-syscalls false build \
+            .#nixosConfigurations.usb.config.system.build.sdImage --no-write-lock-file --out-link result
+          artifact=$(find -L result -maxdepth 4 -type f \\( -name '*.img' -o -name '*.raw' -o -name '*.img.zst' -o -name '*.raw.zst' \\) | sort | head -n 1)
+          if [ -z "$artifact" ]; then
+            echo 'No NixOS image artifact found under result' >&2
+            exit 1
+          fi
+          rm -f /work/nixos-output.img /work/nixos-output.img.zst
+          case "$artifact" in
+            *.zst)
+              cp "$artifact" /work/nixos-output.img.zst
+              nix --extra-experimental-features 'nix-command flakes' shell github:NixOS/nixpkgs/{config.channel}#zstd \
+                -c zstd -df /work/nixos-output.img.zst -o /work/nixos-output.img
+              ;;
+            *)
+              cp "$artifact" /work/nixos-output.img
+              ;;
+          esac
+          chmod 0644 /work/nixos-output.img 2>/dev/null || true
+        """
+        cmd = [
+            docker,
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--security-opt",
+            "seccomp=unconfined",
+            "-v",
+            f"{work}:/work",
+            "-w",
+            "/work",
+            "nixos/nix:latest",
+            "sh",
+            "-ceu",
+            script,
+        ]
+        info("Starting NixOS Docker sd-image build. This can take a while…")
+        code = subprocess.call(cmd)
+        if code != 0:
+            err(f"NixOS Docker build failed with exit code {code}")
+            return code
+        image = work / "nixos-output.img"
+        if not image.is_file():
+            err("NixOS Docker build finished but no image was copied out")
+            return 1
+        shutil.copy2(image, output)
+    ok(f"NixOS image written: {output}")
     return 0
 
 
 def run_nixos_build(config, output: Path) -> int:
+    config = effective_nixos_image_config(config)
+    if platform.system() == "Darwin":
+        return run_nixos_docker_build(config, output)
     tool = shutil.which("nixos-generate")
     if tool is None:
-        err("NixOS build requires nixos-generate. Install it with: nix profile install nixpkgs#nixos-generators")
+        if shutil.which("docker") is not None:
+            warn("nixos-generate not found; falling back to Docker sd-image build.")
+            return run_nixos_docker_build(config, output)
+        err("NixOS build requires nixos-generate or Docker. Install nixpkgs#nixos-generators or Docker.")
         return 1
     with tempfile.TemporaryDirectory(prefix="linux-usb-nixos-") as tmp:
         work = Path(tmp)
@@ -362,7 +438,7 @@ def run_nixos_build(config, output: Path) -> int:
             return 1
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image, output)
-    ok(f"Image ready: {output}")
+    ok(f"NixOS image written: {output}")
     return 0
 
 
@@ -622,7 +698,7 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument("--no-wifi", dest="wifi", action="store_false")
     parser.add_argument("--bluetooth", dest="bluetooth", action="store_true", default=True)
     parser.add_argument("--no-bluetooth", dest="bluetooth", action="store_false")
-    parser.add_argument("--bootloader", default="grub", choices=["grub", "systemd-boot"])
+    parser.add_argument("--bootloader", default="grub", choices=["grub", "systemd-boot", "extlinux"])
     parser.add_argument("--kernel", default="lts", choices=["lts", "stable"])
     parser.add_argument("--firmware", default="full", choices=["full", "none"])
     parser.add_argument(

@@ -42,7 +42,7 @@ CHOICES = {
     "browser": ["firefox-esr", "firefox", "chromium", "none"],
     "audio": ["pipewire", "alsa", "none"],
     "network": ["networkmanager", "none"],
-    "bootloader": ["grub", "systemd-boot"],
+    "bootloader": ["extlinux", "grub", "systemd-boot"],
     "kernel": ["lts", "stable"],
     "firmware": ["full", "none"],
     "systemd_boot_console_mode": ["max", "auto", "keep", "0", "1", "2", "3"],
