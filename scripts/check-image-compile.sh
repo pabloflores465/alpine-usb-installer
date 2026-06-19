@@ -65,6 +65,23 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" != "1" ]; then
   exit 0
 fi
 
+FULL_GENTOO_LOG="$WORK_DIR/gentoo-full.log"
+FULL_GENTOO_IMG="$(pwd)/$WORK_DIR/gentoo-full.img"
+log "Attempting full Gentoo image build; this branch should fail with the known unsupported-build message ($FULL_GENTOO_LOG)"
+set +e
+./alpine-usb build \
+  --distro gentoo \
+  --password testpass \
+  --output "$FULL_GENTOO_IMG" \
+  -y >"$FULL_GENTOO_LOG" 2>&1
+gentoo_code=$?
+set -e
+if [ "$gentoo_code" -eq 0 ]; then
+  die "Gentoo full image build unexpectedly succeeded; update the image compile check for real Gentoo build support."
+fi
+assert_log_contains 'Gentoo full image build is not implemented in this branch yet' "$FULL_GENTOO_LOG"
+die "Gentoo full image build is intentionally unsupported in this branch; see $FULL_GENTOO_LOG"
+
 supports_alpine_full_build() {
   case "$(uname -s)" in
     Darwin)
