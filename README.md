@@ -479,6 +479,12 @@ Unified terminal smoke tests:
 scripts/test-cli.sh
 ```
 
+Dry-run image configuration compile check (Python/shell compile plus Alpine and Gentoo CLI build-plan dry-runs):
+
+```sh
+scripts/check-image-compile.sh
+```
+
 Dry-run option matrix (parallel by default; override with `JOBS=4`):
 
 ```sh
