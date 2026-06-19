@@ -27,7 +27,7 @@ from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_
 from alpine_usb.fedora_packages.index import search_fedora_packages
 from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.interfaces import cli
-from alpine_usb.linux_distros.fedora import FEDORA_RELEASE_RE
+from alpine_usb.linux_distros.fedora import validate_release
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
 
 
@@ -162,6 +162,7 @@ DEFAULT_IMAGE_NAME = "alpine-usb.img"
 DEFAULT_FEDORA_IMAGE_NAME = "fedora-usb.img"
 DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "alpine-usb-installer"
 DEFAULT_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME
+DEFAULT_FEDORA_OUTPUT_PATH = DEFAULT_OUTPUT_DIR / DEFAULT_FEDORA_IMAGE_NAME
 SAVED_CONFIG_PATH = Path.home() / ".config" / "alpine-usb-installer" / "gui-config.json"
 CONFIG_FILE_FILTER = "JSON configuration (*.json);;YAML configuration (*.yaml *.yml)"
 
@@ -1336,9 +1337,16 @@ class Main(QWidget):
         }
 
     def apply_config(self, cfg: dict):
-        self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
+        distro = str(cfg.get("distro", "alpine"))
+        default_image = DEFAULT_FEDORA_OUTPUT_PATH if distro == "fedora" else DEFAULT_OUTPUT_PATH
+        image = str(cfg.get("image", default_image))
+        if image == str(DEFAULT_OUTPUT_PATH) and distro == "fedora":
+            image = str(DEFAULT_FEDORA_OUTPUT_PATH)
+        elif image == str(DEFAULT_FEDORA_OUTPUT_PATH) and distro != "fedora":
+            image = str(DEFAULT_OUTPUT_PATH)
+        self.image.setText(image)
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
-        self.set_combo_value(self.distro, str(cfg.get("distro", "alpine")))
+        self.set_combo_value(self.distro, distro)
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
@@ -1543,6 +1551,19 @@ class Main(QWidget):
             self.write_current_config_silently()
             self.refresh_build_summary()
             self.update_dirty_indicators()
+
+        def distro_changed(*_args):
+            distro = combo_value(self.distro) or "alpine"
+            default_image = DEFAULT_FEDORA_OUTPUT_PATH if distro == "fedora" else DEFAULT_OUTPUT_PATH
+            current = self.image.text().strip()
+            if (
+                not current or current in {str(DEFAULT_OUTPUT_PATH), str(DEFAULT_FEDORA_OUTPUT_PATH)}
+            ) and current != str(default_image):
+                self.image.setText(str(default_image))
+                return
+            changed()
+
+        self.distro.currentTextChanged.connect(distro_changed)
 
         for widget in [
             self.image_size,
@@ -2106,11 +2127,14 @@ class Main(QWidget):
         self.console_stack.setVisible(expanded)
         self.update_console_style(expanded)
 
+    def default_output_path(self) -> Path:
+        return DEFAULT_FEDORA_OUTPUT_PATH if combo_value(self.distro) == "fedora" else DEFAULT_OUTPUT_PATH
+
     def choose_output_path(self):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Select output image path",
-            self.image.text().strip() or str(DEFAULT_OUTPUT_PATH),
+            self.image.text().strip() or str(self.default_output_path()),
             "Disk images (*.img);;All files (*)",
         )
         if path:
@@ -2292,8 +2316,10 @@ class Main(QWidget):
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
         if env.get("LINUX_USB_DISTRO") == "fedora":
-            if not FEDORA_RELEASE_RE.match(env["FEDORA_RELEASE"]):
-                return "Fedora release must be stable, rawhide, or a numeric release such as 41."
+            try:
+                validate_release(env["FEDORA_RELEASE"])
+            except ValueError:
+                return "Fedora release must be stable, latest, rawhide, or a numeric release such as 41."
             if not re.match(r"^[a-z_][a-z0-9_-]*$", env["FEDORA_USB_USER"]):
                 return (
                     "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
@@ -2337,6 +2363,17 @@ class Main(QWidget):
         return None
 
     def config_summary_text(self, env: dict[str, str]) -> str:
+        if env.get("LINUX_USB_DISTRO") == "fedora":
+            return (
+                f"Image: {env['IMAGE_SIZE']} | Fedora: {env['FEDORA_RELEASE']} | Arch: {env['ARCH']}\n"
+                f"System: hostname={env['FEDORA_USB_HOSTNAME']} | user={env['FEDORA_USB_USER']} | passwords hidden\n"
+                f"Locale: {env['FEDORA_USB_LOCALE']} | TZ: {env['FEDORA_USB_TIMEZONE']} | console={env['FEDORA_USB_CONSOLE_KEYMAP']} | xkb={env['FEDORA_USB_XKB_LAYOUT']} {env['FEDORA_USB_XKB_VARIANT'] or ''} model={env['FEDORA_USB_XKB_MODEL']}\n"
+                f"Desktop: {env['FEDORA_USB_DESKTOP']} | DM: {env['FEDORA_USB_DISPLAY_MANAGER']} | Session: {env['FEDORA_USB_DEFAULT_SESSION']} | WMs: {env['FEDORA_USB_TILING_WMS'] or 'none'}\n"
+                f"Apps: browser={env['FEDORA_USB_BROWSER']} | audio={env['FEDORA_USB_AUDIO']}\n"
+                f"Hardware/network: network={env['FEDORA_USB_NETWORK']} | Wi‑Fi={env['FEDORA_USB_WIFI']} | Bluetooth={env['FEDORA_USB_BLUETOOTH']}\n"
+                f"Boot: {env['FEDORA_USB_BOOTLOADER']} | kernel={env['FEDORA_USB_KERNEL_FLAVOR']} | firmware={env['FEDORA_USB_FIRMWARE']} | legacy-X11={env.get('FEDORA_USB_LEGACY_X11_DRIVERS', '1')} | timeout={env['FEDORA_USB_BOOT_TIMEOUT']} | auto-resize={env['FEDORA_USB_AUTO_RESIZE']}\n"
+                f"Extra packages: {env['FEDORA_USB_EXTRA_PACKAGES'] or 'none'}"
+            )
         return (
             f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
             f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
@@ -2352,37 +2389,66 @@ class Main(QWidget):
         def esc(value: object) -> str:
             return html.escape(str(value))
 
-        rows = [
-            ("Output", html_soft_break(output_path)),
-            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
-            (
-                "System",
-                f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
-            ),
-            (
-                "Locale",
-                f"{esc(env['ALPINE_USB_LOCALE'])} · TZ {esc(env['ALPINE_USB_TIMEZONE'])} · console {esc(env['ALPINE_USB_CONSOLE_KEYMAP'])} · XKB {esc(env['ALPINE_USB_XKB_LAYOUT'])} {esc(env['ALPINE_USB_XKB_VARIANT'] or '')} · model {esc(env['ALPINE_USB_XKB_MODEL'])}",
-            ),
-            (
-                "Desktop",
-                f"{esc(env['ALPINE_USB_DESKTOP'])} · DM {esc(env['ALPINE_USB_DISPLAY_MANAGER'])} · Session {esc(env['ALPINE_USB_DEFAULT_SESSION'])} · WMs {esc(env['ALPINE_USB_TILING_WMS'] or 'none')}",
-            ),
-            ("Apps", f"browser={esc(env['ALPINE_USB_BROWSER'])} · audio={esc(env['ALPINE_USB_AUDIO'])}"),
-            (
-                "Hardware/network",
-                f"network={esc(env['ALPINE_USB_NETWORK'])} · Wi‑Fi={esc(env['ALPINE_USB_WIFI'])} · Bluetooth={esc(env['ALPINE_USB_BLUETOOTH'])}",
-            ),
-            (
-                "Boot",
-                f"{esc(env['ALPINE_USB_BOOTLOADER'])} · linux-{esc(env['ALPINE_USB_KERNEL_FLAVOR'])} · firmware={esc(env['ALPINE_USB_FIRMWARE'])} · legacy-X11={esc(env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env['ALPINE_USB_BOOT_TIMEOUT'])} · auto-resize={esc(env['ALPINE_USB_AUTO_RESIZE'])}",
-            ),
-            ("Extra packages", esc(env["ALPINE_USB_EXTRA_PACKAGES"] or "none")),
-        ]
+        if env.get("LINUX_USB_DISTRO") == "fedora":
+            rows = [
+                ("Output", html_soft_break(output_path)),
+                ("Image", f"{esc(env['IMAGE_SIZE'])} · Fedora {esc(env['FEDORA_RELEASE'])} · Arch {esc(env['ARCH'])}"),
+                (
+                    "System",
+                    f"hostname={esc(env['FEDORA_USB_HOSTNAME'])} · user={esc(env['FEDORA_USB_USER'])} · passwords hidden",
+                ),
+                (
+                    "Locale",
+                    f"{esc(env['FEDORA_USB_LOCALE'])} · TZ {esc(env['FEDORA_USB_TIMEZONE'])} · console {esc(env['FEDORA_USB_CONSOLE_KEYMAP'])} · XKB {esc(env['FEDORA_USB_XKB_LAYOUT'])} {esc(env['FEDORA_USB_XKB_VARIANT'] or '')} · model {esc(env['FEDORA_USB_XKB_MODEL'])}",
+                ),
+                (
+                    "Desktop",
+                    f"{esc(env['FEDORA_USB_DESKTOP'])} · DM {esc(env['FEDORA_USB_DISPLAY_MANAGER'])} · Session {esc(env['FEDORA_USB_DEFAULT_SESSION'])} · WMs {esc(env['FEDORA_USB_TILING_WMS'] or 'none')}",
+                ),
+                ("Apps", f"browser={esc(env['FEDORA_USB_BROWSER'])} · audio={esc(env['FEDORA_USB_AUDIO'])}"),
+                (
+                    "Hardware/network",
+                    f"network={esc(env['FEDORA_USB_NETWORK'])} · Wi‑Fi={esc(env['FEDORA_USB_WIFI'])} · Bluetooth={esc(env['FEDORA_USB_BLUETOOTH'])}",
+                ),
+                (
+                    "Boot",
+                    f"{esc(env['FEDORA_USB_BOOTLOADER'])} · kernel={esc(env['FEDORA_USB_KERNEL_FLAVOR'])} · firmware={esc(env['FEDORA_USB_FIRMWARE'])} · legacy-X11={esc(env.get('FEDORA_USB_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env['FEDORA_USB_BOOT_TIMEOUT'])} · auto-resize={esc(env['FEDORA_USB_AUTO_RESIZE'])}",
+                ),
+                ("Extra packages", esc(env["FEDORA_USB_EXTRA_PACKAGES"] or "none")),
+            ]
+        else:
+            rows = [
+                ("Output", html_soft_break(output_path)),
+                ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+                (
+                    "System",
+                    f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
+                ),
+                (
+                    "Locale",
+                    f"{esc(env['ALPINE_USB_LOCALE'])} · TZ {esc(env['ALPINE_USB_TIMEZONE'])} · console {esc(env['ALPINE_USB_CONSOLE_KEYMAP'])} · XKB {esc(env['ALPINE_USB_XKB_LAYOUT'])} {esc(env['ALPINE_USB_XKB_VARIANT'] or '')} · model {esc(env['ALPINE_USB_XKB_MODEL'])}",
+                ),
+                (
+                    "Desktop",
+                    f"{esc(env['ALPINE_USB_DESKTOP'])} · DM {esc(env['ALPINE_USB_DISPLAY_MANAGER'])} · Session {esc(env['ALPINE_USB_DEFAULT_SESSION'])} · WMs {esc(env['ALPINE_USB_TILING_WMS'] or 'none')}",
+                ),
+                ("Apps", f"browser={esc(env['ALPINE_USB_BROWSER'])} · audio={esc(env['ALPINE_USB_AUDIO'])}"),
+                (
+                    "Hardware/network",
+                    f"network={esc(env['ALPINE_USB_NETWORK'])} · Wi‑Fi={esc(env['ALPINE_USB_WIFI'])} · Bluetooth={esc(env['ALPINE_USB_BLUETOOTH'])}",
+                ),
+                (
+                    "Boot",
+                    f"{esc(env['ALPINE_USB_BOOTLOADER'])} · linux-{esc(env['ALPINE_USB_KERNEL_FLAVOR'])} · firmware={esc(env['ALPINE_USB_FIRMWARE'])} · legacy-X11={esc(env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env['ALPINE_USB_BOOT_TIMEOUT'])} · auto-resize={esc(env['ALPINE_USB_AUTO_RESIZE'])}",
+                ),
+                ("Extra packages", esc(env["ALPINE_USB_EXTRA_PACKAGES"] or "none")),
+            ]
         lines = "".join(
             f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
             for title, value in rows
         )
-        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        distro_label = "Fedora" if env.get("LINUX_USB_DISTRO") == "fedora" else "Alpine"
+        return f"<div style='min-width:440px; max-width:520px;'><h2>Build {distro_label} image?</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(
@@ -2407,9 +2473,17 @@ class Main(QWidget):
         return ""
 
     def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
+        distro = str(cfg.get("distro", "alpine"))
+        default_image = DEFAULT_FEDORA_OUTPUT_PATH if distro == "fedora" else DEFAULT_OUTPUT_PATH
+        image = str(cfg.get("image", default_image))
+        if image == str(DEFAULT_OUTPUT_PATH) and distro == "fedora":
+            image = str(DEFAULT_FEDORA_OUTPUT_PATH)
+        elif image == str(DEFAULT_FEDORA_OUTPUT_PATH) and distro != "fedora":
+            image = str(DEFAULT_OUTPUT_PATH)
         return {
-            "image": str(cfg.get("image", DEFAULT_OUTPUT_PATH)),
+            "image": image,
             "image_size": str(cfg.get("image_size", "16G")),
+            "distro": distro,
             "alpine_branch": str(cfg.get("alpine_branch", "latest-stable")),
             "arch": str(cfg.get("arch", "x86_64")),
             "hostname": str(cfg.get("hostname", "alpine-usb")),
@@ -2445,9 +2519,13 @@ class Main(QWidget):
         e = {key: html.escape(str(value)) for key, value in env.items()}
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
+        distro_label = "Fedora" if env.get("distro") == "fedora" else "Alpine"
+        branch = e["alpine_branch"]
+        if env.get("distro") == "fedora" and branch == "latest-stable":
+            branch = "stable"
         self.build_summary.setText(
             f"<b>Output:</b> {e['image']}<br>"
-            f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
+            f"<b>Image:</b> size {e['image_size']} · {distro_label} {branch} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
             f"<b>Locale:</b> {e['locale']} · timezone {e['timezone']} · console keymap {e['console_keymap']} · XKB {e['xkb_layout']} · variant {e['xkb_variant'] or 'none'} · model {e['xkb_model']}<br>"
             f"<b>Desktop:</b> {e['desktop']} · display manager {e['display_manager']} · session {e['default_session']} · WMs {wms}<br>"
@@ -2461,7 +2539,13 @@ class Main(QWidget):
         if self.has_running_worker():
             modal(self, "error", APP_TITLE, "Another operation is still running. Wait for it to finish.")
             return
-        output_path = self.image.text().strip() or str(DEFAULT_OUTPUT_PATH)
+        output_path = self.image.text().strip() or str(self.default_output_path())
+        if output_path == str(DEFAULT_OUTPUT_PATH) and combo_value(self.distro) == "fedora":
+            output_path = str(DEFAULT_FEDORA_OUTPUT_PATH)
+            self.image.setText(output_path)
+        elif output_path == str(DEFAULT_FEDORA_OUTPUT_PATH) and combo_value(self.distro) != "fedora":
+            output_path = str(DEFAULT_OUTPUT_PATH)
+            self.image.setText(output_path)
         Path(output_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
         env = self.collect_build_env()
         validation_error = self.validate_build_config(env)

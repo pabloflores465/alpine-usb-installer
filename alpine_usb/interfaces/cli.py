@@ -491,23 +491,24 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    branch = args.branch
     try:
         if args.distro == "fedora":
-            validate_release(args.branch)
+            branch = validate_release(args.branch)
         else:
             validate_branch(args.branch)
     except ValueError as exc:
         err(str(exc))
         return 2
     if args.distro == "fedora":
-        info(f"Searching Fedora {args.branch}/{args.arch} packages via dnf/repoquery cache")
+        info(f"Searching Fedora {branch}/{args.arch} packages via dnf/repoquery cache")
     else:
-        info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+        info(f"Searching Alpine {branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
     try:
         results = (
-            search_fedora_packages(args.branch, args.arch, args.query, args.limit)
+            search_fedora_packages(branch, args.arch, args.query, args.limit)
             if args.distro == "fedora"
-            else search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+            else search_official_apk_packages(branch, args.arch, args.query, args.limit)
         )
     except Exception as exc:
         err(f"Package search failed: {exc}")
@@ -639,7 +640,12 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--branch",
         default="latest-stable",
-        help="Alpine branch (latest-stable, edge, v3.22, ...) or Fedora release (stable, rawhide, 41, ...)",
+        help="Alpine branch (latest-stable, edge, v3.22, ...) or Fedora release (stable, latest, rawhide, 41, ...)",
+    )
+    parser.add_argument(
+        "--release",
+        dest="branch",
+        help="Alias for --branch when building or searching Fedora releases (stable, latest, rawhide, 41, ...)",
     )
     parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
     parser.add_argument("--hostname", default="alpine-usb")

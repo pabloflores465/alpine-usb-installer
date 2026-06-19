@@ -65,7 +65,63 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-[[ "$(uname -s)" == "Linux" ]] || die "Fedora image build currently requires a Linux host or VM (dry-run works everywhere)."
+# macOS cannot create Linux filesystems/loop devices natively. Re-exec inside a
+# privileged Fedora container, mirroring the Alpine Docker builder path.
+if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]]; then
+  need docker
+  docker info >/dev/null 2>&1 || die "Docker is not running. Start Docker Desktop and try again."
+
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  docker_image="${FEDORA_USB_DOCKER_IMAGE:-fedora:latest}"
+  pass_env=(
+    IMAGE_NAME OUTPUT_PATH IMAGE_SIZE ARCH LINUX_USB_DISTRO
+    FEDORA_RELEASE FEDORA_USB_PROFILE FEDORA_USB_USER FEDORA_USB_PASSWORD_FILE FEDORA_USB_ROOT_PASSWORD_FILE
+    FEDORA_USB_HOSTNAME FEDORA_USB_TIMEZONE FEDORA_USB_LOCALE FEDORA_USB_LANGUAGE
+    FEDORA_USB_CONSOLE_KEYMAP FEDORA_USB_XKB_LAYOUT FEDORA_USB_XKB_VARIANT FEDORA_USB_XKB_MODEL
+    FEDORA_USB_DESKTOP FEDORA_USB_TILING_WMS FEDORA_USB_DEFAULT_SESSION FEDORA_USB_DISPLAY_MANAGER
+    FEDORA_USB_NETWORK FEDORA_USB_WIFI FEDORA_USB_BLUETOOTH FEDORA_USB_AUDIO FEDORA_USB_BROWSER
+    FEDORA_USB_FIRMWARE FEDORA_USB_LEGACY_X11_DRIVERS FEDORA_USB_BOOTLOADER FEDORA_USB_KERNEL_FLAVOR
+    FEDORA_USB_BOOT_TIMEOUT FEDORA_USB_SYSTEMD_BOOT_CONSOLE_MODE FEDORA_USB_AUTO_RESIZE
+    FEDORA_USB_EXTRA_PACKAGES FEDORA_USB_PACKAGES FEDORA_USB_GROUPS FEDORA_USB_SERVICES
+    FEDORA_USB_DEFAULT_TARGET FEDORA_USB_WARNINGS FEDORA_USB_WORKDIR
+  )
+  docker_env=(-e FEDORA_USB_BUILD_IN_DOCKER=1)
+  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_name_args=()
+  if [[ -n "${ALPINE_USB_DOCKER_NAME:-}" ]]; then
+    docker_name_args=(--name "$ALPINE_USB_DOCKER_NAME")
+  fi
+  for name in "${pass_env[@]}"; do
+    value="${!name-}"
+    if [[ "$name" == "OUTPUT_PATH" && -n "$value" ]]; then
+      mkdir -p "$(dirname "$value")"
+      output_dir="$(cd "$(dirname "$value")" && pwd -P)"
+      output_base="$(basename "$value")"
+      docker_mounts+=(-v "$output_dir:/out")
+      docker_env+=(-e "OUTPUT_PATH=/out/$output_base")
+      continue
+    fi
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
+      value="/work/${value#"$SCRIPT_DIR"/}"
+    fi
+    docker_env+=(-e "$name=$value")
+  done
+
+  log "Starting Docker Fedora build container ($docker_image)..."
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged \
+    "${docker_env[@]}" \
+    "${docker_mounts[@]}" \
+    -w /work \
+    "$docker_image" \
+    bash -ceu '
+      dnf -y install dnf-plugins-core parted dosfstools e2fsprogs util-linux util-linux-core \
+        rsync grub2-tools grub2-tools-extra grub2-efi-x64 shim-x64 passwd policycoreutils kpartx >/dev/null
+      chmod +x build-fedora-usb.sh
+      exec ./build-fedora-usb.sh
+    '
+fi
+
+[[ "$(uname -s)" == "Linux" ]] || die "Fedora image build currently requires a Linux host, VM, or Docker Desktop on macOS (dry-run works everywhere)."
 need dnf
 need parted
 need mkfs.vfat
@@ -76,38 +132,108 @@ need rsync
 need grub2-install
 need grub2-mkconfig
 
+device_ready() {
+  local path="$1" size
+  [[ -b "$path" ]] || return 1
+  size="$(blockdev --getsize64 "$path" 2>/dev/null || true)"
+  [[ "$size" =~ ^[0-9]+$ && "$size" -gt 0 ]]
+}
+
+wait_for_device() {
+  local path="$1"
+  for _ in $(seq 1 30); do
+    device_ready "$path" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+settle_loop_partitions() {
+  local loopdev="$1"
+  local direct_boot="${loopdev}p1"
+  local direct_root="${loopdev}p2"
+  local mapper_base="/dev/mapper/$(basename "$loopdev")"
+  local mapper_boot="${mapper_base}p1"
+  local mapper_root="${mapper_base}p2"
+
+  partprobe "$loopdev" >/dev/null 2>&1 || true
+  blockdev --rereadpt "$loopdev" >/dev/null 2>&1 || true
+  partx -a "$loopdev" >/dev/null 2>&1 || partx -u "$loopdev" >/dev/null 2>&1 || true
+  if wait_for_device "$direct_boot" && wait_for_device "$direct_root"; then
+    boot_part="$direct_boot"
+    root_part="$direct_root"
+    return 0
+  fi
+
+  if command -v kpartx >/dev/null 2>&1; then
+    kpartx -d "$loopdev" >/dev/null 2>&1 || true
+    kpartx -avs "$loopdev" >/dev/null 2>&1 || true
+    command -v dmsetup >/dev/null 2>&1 && dmsetup mknodes >/dev/null 2>&1 || true
+    if wait_for_device "$mapper_boot" && wait_for_device "$mapper_root"; then
+      boot_part="$mapper_boot"
+      root_part="$mapper_root"
+      return 0
+    fi
+  fi
+
+  die "Kernel did not expose loop partitions for $loopdev. Try Docker Desktop restart, or build on a Linux VM."
+}
+
+mount_chroot_api() {
+  mkdir -p "$rootfs/dev" "$rootfs/proc" "$rootfs/sys" "$rootfs/run"
+  mountpoint -q "$rootfs/dev" || mount --rbind /dev "$rootfs/dev"
+  mountpoint -q "$rootfs/proc" || mount -t proc proc "$rootfs/proc"
+  mountpoint -q "$rootfs/sys" || mount --rbind /sys "$rootfs/sys" || true
+  mountpoint -q "$rootfs/run" || mount --rbind /run "$rootfs/run" || true
+}
+
 if [[ $EUID -ne 0 ]]; then
   die "Fedora image build requires root on Linux because it creates loop devices and filesystems. Re-run with sudo, or use --dry-run."
 fi
 
-workdir="${FEDORA_USB_WORKDIR:-.work/fedora-build}"
-rootfs="$workdir/rootfs"
+workdir="${FEDORA_USB_WORKDIR:-$PWD/.work/fedora-build}"
 mkdir -p "$workdir"
+workdir="$(cd "$workdir" && pwd -P)"
+rootfs="$workdir/rootfs"
 rm -rf "$rootfs"
 mkdir -p "$rootfs"
+if [[ "${FEDORA_USB_BUILD_IN_DOCKER:-0}" == "1" ]]; then
+  [[ -e /dev/loop-control ]] || mknod /dev/loop-control c 10 237 || true
+  for i in $(seq 0 15); do
+    [[ -e "/dev/loop$i" ]] || mknod "/dev/loop$i" b 7 "$i" || true
+  done
+fi
 truncate -s "$image_size" "$output_path"
-loop="$(losetup --find --show "$output_path")"
+parted -s "$output_path" mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on mkpart root ext4 513MiB 100%
+loop="$(losetup --partscan --find --show "$output_path")"
 cleanup() {
   set +e
-  mountpoint -q "$rootfs/boot/efi" && umount "$rootfs/boot/efi"
-  mountpoint -q "$rootfs" && umount "$rootfs"
+  for mp in "$rootfs/run" "$rootfs/sys" "$rootfs/proc" "$rootfs/dev" "$rootfs/boot/efi" "$rootfs"; do
+    mountpoint -q "$mp" && umount -R "$mp" >/dev/null 2>&1
+  done
+  command -v kpartx >/dev/null 2>&1 && kpartx -d "$loop" >/dev/null 2>&1
   losetup -d "$loop" >/dev/null 2>&1
 }
 trap cleanup EXIT
-parted -s "$loop" mklabel gpt mkpart ESP fat32 1MiB 513MiB set 1 esp on mkpart root ext4 513MiB 100%
-partprobe "$loop" || true
-sleep 1
-boot_part="${loop}p1"; root_part="${loop}p2"
-[[ -e "$boot_part" ]] || boot_part="/dev/mapper/$(basename "$loop")p1"
-[[ -e "$root_part" ]] || root_part="/dev/mapper/$(basename "$loop")p2"
+boot_part=""
+root_part=""
+settle_loop_partitions "$loop"
+log "Using partitions: boot=$boot_part root=$root_part"
 mkfs.vfat -F32 "$boot_part"
 mkfs.ext4 -F -L fedora-usb "$root_part"
 mount "$root_part" "$rootfs"
 mkdir -p "$rootfs/boot/efi"
 mount "$boot_part" "$rootfs/boot/efi"
+mount_chroot_api
+mkdir -p "$rootfs/etc/default"
+if ! grep -q '^GRUB_DISABLE_OS_PROBER=' "$rootfs/etc/default/grub" 2>/dev/null; then
+  printf '%s\n' 'GRUB_DISABLE_OS_PROBER=true' >> "$rootfs/etc/default/grub"
+fi
 release_args=()
 [[ "$release" != "stable" ]] && release_args=("--releasever=$release")
-dnf -y --installroot="$rootfs" --forcearch="$arch" "${release_args[@]}" --setopt=install_weak_deps=False install $packages $(printf '@%s ' $groups)
+dnf_root_args=(-y --use-host-config --installroot="$rootfs" --forcearch="$arch")
+log "Installing Fedora packages into installroot with host DNF repositories..."
+SYSTEMD_OFFLINE=1 dnf "${dnf_root_args[@]}" "${release_args[@]}" --setopt=install_weak_deps=False install $packages $(printf '@%s ' $groups)
 echo "$hostname" > "$rootfs/etc/hostname"
 ln -sf "../usr/share/zoneinfo/$timezone" "$rootfs/etc/localtime" || true
 echo "LANG=$locale" > "$rootfs/etc/locale.conf"
@@ -123,7 +249,11 @@ if [[ -n "${FEDORA_USB_ROOT_PASSWORD_FILE:-}" && -f "${FEDORA_USB_ROOT_PASSWORD_
 fi
 chroot "$rootfs" systemctl set-default "$default_target"
 for svc in $services; do chroot "$rootfs" systemctl enable "$svc" || true; done
-chroot "$rootfs" grub2-install --target=x86_64-efi --efi-directory=/boot/efi --removable --bootloader-id=FedoraUSB --recheck
+if ! grep -q '^GRUB_DISABLE_OS_PROBER=' "$rootfs/etc/default/grub" 2>/dev/null; then
+  printf '%s\n' 'GRUB_DISABLE_OS_PROBER=true' >> "$rootfs/etc/default/grub"
+fi
+mount_chroot_api
+chroot "$rootfs" grub2-install --target=x86_64-efi --efi-directory=/boot/efi --removable --bootloader-id=FedoraUSB --recheck --no-nvram --force
 chroot "$rootfs" grub2-mkconfig -o /boot/grub2/grub.cfg
 sync
 log "Image ready: $output_path"

@@ -7,6 +7,7 @@ from alpine_usb.apk_packages.index import validate_package_name
 from alpine_usb.build_profiles.presets import VALID_WMS
 
 FEDORA_DEFAULT_RELEASE = "stable"
+FEDORA_RELEASE_ALIASES = {"latest": FEDORA_DEFAULT_RELEASE, "latest-stable": FEDORA_DEFAULT_RELEASE}
 FEDORA_RELEASE_RE = re.compile(r"^(stable|rawhide|[0-9]{2,3})$")
 FEDORA_ARCHES = ("x86_64",)
 FEDORA_DESKTOPS = ("xfce", "gnome", "plasma", "mate", "lxqt", "none")
@@ -30,8 +31,9 @@ class FedoraPlan:
 
 
 def validate_release(release: str) -> str:
+    release = FEDORA_RELEASE_ALIASES.get(release, release)
     if not FEDORA_RELEASE_RE.match(release):
-        raise ValueError("Fedora release must be stable, rawhide, or a numeric release such as 41")
+        raise ValueError("Fedora release must be stable, rawhide, latest, or a numeric release such as 41")
     return release
 
 
@@ -162,6 +164,9 @@ def plan_from_options(
         "glibc-langpack-en",
         "kbd",
         "grub2-efi-x64",
+        "grub2-efi-x64-modules",
+        "grub2-tools",
+        "grub2-tools-extra",
         "shim-x64",
         "efibootmgr",
     ]
@@ -192,7 +197,6 @@ def plan_from_options(
                     "xorg-x11-drv-ati",
                     "xorg-x11-drv-intel",
                     "xorg-x11-drv-nouveau",
-                    "xorg-x11-drv-vesa",
                 ]
             )
 

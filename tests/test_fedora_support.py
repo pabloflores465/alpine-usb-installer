@@ -38,6 +38,8 @@ def test_fedora_plan_maps_desktop_services_and_packages() -> None:
     assert "sway" in plan.packages
     assert "chromium" in plan.packages
     assert "neovim" in plan.packages
+    assert "grub2-efi-x64-modules" in plan.packages
+    assert "xorg-x11-drv-vesa" not in plan.packages
     assert "NetworkManager.service" in plan.enabled_services
     assert plan.default_target == "graphical.target"
 
@@ -47,7 +49,12 @@ def test_fedora_release_validation_accepts_supported_values(release: str) -> Non
     assert fedora.validate_release(release) == release
 
 
-@pytest.mark.parametrize("release", ["latest-stable", "v3.22", "../41", ""])
+@pytest.mark.parametrize("release", ["latest", "latest-stable"])
+def test_fedora_release_validation_normalizes_latest_aliases(release: str) -> None:
+    assert fedora.validate_release(release) == "stable"
+
+
+@pytest.mark.parametrize("release", ["v3.22", "../41", ""])
 def test_fedora_release_validation_rejects_alpine_or_unsafe_values(release: str) -> None:
     with pytest.raises(ValueError):
         fedora.validate_release(release)
@@ -57,7 +64,7 @@ def test_cli_fedora_env_uses_fedora_keys_and_plan() -> None:
     env = cli.env_from_build_args(
         namespace(
             distro="fedora",
-            branch="stable",
+            branch="latest",
             user="fedora",
             hostname="fedora-usb",
             kernel="lts",
