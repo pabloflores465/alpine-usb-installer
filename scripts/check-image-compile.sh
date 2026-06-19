@@ -63,22 +63,27 @@ assert_log_contains "$ALPINE_LOG" '^[[:space:]]*packages:[[:space:]]+[^[:space:]
 
 if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
   log "Full image compile requested"
-  if [ "$(uname -s)" != "Linux" ]; then
-    log "SKIP full image compile: native Linux is required for loop mounts"
-    exit 0
-  fi
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    log "SKIP full image compile: root is required for xbps-install -r and loop mounts"
-    exit 0
-  fi
-  missing=()
-  for tool in xbps-install xbps-reconfigure qemu-img parted mkfs.vfat mkfs.ext4 mount umount blkid losetup; do
-    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
-  done
-  if [ "${#missing[@]}" -ne 0 ]; then
-    log "SKIP full image compile: missing tools: ${missing[*]}"
-    exit 0
-  fi
+  case "$(uname -s)" in
+    Darwin)
+      command -v docker >/dev/null 2>&1 || fail "Full Void image compile on macOS requires Docker"
+      docker info >/dev/null 2>&1 || fail "Docker is not running; start Docker Desktop for full Void image compile"
+      ;;
+    Linux)
+      if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        fail "Full Void image compile requires root for xbps-install -r and loop mounts"
+      fi
+      missing=()
+      for tool in xbps-install xbps-reconfigure qemu-img parted mkfs.vfat mkfs.ext4 mount umount blkid losetup; do
+        command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+      done
+      if [ "${#missing[@]}" -ne 0 ]; then
+        fail "Full Void image compile missing tools: ${missing[*]}"
+      fi
+      ;;
+    *)
+      fail "Full Void image compile requires Linux, or macOS with Docker"
+      ;;
+  esac
   FULL_LOG="$WORK_DIR/void-full.log"
   FULL_IMAGE="$(pwd)/$WORK_DIR/void-full.img"
   log "Building real Void image -> $FULL_IMAGE (log: $FULL_LOG)"
@@ -91,6 +96,7 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
     --no-bluetooth \
     --audio none \
     --browser none \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     --output "$FULL_IMAGE" \
     -y >"$FULL_LOG" 2>&1
   [ -s "$FULL_IMAGE" ] || fail "Full image build did not create a non-empty image (see $FULL_LOG)"
