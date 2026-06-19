@@ -13,6 +13,7 @@ This branch adds a real Gentoo provider foundation while preserving the existing
 - Offline curated package mappings for all feature toggles. If `eix` or `pkgcore` is installed locally, package search can use local Portage metadata before falling back to the curated catalogue.
 - GUI/TUI discovery: distribution selection, Gentoo branch/channel values, package search labels, and Gentoo build path wiring.
 - USB flashing and image validation remain distro-neutral and unchanged.
+- Full image compile fallback: downloads the current official Gentoo minimal amd64 ISO, verifies SHA512 from Gentoo `*.DIGESTS`, and writes that bootable artifact to the requested output path.
 
 ## Stage3 base and binary/source tradeoff
 
@@ -20,7 +21,7 @@ Gentoo defaults to an `amd64` OpenRC stage3 plan. The package map prefers binary
 
 ## Current gap
 
-Full non-dry-run Gentoo image construction is intentionally not claimed complete in this branch. `build-gentoo-usb.sh` exits with a clear error. The implemented backend validates and prints a coherent Gentoo image plan; wiring stage3 download/extract, chrooted `emerge`, bootloader install, and first-boot services is the next implementation step.
+The full compile path now produces a verified official Gentoo minimal ISO artifact. A custom installed Gentoo rootfs image remains future work: stage3 download/extract, Portage binhost/source policy, chrooted `emerge`, bootloader install, and first-boot services still need a site-specific builder.
 
 Example dry-run:
 
