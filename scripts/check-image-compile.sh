@@ -34,17 +34,23 @@ run_full_image_compile_if_requested() {
   [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ] || return 0
 
   log "Full image compile requested."
-  if [ "$(uname -s)" != "Linux" ]; then
-    log "SKIP: full RHEL-family image compile requires a Linux host."
-    return 0
-  fi
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    log "SKIP: full RHEL-family image compile requires root for loop devices and mounts."
-    return 0
-  fi
-  for tool in dnf parted mkfs.vfat mkfs.xfs mount umount grub2-install losetup blkid; do
-    have "$tool" || fail "Full image compile requested, but required tool is missing: $tool"
-  done
+  case "$(uname -s)" in
+    Darwin)
+      have docker || fail "Full RHEL-family image compile on macOS requires Docker"
+      docker info >/dev/null 2>&1 || fail "Docker is not running; start Docker Desktop for full RHEL-family image compile"
+      ;;
+    Linux)
+      if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        fail "Full RHEL-family image compile requires root for loop devices and mounts."
+      fi
+      for tool in dnf parted mkfs.vfat mkfs.xfs mount umount grub2-install losetup blkid; do
+        have "$tool" || fail "Full image compile requested, but required tool is missing: $tool"
+      done
+      ;;
+    *)
+      fail "Full RHEL-family image compile requires Linux, or macOS with Docker"
+      ;;
+  esac
 
   local full_log="$work_dir/rhel-full.log"
   local output
@@ -61,6 +67,7 @@ run_full_image_compile_if_requested() {
     --audio none \
     --no-wifi \
     --no-bluetooth \
+    --image-size "${LINUX_USB_FULL_IMAGE_SIZE:-8G}" \
     --output "$output" \
     -y 2>&1 | tee "$full_log"
   [ -s "$output" ] || fail "Full image compile did not create a non-empty image: $output"
