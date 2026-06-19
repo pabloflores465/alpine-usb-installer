@@ -77,6 +77,25 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" != "1" ]; then
   exit 0
 fi
 
+SLACKWARE_FULL_LOG="$WORK_DIR/slackware-full.log"
+set +e
+run_logged "$SLACKWARE_FULL_LOG" \
+  ./alpine-usb build \
+  --distro slackware \
+  --slackware-release stable \
+  --output "$(pwd)/$WORK_DIR/slackware-full.img" \
+  --password testpass \
+  --extra-package vim \
+  --wm i3 \
+  -y
+slackware_code=$?
+set -e
+if [ "$slackware_code" -eq 0 ]; then
+  fail "Slackware full image compile unexpectedly succeeded; unsupported builds must not pretend success."
+fi
+assert_log_contains "$SLACKWARE_FULL_LOG" 'Slackware full image assembly is not implemented yet; use --dry-run for validated package/config planning\.' "Slackware unsupported-build message missing"
+fail "Slackware full image compile is intentionally unsupported; see $SLACKWARE_FULL_LOG"
+
 echo "== Gated full image compile probe =="
 case "$(uname -s)" in
   Darwin)
