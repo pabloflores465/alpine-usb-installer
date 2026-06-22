@@ -35,8 +35,13 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     esac
     docker_env="$docker_env -e $name=$value"
   done
+  docker_name_args=""
+  if [ -n "${ARCH_USB_DOCKER_NAME:-}" ]; then
+    case "$ARCH_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") echo "ERROR: invalid Docker container name: $ARCH_USB_DOCKER_NAME" >&2; exit 1 ;; esac
+    docker_name_args="--name $ARCH_USB_DOCKER_NAME"
+  fi
   # shellcheck disable=SC2086
-  exec docker run --rm --platform linux/amd64 --privileged --security-opt seccomp=unconfined $docker_env $docker_mounts -w /work archlinux:latest bash -ceu '
+  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --security-opt seccomp=unconfined $docker_env $docker_mounts -w /work archlinux:latest bash -ceu '
     grep -qxF DisableSandbox /etc/pacman.conf || printf "\nDisableSandbox\n" >> /etc/pacman.conf
     cat >/etc/pacman.d/mirrorlist <<EOF_MIRRORS
 Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch
