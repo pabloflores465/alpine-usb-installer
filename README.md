@@ -23,6 +23,7 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 - [macOS DMG packaging](#macos-dmg-packaging)
 - [Validation and tests](#validation-and-tests)
 - [Troubleshooting](#troubleshooting)
+  - [Free build space on macOS](#free-build-space-on-macos)
 - [License](#license)
 
 ## Features
@@ -521,6 +522,56 @@ ls /tmp/alpine-usb-*pipewire*.log /tmp/alpine-usb-wireplumber.log 2>/dev/null
 ### GUI modal appears in wrong place on macOS tiling WMs
 
 The Qt GUI forces dialogs visible and centered. If using a tiling window manager such as AeroSpace, keep Python/PySide windows floating if your WM moves modal dialogs away from their parent window.
+
+### Free build space on macOS
+
+Failed or cancelled image builds can leave large files in each distro worktree's `.work/` directory, in `/tmp`/`/private/tmp`, or as deleted files still held open by macOS Virtualization/Docker processes. If Finder/`df` still shows disk space in use after deleting images, check for open deleted build files and then remove build artifacts from all `usb_system*` worktrees.
+
+Inspect space and open deleted files:
+
+```sh
+df -h "$HOME"
+lsof +L1 2>/dev/null | awk 'NR==1 || $7 >= 104857600 {print}'
+```
+
+Clean all local build workspaces and generated images across the main checkout plus distro worktrees:
+
+```sh
+repo="$HOME/Documents/usb_system"
+worktrees=$(cd "$repo" && git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
+
+for wt in $worktrees; do
+  [ -d "$wt" ] || continue
+  rm -rf "$wt/.work"
+  find "$wt" -maxdepth 1 -type f \
+    \( -name '*.img' -o -name '*.raw' -o -name '*.img.tmp' -o -name '*.raw.tmp' -o -name '*.iso' -o -name '*.iso.tmp' \) \
+    -delete
+done
+
+rm -rf /tmp/alpine-usb-installer /private/tmp/alpine-usb-installer 2>/dev/null || true
+find /tmp /private/tmp -maxdepth 1 -type f \
+  \( -name 'void-*.img' -o -name '*usb*.img' -o -name '*.img.tmp' -o -name '*.raw.tmp' \) \
+  -delete 2>/dev/null || true
+
+cd "$repo" && git worktree prune
+```
+
+If `lsof +L1` still shows large deleted images, stop the process holding them. Common culprit on macOS is `com.apple.Virtualization.VirtualMachine` after Docker/Virtualization builds:
+
+```sh
+lsof +L1 2>/dev/null | awk 'NR>1 && $7 >= 104857600 {print $2, $9}'
+# then stop the relevant PID, for example:
+kill -TERM <pid>
+sleep 2
+kill -KILL <pid> 2>/dev/null || true
+```
+
+Re-check free space:
+
+```sh
+df -h "$HOME"
+diskutil apfs list | awk '/Capacity In Use|Capacity Not Allocated|Purgeable/ {print}'
+```
 
 ## License
 
