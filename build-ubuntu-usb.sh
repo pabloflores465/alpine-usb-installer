@@ -172,6 +172,15 @@ sudo mount "$ROOT" "$MNT_DIR"
 sudo mkdir -p "$MNT_DIR/boot/efi"
 sudo mount "$ESP" "$MNT_DIR/boot/efi"
 sudo debootstrap --arch="$DEBOOTSTRAP_ARCH" --variant=minbase "$CODENAME" "$MNT_DIR" "$UBUNTU_MIRROR"
+# debootstrap's minbase leaves only "<codename> main" in sources.list, but the
+# selected desktop/display-manager packages (xfce4, lightdm, mesa-utils, blueman,
+# pavucontrol, ...) live in universe. Enable main + universe + restricted so the
+# chroot apt-get update/install below can resolve them.
+sudo tee "$MNT_DIR/etc/apt/sources.list" >/dev/null <<SOURCES
+deb $UBUNTU_MIRROR $CODENAME main universe restricted
+deb $UBUNTU_MIRROR $CODENAME-updates main universe restricted
+deb $UBUNTU_MIRROR $CODENAME-security main universe restricted
+SOURCES
 for fs in dev proc sys; do sudo mount --bind "/$fs" "$MNT_DIR/$fs"; done
 sudo mount --bind /dev/pts "$MNT_DIR/dev/pts"
 
