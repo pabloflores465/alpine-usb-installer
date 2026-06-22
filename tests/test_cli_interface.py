@@ -92,10 +92,18 @@ def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pyte
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
+    for name in [
+        "build-alpine-usb.sh",
+        "configure-alpine-usb.sh",
+        "build-gentoo-usb.sh",
+        "configure-gentoo-usb.sh",
+        "README.md",
+        "LICENSE",
+    ]:
         (source / name).write_text(name)
     (source / "scripts").mkdir()
     (source / "scripts" / "Dockerfile.builder").write_text("FROM alpine")
+    (source / "scripts" / "Dockerfile.gentoo-builder").write_text("FROM alpine-gentoo")
     (source / "efi-fallback").mkdir()
     (source / "efi-fallback" / "BOOTX64.EFI").write_text("efi")
     monkeypatch.setattr(cli, "secure_runtime_dir", lambda name: tmp_path / "runtime")
@@ -103,8 +111,10 @@ def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, mon
     runtime = cli.prepare_terminal_runtime(source)
 
     assert (runtime / "scripts" / "Dockerfile.builder").read_text() == "FROM alpine"
+    assert (runtime / "scripts" / "Dockerfile.gentoo-builder").read_text() == "FROM alpine-gentoo"
     assert (runtime / "efi-fallback" / "BOOTX64.EFI").read_text() == "efi"
     assert (runtime / "build-alpine-usb.sh").exists()
+    assert (runtime / "build-gentoo-usb.sh").exists()
 
 
 def test_env_from_build_args_accepts_gentoo_branch_and_atoms() -> None:

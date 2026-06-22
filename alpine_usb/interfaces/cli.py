@@ -27,11 +27,13 @@ _TERMINAL_RUNTIME_DIR: Path | None = None
 TERMINAL_RUNTIME_RESOURCES = (
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-gentoo-usb.sh",
     "configure-gentoo-usb.sh",
     "README.md",
     "LICENSE",
     "efi-fallback",
     "scripts/Dockerfile.builder",
+    "scripts/Dockerfile.gentoo-builder",
 )
 
 

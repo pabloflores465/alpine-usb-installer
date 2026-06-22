@@ -62,6 +62,6 @@ def test_gentoo_feature_package_atoms_maps_desktop_stack() -> None:
 
     assert "xfce-base/xfce4-meta" in atoms
     assert "x11-misc/lightdm" in atoms
-    assert "www-client/firefox" in atoms
+    assert "www-client/firefox-bin" in atoms
     assert "app-misc/ranger" in atoms
     assert "net-wireless/bluez" not in atoms

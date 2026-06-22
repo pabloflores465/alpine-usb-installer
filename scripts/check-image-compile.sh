@@ -67,7 +67,7 @@ fi
 
 FULL_GENTOO_LOG="$WORK_DIR/gentoo-full.log"
 FULL_GENTOO_IMG="$(pwd)/$WORK_DIR/gentoo-full.img"
-log "Attempting full Gentoo image build via verified official ISO fallback ($FULL_GENTOO_LOG)"
+log "Attempting full installed Gentoo image build ($FULL_GENTOO_LOG)"
 ./alpine-usb build \
   --distro gentoo \
   --password testpass \
@@ -81,5 +81,5 @@ log "Attempting full Gentoo image build via verified official ISO fallback ($FUL
   --output "$FULL_GENTOO_IMG" \
   -y >"$FULL_GENTOO_LOG" 2>&1
 [ -s "$FULL_GENTOO_IMG" ] || die "Gentoo full image build did not produce $FULL_GENTOO_IMG"
-assert_log_contains 'Gentoo image written' "$FULL_GENTOO_LOG"
+assert_log_contains 'Gentoo installed image written' "$FULL_GENTOO_LOG"
 log "Image compile check passed."

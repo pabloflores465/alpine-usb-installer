@@ -45,10 +45,13 @@ mkdir -p "$STAGE_DIR"
   --hidden-import "alpine_usb.images.validation" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
+  --add-data "build-gentoo-usb.sh:." \
+  --add-data "configure-gentoo-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
   --add-data "scripts/Dockerfile.builder:scripts" \
+  --add-data "scripts/Dockerfile.gentoo-builder:scripts" \
   gui.py
 
 cp -R "$DIST_DIR/$APP_NAME.app" "$STAGE_DIR/"

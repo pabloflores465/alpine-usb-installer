@@ -1,6 +1,6 @@
 # Linux USB Installer
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** and plan **Gentoo Linux stage3-based USB images**; Gentoo full compile can also emit a verified official minimal ISO artifact. Use a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** and **Gentoo Linux stage3/OpenRC USB images**. Use a Qt GUI or one unified terminal binary (TUI + CLI commands).
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,11 +27,11 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** an
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image; Gentoo currently supports provider-backed dry-run planning and package search.
+- Build bootable, installed Alpine Linux or Gentoo Linux USB images.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra distro packages/atoms.
 - Search Alpine `main` + `community` packages or Gentoo Portage package mappings/local metadata from GUI/TUI/CLI.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
@@ -45,11 +45,12 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** an
 ### Build host
 
 - Python 3.
-- Docker Desktop on macOS. The build needs Linux/NBD support.
-  - First macOS build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
-  - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
-  - Set `ALPINE_USB_REBUILD_BUILDER=1` to rebuild the cached builder image.
-- On native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- Docker Desktop on macOS. Builds need Linux image/chroot support.
+  - First macOS Alpine build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
+  - First macOS Gentoo build creates a cached `gentoo-usb-builder:3.22-amd64` Docker image for partition/rootfs tools.
+  - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` or `GENTOO_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
+  - Set `ALPINE_USB_REBUILD_BUILDER=1` or `GENTOO_USB_REBUILD_BUILDER=1` to rebuild cached builder images.
+- On native Linux: `mtools`, GRUB EFI tooling, `parted`, `rsync`, `dosfstools`, chroot/mount support, and normal image build tools.
 
 ### Runtime tools
 
@@ -76,6 +77,9 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** an
 # Gentoo dry-run / package planning
 ./alpine-usb build --distro gentoo --branch stable --dry-run --password gentoo
 ./alpine-usb search --distro gentoo --branch stable firefox
+
+# Full installed Gentoo image
+./alpine-usb build --distro gentoo --branch stable --password gentoo --desktop none --browser none -y
 ```
 
 Default output path:
@@ -131,6 +135,9 @@ The TUI provides full-screen menus for configuration, package search, dry-run/bu
 # Gentoo dry-run / package planning
 ./alpine-usb build --distro gentoo --branch stable --dry-run --password gentoo
 ./alpine-usb search --distro gentoo --branch stable firefox
+
+# Gentoo full installed image (uses Docker automatically on macOS)
+./alpine-usb build --distro gentoo --branch stable --password gentoo --desktop none --browser none -y
 ```
 
 Common commands:
@@ -174,7 +181,7 @@ Extra packages can be repeated or space-separated:
 
 ## Gentoo support
 
-Gentoo is selectable with `--distro gentoo` in the CLI and from GUI/TUI distribution controls. The Gentoo backend validates a stage3/OpenRC image plan, maps feature options to Portage atoms, supports package search/cache via curated mappings plus local `eix`/`pkgcore`, and can produce a bootable verified official minimal ISO artifact for full compile checks. Custom installed Gentoo rootfs assembly remains future work; see [`docs/gentoo.md`](docs/gentoo.md). Alpine behavior is unchanged and remains the complete image builder.
+Gentoo is selectable with `--distro gentoo` in the CLI and from GUI/TUI distribution controls. The Gentoo backend validates a stage3/OpenRC image plan, maps feature options to Portage atoms, supports package search/cache via curated mappings plus local `eix`/`pkgcore`, and builds a full installed raw USB image from official stage3. On macOS it uses a privileged Docker builder like Alpine; on Linux run as root or set `GENTOO_USB_FORCE_DOCKER=1`. Gentoo full builds may take much longer than Alpine because Portage may compile packages when binary packages are unavailable. Gentoo installed-image boot currently supports GRUB removable UEFI.
 
 ## Build profiles
 

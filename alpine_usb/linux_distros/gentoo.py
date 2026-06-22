@@ -21,6 +21,7 @@ FEATURE_PACKAGES: dict[str, tuple[str, ...]] = {
     "base": (
         "sys-apps/baselayout",
         "sys-apps/openrc",
+        "sys-apps/shadow",
         "app-admin/sysklogd",
         "app-admin/sudo",
         "app-admin/doas",
@@ -33,6 +34,7 @@ FEATURE_PACKAGES: dict[str, tuple[str, ...]] = {
         "sys-fs/e2fsprogs",
         "sys-fs/dosfstools",
         "sys-apps/util-linux",
+        "sys-block/parted",
     ),
     "kernel:lts": ("sys-kernel/gentoo-kernel-bin",),
     "kernel:stable": ("sys-kernel/gentoo-kernel-bin",),
@@ -56,10 +58,10 @@ FEATURE_PACKAGES: dict[str, tuple[str, ...]] = {
     "wm:bspwm": ("x11-wm/bspwm",),
     "wm:openbox": ("x11-wm/openbox",),
     "wm:labwc": ("gui-wm/labwc",),
-    "browser:firefox": ("www-client/firefox",),
+    "browser:firefox": ("www-client/firefox-bin",),
     "browser:firefox-esr": ("www-client/firefox-bin",),
     "browser:chromium": ("www-client/chromium",),
-    "audio:pipewire": ("media-video/pipewire", "media-session/wireplumber"),
+    "audio:pipewire": ("media-video/pipewire", "media-video/wireplumber"),
     "audio:alsa": ("media-libs/alsa-lib", "media-sound/alsa-utils"),
     "network:networkmanager": ("net-misc/networkmanager",),
     "wifi": (
@@ -69,7 +71,7 @@ FEATURE_PACKAGES: dict[str, tuple[str, ...]] = {
     "bluetooth": ("net-wireless/bluez",),
     "x11": ("x11-base/xorg-server", "x11-drivers/xf86-input-libinput", "media-libs/mesa"),
     "legacy_x11": ("x11-drivers/xf86-video-amdgpu", "x11-drivers/xf86-video-nouveau", "x11-drivers/xf86-video-vesa"),
-    "auto_resize": ("sys-fs/growpart",),
+    "auto_resize": (),
 }
 
 PACKAGE_DESCRIPTIONS: dict[str, str] = {
@@ -81,7 +83,8 @@ PACKAGE_DESCRIPTIONS: dict[str, str] = {
     "kde-plasma/plasma-meta": "KDE Plasma desktop meta package",
     "mate-base/mate": "MATE desktop environment",
     "lxqt-base/lxqt-meta": "LXQt desktop environment",
-    "www-client/firefox": "Firefox web browser",
+    "www-client/firefox": "Firefox web browser built from source",
+    "www-client/firefox-bin": "Firefox prebuilt browser binary",
     "www-client/chromium": "Chromium web browser",
     "net-misc/networkmanager": "NetworkManager daemon and tools",
     "media-video/pipewire": "PipeWire multimedia server",

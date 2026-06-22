@@ -1,10 +1,9 @@
 #!/bin/sh
-# Gentoo configuration planner/validator. In dry-run mode this provides the
-# same safety boundary as the Alpine configurator without mutating a target
-# root. Non-dry-run is intended to run inside a mounted stage3 root once the
-# Gentoo image builder is completed.
+# Gentoo configuration planner/installer. Dry-run validates and prints the
+# package plan. Non-dry-run runs inside an extracted Gentoo stage3 root.
 set -eu
 
+log() { printf '[gentoo-config] %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 is_enabled() { case "$(lower "${1:-0}")" in 1|yes|true|on|enabled) return 0 ;; *) return 1 ;; esac; }
@@ -19,6 +18,9 @@ read_secret_value() {
   eval "file_value=\${$file_var:-}"; eval "direct_value=\${$value_var:-}"
   if [ -n "$file_value" ]; then [ -f "$file_value" ] || die "Secret file not found: $file_value"; cat "$file_value"; elif [ -n "$direct_value" ]; then printf '%s' "$direct_value"; else printf '%s' "$default_value"; fi
 }
+service_exists() { [ -x "/etc/init.d/$1" ]; }
+add_service() { service="$1"; runlevel="${2:-default}"; service_exists "$service" && rc-update add "$service" "$runlevel" >/dev/null 2>&1 || true; }
+write_file() { path="$1"; shift; mkdir -p "$(dirname "$path")"; cat > "$path"; }
 
 USER_NAME="${ALPINE_USB_USER:-gentoo}"
 USER_PASSWORD="$(read_secret_value ALPINE_USB_PASSWORD_FILE ALPINE_USB_PASSWORD gentoo)"
@@ -73,29 +75,29 @@ case "$BOOTLOADER" in grub|systemd-boot|systemdboot) ;; *) die "Unsupported boot
 case "$KERNEL_FLAVOR" in lts|stable) ;; *) die "Unsupported kernel flavor: $KERNEL_FLAVOR" ;; esac
 VALID_WMS="i3 sway hyprland awesome bspwm openbox labwc"
 for wm in $TILING_WMS; do has_word "$wm" "$VALID_WMS" || die "Unsupported window manager: $wm"; done
+# shellcheck disable=SC2086 # intentional split: first configured WM becomes default session
 if [ "$DEFAULT_SESSION" = "auto" ]; then if [ "$DESKTOP" != "none" ]; then DEFAULT_SESSION="$DESKTOP"; else set -- $TILING_WMS; DEFAULT_SESSION="${1:-shell}"; fi; fi
 case "$DEFAULT_SESSION" in xfce|gnome|plasma|mate|lxqt|i3|sway|hyprland|awesome|bspwm|openbox|labwc|shell) ;; *) die "Unsupported default session: $DEFAULT_SESSION" ;; esac
 if [ "$DISPLAY_MANAGER" = "auto" ]; then case "$DESKTOP" in gnome) DISPLAY_MANAGER="gdm" ;; plasma|lxqt) DISPLAY_MANAGER="sddm" ;; xfce|mate) DISPLAY_MANAGER="lightdm" ;; none) if [ -n "$TILING_WMS" ]; then DISPLAY_MANAGER="greetd"; else DISPLAY_MANAGER="none"; fi ;; esac; fi
 
-append_packages sys-apps/baselayout sys-apps/openrc app-admin/sudo app-admin/doas app-shells/bash app-editors/vim net-misc/curl net-misc/wget dev-vcs/git sys-fs/e2fsprogs sys-fs/dosfstools sys-apps/util-linux sys-kernel/gentoo-kernel-bin
+append_packages sys-apps/baselayout sys-apps/openrc sys-apps/shadow app-admin/sysklogd app-admin/sudo app-admin/doas app-shells/bash app-editors/vim app-misc/tmux net-misc/curl net-misc/wget dev-vcs/git sys-fs/e2fsprogs sys-fs/dosfstools sys-apps/util-linux sys-block/parted sys-kernel/gentoo-kernel-bin
 [ "$FIRMWARE" = "full" ] && append_packages sys-kernel/linux-firmware
-case "$BOOTLOADER" in grub) append_packages sys-boot/grub sys-boot/efibootmgr ;; systemd-boot) append_packages sys-apps/systemd sys-boot/efibootmgr ;; esac
+case "$BOOTLOADER" in grub) append_packages sys-boot/grub ;; systemd-boot) append_packages sys-apps/systemd sys-boot/efibootmgr ;; esac
 if [ "$DESKTOP" != "none" ] || [ -n "$TILING_WMS" ]; then append_packages x11-base/xorg-server x11-drivers/xf86-input-libinput media-libs/mesa; fi
 case "$DESKTOP" in xfce) append_packages xfce-base/xfce4-meta x11-terms/xfce4-terminal ;; gnome) append_packages gnome-base/gnome ;; plasma) append_packages kde-plasma/plasma-meta kde-apps/konsole ;; mate) append_packages mate-base/mate ;; lxqt) append_packages lxqt-base/lxqt-meta ;; none) ;; esac
 case "$DISPLAY_MANAGER" in lightdm) append_packages x11-misc/lightdm x11-misc/lightdm-gtk-greeter ;; sddm) append_packages x11-misc/sddm ;; gdm) append_packages gnome-base/gdm ;; lxdm) append_packages lxde-base/lxdm ;; greetd) append_packages gui-libs/greetd gui-apps/tuigreet ;; none) ;; esac
 for wm in $TILING_WMS; do case "$wm" in i3) append_packages x11-wm/i3 ;; sway) append_packages gui-wm/sway ;; hyprland) append_packages gui-wm/hyprland ;; awesome) append_packages x11-wm/awesome ;; bspwm) append_packages x11-wm/bspwm ;; openbox) append_packages x11-wm/openbox ;; labwc) append_packages gui-wm/labwc ;; esac; done
-case "$BROWSER" in firefox) append_packages www-client/firefox ;; firefox-esr) append_packages www-client/firefox-bin ;; chromium) append_packages www-client/chromium ;; none) ;; esac
-case "$AUDIO" in pipewire) append_packages media-video/pipewire media-session/wireplumber ;; alsa) append_packages media-libs/alsa-lib media-sound/alsa-utils ;; none) ;; esac
+case "$BROWSER" in firefox|firefox-esr) append_packages www-client/firefox-bin ;; chromium) append_packages www-client/chromium ;; none) ;; esac
+case "$AUDIO" in pipewire) append_packages media-video/pipewire media-video/wireplumber ;; alsa) append_packages media-libs/alsa-lib media-sound/alsa-utils ;; none) ;; esac
 [ "$NETWORK_BACKEND" = "networkmanager" ] && append_packages net-misc/networkmanager
 is_enabled "$WIFI" && append_packages net-wireless/wpa_supplicant net-wireless/iw
 is_enabled "$BLUETOOTH" && append_packages net-wireless/bluez
 is_enabled "$LEGACY_X11_DRIVERS" && append_packages x11-drivers/xf86-video-amdgpu x11-drivers/xf86-video-nouveau x11-drivers/xf86-video-vesa
-is_enabled "$AUTO_RESIZE" && append_packages sys-fs/growpart
 for pkg in $EXTRA_PACKAGES; do append_packages "$pkg"; done
 
 if is_enabled "$DRY_RUN"; then
   echo "Gentoo USB dry-run OK"
-  echo "Stage3: $STAGE3_BRANCH amd64 openrc (default base)"
+  echo "Stage3: $STAGE3_BRANCH amd64 openrc"
   echo "Desktop/session: $DESKTOP / $DEFAULT_SESSION, display manager: $DISPLAY_MANAGER"
   echo "Boot: $BOOTLOADER, kernel package: sys-kernel/gentoo-kernel-bin, firmware: $FIRMWARE"
   # shellcheck disable=SC2086
@@ -105,4 +107,247 @@ if is_enabled "$DRY_RUN"; then
   exit 0
 fi
 
-die "Gentoo non-dry-run target configuration is not wired yet; use --dry-run or Alpine build path. See docs/gentoo.md."
+[ -f /etc/gentoo-release ] || die "Non-dry-run Gentoo configuration must run inside a Gentoo stage3 root"
+[ "$(id -u)" = "0" ] || die "Gentoo configuration must run as root"
+[ "$BOOTLOADER" = "grub" ] || die "Gentoo installed image build currently supports GRUB only"
+
+configure_portage() {
+  log "Writing Portage defaults"
+  mkdir -p /etc/portage/package.use /etc/portage/package.accept_keywords /etc/portage/package.license
+  build_jobs="${GENTOO_BUILD_JOBS:-2}"
+  case "$build_jobs" in *[!0-9]*|"") build_jobs=2 ;; esac
+  jobs="${GENTOO_MAKEOPTS:-}"
+  if [ -z "$jobs" ]; then jobs="-j$build_jobs"; fi
+  use_flags="${GENTOO_USE_FLAGS:-X wayland elogind dbus policykit udev udisks opengl vulkan alsa pulseaudio bluetooth wifi png jpeg harfbuzz truetype fontconfig gtk gtk3 -vala -introspection -systemd}"
+  emerge_opts="--jobs=$build_jobs --load-average=$build_jobs --binpkg-respect-use=y --autounmask-continue=y --autounmask-use=y --autounmask-license=y --autounmask-keep-masks=y --quiet-build=y ${GENTOO_EMERGE_OPTS:-}"
+  if is_enabled "${GENTOO_USE_BINPKGS:-1}"; then emerge_opts="--getbinpkg --usepkg $emerge_opts"; fi
+  cat >> /etc/portage/make.conf <<EOF
+
+# Linux USB Installer Gentoo image defaults
+COMMON_FLAGS="-O2 -pipe"
+CFLAGS="\${COMMON_FLAGS}"
+CXXFLAGS="\${COMMON_FLAGS}"
+FCFLAGS="\${COMMON_FLAGS}"
+FFLAGS="\${COMMON_FLAGS}"
+MAKEOPTS="$jobs"
+ACCEPT_LICENSE="${GENTOO_ACCEPT_LICENSE:-*}"
+GRUB_PLATFORMS="efi-64"
+VIDEO_CARDS="amdgpu nouveau vesa modesetting intel"
+INPUT_DEVICES="libinput"
+USE="$use_flags"
+FEATURES="${GENTOO_FEATURES:--sandbox -usersandbox -pid-sandbox -network-sandbox}"
+EMERGE_DEFAULT_OPTS="$emerge_opts"
+EOF
+  cat > /etc/portage/package.use/usb-installer <<EOF
+# Keep common desktop/browser dependency USE constraints satisfiable.
+app-crypt/gcr -vala -introspection
+net-misc/networkmanager -bluetooth -modemmanager -ppp -teamd -ovs -introspection
+dev-python/pillow -truetype
+dev-libs/libdbusmenu gtk3
+x11-libs/gdk-pixbuf -introspection
+xfce-base/thunar udisks
+sys-kernel/installkernel dracut
+media-libs/freetype harfbuzz png
+media-libs/libvpx postproc
+www-client/firefox -system-libvpx
+EOF
+  if [ "$STAGE3_BRANCH" = "testing" ]; then
+    printf '*/* ~amd64\n' > /etc/portage/package.accept_keywords/usb-installer
+  fi
+}
+
+sync_portage() {
+  if ! is_enabled "${GENTOO_EMERGE_SYNC:-1}" && [ -d /var/db/repos/gentoo/profiles ]; then
+    log "Skipping Portage sync by request"
+    return 0
+  fi
+  log "Syncing Gentoo repository metadata"
+  emerge-webrsync || emerge --sync
+}
+
+select_desktop_profile() {
+  if [ "$DESKTOP" = "none" ] && [ -z "$TILING_WMS" ]; then
+    return 0
+  fi
+  command -v eselect >/dev/null 2>&1 || return 0
+  for profile in \
+    default/linux/amd64/23.0/desktop \
+    default/linux/amd64/17.1/desktop \
+    default/linux/amd64/23.0/split-usr/desktop; do
+    if [ -d "/var/db/repos/gentoo/profiles/$profile" ]; then
+      log "Selecting Gentoo desktop profile: $profile"
+      eselect profile set "$profile" >/dev/null 2>&1 || true
+      return 0
+    fi
+  done
+}
+
+print_last_build_log() {
+  latest_log="$(find /var/tmp/portage -path '*/temp/build.log' -type f -exec ls -t {} + 2>/dev/null | head -n 1 || true)"
+  [ -n "$latest_log" ] || return 0
+  log "Last Portage build log tail: $latest_log"
+  tail -n 200 "$latest_log" || true
+}
+
+install_packages() {
+  log "Installing Gentoo packages"
+  # Allow stage3 packages to rebuild/update when desktop USE flags (for example
+  # elogind on pambase) are required by the selected package set.
+  # shellcheck disable=SC2086
+  if ! emerge --verbose --update --newuse --deep --with-bdeps=y $PACKAGES; then
+    print_last_build_log
+    return 1
+  fi
+}
+
+session_command() {
+  case "$DEFAULT_SESSION" in
+    xfce) echo "startxfce4" ;;
+    gnome) echo "gnome-session" ;;
+    plasma) echo "startplasma-x11" ;;
+    mate) echo "mate-session" ;;
+    lxqt) echo "startlxqt" ;;
+    i3) echo "i3" ;;
+    sway) echo "sway" ;;
+    hyprland) echo "Hyprland" ;;
+    awesome) echo "awesome" ;;
+    bspwm) echo "bspwm" ;;
+    openbox) echo "openbox-session" ;;
+    labwc) echo "labwc" ;;
+    shell|*) echo "bash" ;;
+  esac
+}
+
+configure_system() {
+  log "Configuring system files, users, and services"
+  echo "$HOSTNAME" > /etc/hostname
+  cat > /etc/hosts <<EOF
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME.localdomain $HOSTNAME
+::1 localhost
+EOF
+  if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then ln -snf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime; fi
+  echo "$TIMEZONE" > /etc/timezone
+  if ! grep -qs "^$LOCALE " /etc/locale.gen 2>/dev/null; then echo "$LOCALE UTF-8" >> /etc/locale.gen; fi
+  locale-gen >/dev/null 2>&1 || true
+  mkdir -p /etc/env.d
+  cat > /etc/env.d/02locale <<EOF
+LANG="$LOCALE"
+LANGUAGE="$LANGUAGE_VALUE"
+EOF
+  env-update >/dev/null 2>&1 || true
+  mkdir -p /etc/conf.d
+  cat > /etc/conf.d/keymaps <<EOF
+keymap="$CONSOLE_KEYMAP"
+windowkeys="YES"
+EOF
+  mkdir -p /etc/X11/xorg.conf.d
+  cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF
+Section "InputClass"
+    Identifier "system-keyboard"
+    MatchIsKeyboard "on"
+    Option "XkbLayout" "$XKB_LAYOUT"
+    Option "XkbVariant" "$XKB_VARIANT"
+    Option "XkbModel" "$XKB_MODEL"
+EndSection
+EOF
+  if ! id "$USER_NAME" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$USER_NAME"
+  fi
+  for group in wheel audio video usb plugdev portage input users; do
+    getent group "$group" >/dev/null 2>&1 || groupadd -r "$group" >/dev/null 2>&1 || true
+    usermod -aG "$group" "$USER_NAME" >/dev/null 2>&1 || true
+  done
+  printf 'root:%s\n%s:%s\n' "$ROOT_PASSWORD" "$USER_NAME" "$USER_PASSWORD" | chpasswd
+  mkdir -p /etc/sudoers.d
+  echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/00-wheel
+  chmod 440 /etc/sudoers.d/00-wheel
+  echo 'permit persist :wheel' > /etc/doas.conf
+  chmod 600 /etc/doas.conf
+
+  cmd="$(session_command)"
+  home_dir="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+  if [ -n "$home_dir" ] && [ -d "$home_dir" ]; then
+    cat > "$home_dir/.xinitrc" <<EOF
+#!/bin/sh
+exec $cmd
+EOF
+    chown "$USER_NAME" "$home_dir/.xinitrc" >/dev/null 2>&1 || true
+    chmod 755 "$home_dir/.xinitrc"
+  fi
+
+  add_service sysklogd default
+  add_service dbus default
+  add_service elogind boot
+  [ "$NETWORK_BACKEND" = "networkmanager" ] && add_service NetworkManager default
+  is_enabled "$BLUETOOTH" && add_service bluetooth default
+  [ "$AUDIO" = "alsa" ] && add_service alsasound default
+  case "$DISPLAY_MANAGER" in
+    lightdm|sddm|gdm|lxdm)
+      cat > /etc/conf.d/xdm <<EOF
+DISPLAYMANAGER="$DISPLAY_MANAGER"
+EOF
+      add_service xdm default
+      ;;
+    greetd)
+      mkdir -p /etc/greetd
+      cat > /etc/greetd/config.toml <<EOF
+[terminal]
+vt = 7
+
+[default_session]
+command = "tuigreet --remember --cmd '$cmd'"
+user = "greeter"
+EOF
+      add_service greetd default
+      ;;
+    none) ;;
+  esac
+}
+
+configure_autoresize() {
+  is_enabled "$AUTO_RESIZE" || return 0
+  log "Installing first-boot root auto-resize service"
+  cat > /etc/init.d/usb-root-resize <<'EOF'
+#!/sbin/openrc-run
+description="Grow USB root partition and ext4 filesystem on first boot"
+
+start() {
+    root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+    [ -n "$root_src" ] || return 0
+    root_src="$(readlink -f "$root_src" 2>/dev/null || printf '%s' "$root_src")"
+    [ -b "$root_src" ] || return 0
+    case "$root_src" in
+        /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) part="${root_src##*p}"; disk="${root_src%p$part}" ;;
+        /dev/*[0-9]) part="${root_src##*[!0-9]}"; disk="${root_src%$part}" ;;
+        *) return 0 ;;
+    esac
+    if [ -b "$disk" ] && command -v sfdisk >/dev/null 2>&1; then
+        printf ', +\n' | sfdisk --no-reread -N "$part" "$disk" >/dev/null 2>&1 || true
+        command -v partprobe >/dev/null 2>&1 && partprobe "$disk" >/dev/null 2>&1 || true
+    fi
+    command -v resize2fs >/dev/null 2>&1 && resize2fs "$root_src" >/dev/null 2>&1 || true
+    rc-update del usb-root-resize default >/dev/null 2>&1 || true
+    return 0
+}
+EOF
+  chmod 755 /etc/init.d/usb-root-resize
+  rc-update add usb-root-resize default >/dev/null 2>&1 || true
+}
+
+clean_build_cache() {
+  is_enabled "${GENTOO_CLEAN_BUILD_CACHE:-1}" || return 0
+  log "Cleaning Portage build caches from target root"
+  rm -rf /var/tmp/portage/* /var/cache/distfiles/* /var/cache/binpkgs/* 2>/dev/null || true
+}
+
+configure_portage
+sync_portage
+select_desktop_profile
+install_packages
+configure_system
+configure_autoresize
+clean_build_cache
+
+echo "Gentoo USB install complete"
+echo "Packages:$PACKAGES"

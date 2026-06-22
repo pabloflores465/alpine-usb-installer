@@ -46,10 +46,13 @@ scripts/build-macos-dmg.sh
   --hidden-import "alpine_usb.images.validation" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
+  --add-data "build-gentoo-usb.sh:." \
+  --add-data "configure-gentoo-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
   --add-data "scripts/Dockerfile.builder:scripts" \
+  --add-data "scripts/Dockerfile.gentoo-builder:scripts" \
   alpine-usb
 
 rm -rf "$assets_dir" "$terminal_pkg_dir"
@@ -78,6 +81,8 @@ files = [
     "alpine_usb",
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-gentoo-usb.sh",
+    "configure-gentoo-usb.sh",
     "README.md",
     "LICENSE",
     "requirements.txt",
@@ -87,6 +92,7 @@ files = [
     "repositories",
     ".dockerignore",
     "scripts/Dockerfile.builder",
+    "scripts/Dockerfile.gentoo-builder",
     "scripts/check-project.sh",
 ]
 
