@@ -80,6 +80,49 @@ def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pyte
     assert len(files) == 2
 
 
+def test_build_scripts_do_not_leak_spaced_env_into_docker_image() -> None:
+    """Regression: extra packages with spaces (e.g. "vivaldi neovim kitty docker")
+    must never word-split into a docker IMAGE positional.
+
+    Earlier build-arch-usb.sh built ``docker_env`` as an unquoted string of
+    ``-e NAME=value`` tokens and passed it to ``docker run``. When a value
+    contained spaces (ALPINE_USB_EXTRA_PACKAGES), word splitting pushed the
+    second package name into the image slot and docker tried to pull
+    ``neovim:latest``. Every build script that calls ``docker run`` must use
+    ``--env-file`` or a quoted ``"${docker_env[@]}"`` array so spaced values
+    stay intact, and must never expand a bare ``$docker_env`` string.
+    """
+    import re
+
+    repo = Path(__file__).resolve().parents[1]
+    scripts = sorted(repo.glob("build-*-usb.sh"))
+    assert scripts, "expected at least one build-*-usb.sh script"
+    failures: list[str] = []
+    for script in scripts:
+        text = script.read_text()
+        if "docker run" not in text:
+            continue  # script never shells out to docker
+        safe = ("--env-file" in text) or ('"${docker_env[@]}"' in text)
+        # Bare $docker_env (not ${docker_env[@]} array, not $docker_env_file)
+        # word-splits spaced values into docker positionals.
+        leaks_unquoted = re.search(r"\$docker_env(?![A-Za-z0-9_@])", text) is not None
+        if not safe or leaks_unquoted:
+            failures.append(script.name)
+    assert not failures, (
+        "build-*-usb.sh docker run must use --env-file or quoted "
+        '"${docker_env[@]}" array, never bare $docker_env: ' + ", ".join(failures)
+    )
+
+
+def test_build_arch_usb_passes_extra_packages_via_env_file() -> None:
+    """build-arch-usb.sh must pass ALPINE_USB_EXTRA_PACKAGES through --env-file
+    (not unquoted ``-e NAME=value``) so multi-word values survive intact."""
+    repo = Path(__file__).resolve().parents[1]
+    text = (repo / "build-arch-usb.sh").read_text()
+    assert "--env-file" in text, "build-arch-usb.sh should use --env-file for env passthrough"
+    assert 'docker_env="-e' not in text, "build-arch-usb.sh must not rebuild a flat -e string"
+
+
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "source"
     source.mkdir()

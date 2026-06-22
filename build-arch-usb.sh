@@ -19,29 +19,38 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing required tool
 if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || { echo "ERROR: Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
-  docker_env="-e ARCH_USB_BUILD_IN_DOCKER=1 -e IMAGE_NAME=$IMAGE_NAME -e IMAGE_SIZE=$IMAGE_SIZE"
+  mkdir -p "$SCRIPT_DIR/.work"
+  docker_env_file="$SCRIPT_DIR/.work/arch-docker-env-$$"
+  {
+    printf '%s\n' \
+      "ARCH_USB_BUILD_IN_DOCKER=1" \
+      "IMAGE_NAME=$IMAGE_NAME" \
+      "IMAGE_SIZE=$IMAGE_SIZE"
+    if [ -n "$OUTPUT_PATH" ]; then
+      mkdir -p "$(dirname "$OUTPUT_PATH")"
+      output_dir=$(CDPATH= cd -- "$(dirname "$OUTPUT_PATH")" && pwd)
+      output_base=$(basename "$OUTPUT_PATH")
+      printf '%s\n' "OUTPUT_PATH=/out/$output_base"
+    fi
+    for name in ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE ARCH_USB_BRANCH; do
+      eval "value=\${$name:-}"
+      case "$name:$value" in
+        *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;;
+      esac
+      printf '%s=%s\n' "$name" "$value"
+    done
+  } > "$docker_env_file"
   docker_mounts="-v $SCRIPT_DIR:/work"
   if [ -n "$OUTPUT_PATH" ]; then
-    mkdir -p "$(dirname "$OUTPUT_PATH")"
-    output_dir=$(CDPATH= cd -- "$(dirname "$OUTPUT_PATH")" && pwd)
-    output_base=$(basename "$OUTPUT_PATH")
     docker_mounts="$docker_mounts -v $output_dir:/out"
-    docker_env="$docker_env -e OUTPUT_PATH=/out/$output_base"
   fi
-  for name in ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE ARCH_USB_BRANCH; do
-    eval "value=\${$name:-}"
-    case "$name:$value" in
-      *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;;
-    esac
-    docker_env="$docker_env -e $name=$value"
-  done
   docker_name_args=""
   if [ -n "${ARCH_USB_DOCKER_NAME:-}" ]; then
     case "$ARCH_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") echo "ERROR: invalid Docker container name: $ARCH_USB_DOCKER_NAME" >&2; exit 1 ;; esac
     docker_name_args="--name $ARCH_USB_DOCKER_NAME"
   fi
   # shellcheck disable=SC2086
-  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --security-opt seccomp=unconfined $docker_env $docker_mounts -w /work archlinux:latest bash -ceu '
+  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --security-opt seccomp=unconfined --env-file "$docker_env_file" $docker_mounts -w /work archlinux:latest bash -ceu '
     grep -qxF DisableSandbox /etc/pacman.conf || printf "\nDisableSandbox\n" >> /etc/pacman.conf
     cat >/etc/pacman.d/mirrorlist <<EOF_MIRRORS
 Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch
