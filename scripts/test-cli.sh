@@ -3,15 +3,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile alpine-usb cli.py tui.py gui.py apk_index.py $(find alpine_usb -name '*.py' -type f | sort)
-./alpine-usb tui --self-test >/dev/null
+python3 -m py_compile ledit alpine-usb cli.py tui.py gui.py apk_index.py $(find alpine_usb -name '*.py' -type f | sort)
+./ledit tui --self-test >/dev/null
 if [ "${SKIP_TUI_PTY_TESTS:-0}" != "1" ]; then
   python3 - <<'PY'
 import os, pty, select, subprocess, time
 master, slave = pty.openpty()
 env = os.environ.copy()
 env.setdefault("TERM", "xterm-256color")
-proc = subprocess.Popen(["./alpine-usb"], stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True)
+proc = subprocess.Popen(["./ledit"], stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True)
 os.close(slave)
 time.sleep(0.5)
 os.write(master, b"q")
@@ -30,18 +30,21 @@ os.close(master)
 raise SystemExit(code)
 PY
 fi
+./ledit --help >/dev/null
 ./alpine-usb --help >/dev/null
-./alpine-usb build --help >/dev/null
-./alpine-usb build --dry-run --password testpass --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/alpine-usb-cli-dry-run.out
-grep -q 'DRY RUN OK' /tmp/alpine-usb-cli-dry-run.out
-grep -q 'neovim' /tmp/alpine-usb-cli-dry-run.out
-./alpine-usb build --dry-run --password testpass --profile minimal -y >/tmp/alpine-usb-cli-minimal.out
-grep -q 'desktop=none' /tmp/alpine-usb-cli-minimal.out
-grep -q 'legacy_x11_drivers=0' /tmp/alpine-usb-cli-minimal.out
+./ledit build --help >/dev/null
+./ledit distros >/dev/null
+./ledit build --dry-run --password testpass --desktop xfce --bootloader systemd-boot --no-bluetooth --extra-package neovim -y >/tmp/ledit-cli-dry-run.out
+grep -q 'DRY RUN OK' /tmp/ledit-cli-dry-run.out
+grep -q 'neovim' /tmp/ledit-cli-dry-run.out
+./ledit build --dry-run --password testpass --profile minimal -y >/tmp/ledit-cli-minimal.out
+grep -q 'desktop=none' /tmp/ledit-cli-minimal.out
+grep -q 'legacy_x11_drivers=0' /tmp/ledit-cli-minimal.out
+scripts/check-image-compile.sh
 
 if [ "${SKIP_NETWORK_TESTS:-0}" != "1" ]; then
-  ./alpine-usb search firefox --limit 3 >/tmp/alpine-usb-cli-search.out
-  grep -q 'firefox' /tmp/alpine-usb-cli-search.out
+  ./ledit search firefox --limit 3 >/tmp/ledit-cli-search.out
+  grep -q 'firefox' /tmp/ledit-cli-search.out
 fi
 
 echo "Unified terminal smoke tests passed."

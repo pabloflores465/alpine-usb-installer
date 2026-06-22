@@ -4,8 +4,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="Alpine USB Installer"
-DMG_NAME="Alpine USB Installer.dmg"
+APP_NAME="LEDIT"
+DMG_NAME="LEDIT.dmg"
 BUILD_DIR="build"
 DIST_DIR="dist"
 STAGE_DIR="$BUILD_DIR/dmg-root"
@@ -39,16 +39,31 @@ mkdir -p "$STAGE_DIR"
   --noconfirm \
   --windowed \
   --name "$APP_NAME" \
-  --hidden-import "alpine_usb.interfaces.gui" \
-  --hidden-import "alpine_usb.apk_packages.index" \
-  --hidden-import "alpine_usb.build_profiles.config_files" \
-  --hidden-import "alpine_usb.images.validation" \
+  --collect-submodules "alpine_usb" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
+  --add-data "build-arch-usb.sh:." \
+  --add-data "configure-arch-usb.sh:." \
+  --add-data "build-debian-usb.sh:." \
+  --add-data "configure-debian-usb.sh:." \
+  --add-data "build-fedora-usb.sh:." \
+  --add-data "build-gentoo-usb.sh:." \
+  --add-data "configure-gentoo-usb.sh:." \
+  --add-data "build-opensuse-usb.sh:." \
+  --add-data "configure-opensuse-usb.sh:." \
+  --add-data "build-rhel-usb.sh:." \
+  --add-data "configure-rhel-usb.sh:." \
+  --add-data "build-slackware-usb.sh:." \
+  --add-data "configure-slackware-usb.sh:." \
+  --add-data "build-ubuntu-usb.sh:." \
+  --add-data "configure-ubuntu-usb.sh:." \
+  --add-data "build-void-usb.sh:." \
+  --add-data "configure-void-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
   --add-data "scripts/Dockerfile.builder:scripts" \
+  --add-data "scripts/Dockerfile.gentoo-builder:scripts" \
   gui.py
 
 cp -R "$DIST_DIR/$APP_NAME.app" "$STAGE_DIR/"

@@ -437,7 +437,7 @@ if [ "$GRAPHICAL" = "1" ]; then
   cat > /usr/share/xsessions/alpine-usb.desktop <<EOF
 [Desktop Entry]
 Name=Alpine USB Default ($DEFAULT_SESSION)
-Comment=Default session selected by Alpine USB Installer
+Comment=Default session selected by LEDIT
 Exec=/usr/local/bin/alpine-usb-session
 Type=Application
 DesktopNames=AlpineUSB
@@ -445,7 +445,7 @@ EOF
   cat > /usr/share/wayland-sessions/alpine-usb.desktop <<EOF
 [Desktop Entry]
 Name=Alpine USB Default ($DEFAULT_SESSION)
-Comment=Default session selected by Alpine USB Installer
+Comment=Default session selected by LEDIT
 Exec=/usr/local/bin/alpine-usb-session
 Type=Application
 DesktopNames=AlpineUSB

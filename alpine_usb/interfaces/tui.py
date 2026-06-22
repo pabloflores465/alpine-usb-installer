@@ -5,14 +5,14 @@ import contextlib
 import curses
 import re
 import sys
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 
 from alpine_usb.interfaces import cli as cli
+from alpine_usb.linux_distros import distro_choices, get_distro
 
 CHOICES = {
     "image_size": ["8G", "16G", "24G", "32G", "64G", "128G"],
+    "distro": list(distro_choices(visible_only=True)),
     "branch": ["latest-stable", "edge", "v3.22", "v3.21"],
     "arch": ["x86_64"],
     "timezone": ["UTC", "America/Mexico_City", "America/Bogota", "America/Lima", "America/Santiago", "Europe/Madrid"],
@@ -49,7 +49,8 @@ CHOICES = {
 WM_CHOICES = list(cli.VALID_WMS)
 
 DEFAULT_CONFIG = {
-    "output": str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / cli.DEFAULT_IMAGE_NAME),
+    "distro": "alpine",
+    "output": str(cli.DEFAULT_OUTPUT_DIR / get_distro("alpine").default_image_name),
     "image_size": "16G",
     "branch": "latest-stable",
     "arch": "x86_64",
@@ -141,9 +142,9 @@ class TuiApp:
 
     def draw_header(self, title: str):
         _h, w = self.stdscr.getmaxyx()
-        header = f" Alpine USB Installer TUI  ›  {title} "
+        header = f" LEDIT TUI  ›  {title} "
         self.safe_addnstr(0, 0, header.ljust(w), w, self.color(5, True))
-        subtitle = "Complete terminal UI: build, package search, USB devices and flashing"
+        subtitle = "Linux External Drive Installer Tool: build, package search, USB devices and flashing"
         self.safe_addnstr(1, 2, subtitle, max(0, w - 4), self.color(1))
 
     def draw_footer(self):
@@ -238,6 +239,43 @@ class TuiApp:
         selected = self.menu(title, items, idx)
         return current if selected is None else options[selected]
 
+    def provider(self):
+        return get_distro(str(self.config.get("distro", "alpine")))
+
+    def choices_for(self, key: str) -> list[str]:
+        provider = self.provider()
+        if key == "distro":
+            return list(distro_choices(visible_only=True))
+        if key == "branch":
+            return list(provider.branch_choices)
+        if key == "arch":
+            return list(provider.arch_choices)
+        if key == "bootloader":
+            choices = ["grub"]
+            if provider.supports_systemd_boot:
+                choices.append("systemd-boot")
+            if provider.supports_extlinux:
+                choices.append("extlinux")
+            return choices
+        return CHOICES[key]
+
+    def apply_distro_change(self, old_distro: str):
+        provider = self.provider()
+        old_provider = get_distro(old_distro)
+        self.config["branch"] = provider.default_branch
+        self.config["arch"] = provider.default_arch
+        if self.config.get("hostname") == old_provider.default_hostname:
+            self.config["hostname"] = provider.default_hostname
+        if self.config.get("user") == old_provider.default_user:
+            self.config["user"] = provider.default_user
+        old_output = str(cli.DEFAULT_OUTPUT_DIR / old_provider.default_image_name)
+        if self.config.get("output") in {old_output, str(cli.DEFAULT_OUTPUT_DIR / cli.DEFAULT_IMAGE_NAME)}:
+            self.config["output"] = str(cli.DEFAULT_OUTPUT_DIR / provider.default_image_name)
+        if self.config.get("bootloader") not in self.choices_for("bootloader"):
+            self.config["bootloader"] = "extlinux" if provider.supports_extlinux else "grub"
+        self.status = f"Distro changed to {provider.label}; branch/repo choices updated."
+        self.verify_selected_packages_after_distro_change()
+
     def edit_fields(self, title: str, fields: list[tuple[str, str, str]]):
         idx = 0
         while True:
@@ -261,7 +299,10 @@ class TuiApp:
             if kind == "bool":
                 self.config[key] = not bool(self.config[key])
             elif kind == "choice":
-                self.config[key] = self.choice(label, CHOICES[key], str(self.config[key]))
+                old_value = str(self.config[key])
+                self.config[key] = self.choice(label, self.choices_for(key), old_value)
+                if key == "distro" and self.config[key] != old_value:
+                    self.apply_distro_change(old_value)
             elif kind == "multi_wm":
                 self.edit_wms()
             else:
@@ -289,16 +330,16 @@ class TuiApp:
         while True:
             items = [
                 ("Current packages", self.config["extra_packages"] or "none"),
-                ("Edit manually", "space-separated APK package names"),
-                ("Search official Alpine packages", "top 10 suggestions from main + community"),
+                ("Edit manually", f"space-separated {self.provider().package_manager} package names"),
+                ("Search official distro packages", f"top 10 suggestions from {self.provider().label}"),
                 ("Clear packages", "remove all extra packages"),
                 ("Back", "return"),
             ]
-            choice = self.menu("Extra APK packages", items)
+            choice = self.menu(f"Extra {self.provider().package_manager} packages", items)
             if choice is None or choice == 4:
                 return
             if choice == 1:
-                value = self.prompt("Extra APK packages", self.config["extra_packages"])
+                value = self.prompt(f"Extra {self.provider().package_manager} packages", self.config["extra_packages"])
                 if value is not None:
                     self.config["extra_packages"] = self.dedupe_packages(value)
             elif choice == 2:
@@ -315,14 +356,49 @@ class TuiApp:
                 result.append(pkg)
         return " ".join(result)
 
+    def verify_selected_packages_after_distro_change(self):
+        packages = [pkg for pkg in re.split(r"\s+", str(self.config.get("extra_packages", "")).strip()) if pkg]
+        if not packages:
+            return
+        provider = self.provider()
+        branch = str(self.config["branch"])
+        arch = str(self.config["arch"])
+        missing: list[str] = []
+        checked: list[str] = []
+        self.draw_wait("Package validation", f"Re-searching selected packages in {provider.label} repos…")
+        for package in packages:
+            try:
+                provider.validate_package_name(package)
+                results = provider.search_packages(branch, arch, package, 50)
+            except Exception as exc:
+                self.message(
+                    "Package validation",
+                    f"Could not validate '{package}' in {provider.label} repos: {exc}",
+                    error=True,
+                )
+                return
+            if any(item.get("name") == package for item in results):
+                checked.append(package)
+            else:
+                missing.append(package)
+        if missing:
+            self.message(
+                "Package validation",
+                "These selected packages were not found after changing distro: " + ", ".join(missing),
+                error=True,
+            )
+        else:
+            self.status = "Selected packages found in new distro repos: " + ", ".join(checked)
+
     def package_search_screen(self):
-        query = self.prompt("Search Alpine packages", "")
+        provider = self.provider()
+        query = self.prompt(f"Search {provider.label} packages", "")
         if not query:
             return
-        self.status = f"Searching official APK indexes for '{query}'…"
+        self.status = f"Searching {provider.package_manager} repos for '{query}'…"
         self.draw_wait("Package search", self.status)
         try:
-            results = cli.search_official_apk_packages(self.config["branch"], self.config["arch"], query, 10)
+            results = provider.search_packages(str(self.config["branch"]), str(self.config["arch"]), query, 10)
         except Exception as exc:
             self.message("Package search failed", str(exc), error=True)
             return
@@ -401,9 +477,12 @@ class TuiApp:
 
     def namespace(self, dry_run: bool = False, yes: bool = True) -> SimpleNamespace:
         return SimpleNamespace(
+            distro=self.config["distro"],
             output=self.config["output"],
             image_size=self.config["image_size"],
             branch=self.config["branch"],
+            release=None,
+            nixos_channel=None,
             arch=self.config["arch"],
             hostname=self.config["hostname"],
             user=self.config["user"],
@@ -490,14 +569,31 @@ class TuiApp:
                 if self.validate_build_config() and self.confirm_curses("Build the image now? This can take a while."):
                     self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=False, yes=True)))
             else:
-                hidden = {"ALPINE_USB_PASSWORD", "ALPINE_USB_ROOT_PASSWORD"}
                 self.message(
                     "Build profile",
                     "\n".join(
                         f"{k}={v}"
                         for k, v in env.items()
-                        if (k.startswith("ALPINE_USB_") and k not in hidden)
-                        or k in {"IMAGE_SIZE", "ALPINE_BRANCH", "ARCH"}
+                        if (
+                            k.endswith("_USB_DESKTOP")
+                            or k.endswith("_USB_EXTRA_PACKAGES")
+                            or k.endswith("_USB_BOOTLOADER")
+                        )
+                        or k
+                        in {
+                            "IMAGE_SIZE",
+                            "ARCH",
+                            "LINUX_USB_DISTRO",
+                            "ALPINE_BRANCH",
+                            "DEBIAN_RELEASE",
+                            "FEDORA_RELEASE",
+                            "GENTOO_STAGE3_BRANCH",
+                            "NIXOS_CHANNEL",
+                            "OPENSUSE_RELEASE",
+                            "RHEL_USB_RELEASE",
+                            "SLACKWARE_RELEASE",
+                            "VOID_REPOSITORY",
+                        }
                     ),
                 )
 
@@ -551,10 +647,11 @@ class TuiApp:
 
     def main_menu(self):
         while True:
+            provider = self.provider()
             items = [
                 (
-                    "System, user, localization",
-                    f"{self.config['user']}@{self.config['hostname']}  {self.config['locale']}  {self.config['xkb_layout']}",
+                    "Distribution, system, user",
+                    f"{provider.label}  {self.config['branch']}  {self.config['user']}@{self.config['hostname']}",
                 ),
                 (
                     "Desktop, sessions, WMs",
@@ -568,7 +665,7 @@ class TuiApp:
                     "Bootloader, kernel, firmware",
                     f"{self.config['bootloader']}  linux-{self.config['kernel']}  firmware={self.config['firmware']}  legacy-X11={'yes' if self.config['legacy_x11_drivers'] else 'no'}",
                 ),
-                ("Extra APK packages", self.config["extra_packages"] or "search/add packages"),
+                (f"Extra {provider.package_manager} packages", self.config["extra_packages"] or "search/add packages"),
                 ("Build image", self.config["output"]),
                 ("USB devices and flash", self.config["device"] or "select target USB"),
                 ("Doctor", "check host tools"),
@@ -576,15 +673,16 @@ class TuiApp:
             ]
             choice = self.menu("Main menu", items)
             if choice is None or choice == 8:
-                if self.confirm_curses("Quit Alpine USB Installer TUI?"):
+                if self.confirm_curses("Quit LEDIT TUI?"):
                     raise TuiExit
             elif choice == 0:
                 self.edit_fields(
-                    "System, user, localization",
+                    "Distribution, system, user, localization",
                     [
+                        ("Distribution", "distro", "choice"),
                         ("Output image path", "output", "text"),
                         ("Minimum image size", "image_size", "choice"),
-                        ("Alpine branch", "branch", "choice"),
+                        (provider.branch_label, "branch", "choice"),
                         ("Architecture", "arch", "choice"),
                         ("Hostname", "hostname", "text"),
                         ("User", "user", "text"),
@@ -660,9 +758,12 @@ def self_test() -> int:
     assert app_config["desktop"] == "xfce"
     assert "systemd-boot" in CHOICES["bootloader"]
     ns = SimpleNamespace(
+        distro=app_config["distro"],
         output=app_config["output"],
         image_size=app_config["image_size"],
         branch=app_config["branch"],
+        release=None,
+        nixos_channel=None,
         arch=app_config["arch"],
         hostname=app_config["hostname"],
         user=app_config["user"],
@@ -705,7 +806,7 @@ def self_test() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Curses TUI for Alpine USB Installer (launched by alpine-usb)")
+    parser = argparse.ArgumentParser(description="Curses TUI for LEDIT (launched by ledit)")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -717,5 +818,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    print("tui.py is import-only. Run ./alpine-usb (or ./alpine-usb tui).", file=sys.stderr)
+    print("tui.py is import-only. Run ./ledit (or ./ledit tui).", file=sys.stderr)
     raise SystemExit(2)

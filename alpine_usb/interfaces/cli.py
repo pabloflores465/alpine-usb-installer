@@ -13,29 +13,43 @@ import sys
 import tempfile
 from pathlib import Path
 
-from alpine_usb.apk_packages.index import (
-    APK_SEARCH_REPOS,
-    search_official_apk_packages,
-    validate_branch,
-    validate_package_name,
-)
 from alpine_usb.build_profiles.presets import VALID_WMS, apply_profile_defaults
 from alpine_usb.images.validation import validate_usb_image
+from alpine_usb.linux_distros import DISTROS, DistroProvider, distro_choices, get_distro, rhel_variant_for_name
+from alpine_usb.linux_distros.fedora import plan_from_options as fedora_plan_from_options
+from alpine_usb.nixos.build import env_to_config as nixos_env_to_config
+from alpine_usb.nixos.build import run_nixos_build, run_nixos_dry_run
+from alpine_usb.nixos.build import summary_rows as nixos_summary_rows
+from alpine_usb.rhel_packages.packages import resolve_rhel_packages
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices, selected_device
 
-APP_TITLE = "Alpine USB Installer"
-DEFAULT_IMAGE_NAME = "alpine-usb.img"
-TERMINAL_ENTRYPOINT = "alpine-usb"
+APP_TITLE = "LEDIT"
+APP_DESCRIPTION = "Linux External Drive Installer Tool"
+DEFAULT_IMAGE_NAME = "ledit.img"
+TERMINAL_ENTRYPOINT = "ledit"
+LEGACY_TERMINAL_ENTRYPOINT = "alpine-usb"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIR = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+DEFAULT_OUTPUT_DIR = Path(tempfile.gettempdir()) / "ledit"
 _TERMINAL_RUNTIME_DIR: Path | None = None
+
+BUILD_SCRIPT_RESOURCES = tuple(
+    sorted(
+        {
+            script
+            for provider in DISTROS.values()
+            for script in (provider.build_script, provider.configure_script)
+            if script
+        }
+    )
+)
 TERMINAL_RUNTIME_RESOURCES = (
-    "build-alpine-usb.sh",
-    "configure-alpine-usb.sh",
+    *BUILD_SCRIPT_RESOURCES,
     "README.md",
     "LICENSE",
     "efi-fallback",
     "scripts/Dockerfile.builder",
+    "scripts/Dockerfile.gentoo-builder",
 )
 
 
@@ -93,7 +107,7 @@ def can_write_to_dir(path: Path) -> bool:
 
 def secure_runtime_dir(name: str) -> Path:
     uid = os.getuid() if hasattr(os, "getuid") else "user"
-    base = Path(tempfile.gettempdir()) / f"alpine-usb-installer-{uid}"
+    base = Path(tempfile.gettempdir()) / f"ledit-{uid}"
     for path in [base, base / name]:
         if path.is_symlink():
             raise RuntimeError(f"Refusing symlinked runtime path: {path}")
@@ -163,7 +177,56 @@ def bool_env(value: bool) -> str:
     return "1" if value else "0"
 
 
-def split_packages(values: list[str] | None, inline: str | None) -> str:
+def _arg_was_passed(argv: list[str], name: str) -> bool:
+    return any(token == name or token.startswith(name + "=") for token in argv)
+
+
+def selected_provider(args: argparse.Namespace) -> DistroProvider:
+    return get_distro(getattr(args, "distro", "alpine"))
+
+
+def release_override(args: argparse.Namespace) -> str | None:
+    return getattr(args, "release", None) or getattr(args, "nixos_channel", None)
+
+
+def apply_distro_defaults(args: argparse.Namespace, argv: list[str]) -> None:
+    if getattr(args, "command", None) not in {"build", "search"}:
+        return
+    provider = selected_provider(args)
+    explicit_branch = _arg_was_passed(argv, "--branch") or _arg_was_passed(argv, "--release")
+    explicit_user = _arg_was_passed(argv, "--user")
+    explicit_hostname = _arg_was_passed(argv, "--hostname")
+    explicit_output = _arg_was_passed(argv, "--output") or _arg_was_passed(argv, "-o")
+    explicit_arch = _arg_was_passed(argv, "--arch")
+    args._explicit_user = explicit_user
+    args._explicit_hostname = explicit_hostname
+    args._explicit_output = explicit_output
+    args._explicit_branch = explicit_branch
+    args._explicit_arch = explicit_arch
+    override = release_override(args)
+    if override:
+        args.branch = override
+    elif provider.id != "alpine" and not explicit_branch:
+        args.branch = provider.default_branch
+    if getattr(args, "command", None) == "build":
+        if provider.id != "alpine" and not explicit_user:
+            args.user = provider.default_user
+        if provider.id != "alpine" and not explicit_hostname:
+            args.hostname = provider.default_hostname
+        if not explicit_arch:
+            args.arch = provider.default_arch
+        if not explicit_output:
+            args.output = str(DEFAULT_OUTPUT_DIR / provider.default_image_name)
+        if (
+            provider.supports_extlinux
+            and getattr(args, "bootloader", "grub") == "grub"
+            and not _arg_was_passed(argv, "--bootloader")
+        ):
+            args.bootloader = "extlinux"
+
+
+def split_packages(values: list[str] | None, inline: str | None, distro: str = "alpine") -> str:
+    provider = get_distro(distro)
     packages: list[str] = []
     for item in values or []:
         packages.extend(part for part in re.split(r"\s+", item.strip()) if part)
@@ -172,86 +235,184 @@ def split_packages(values: list[str] | None, inline: str | None) -> str:
     deduped: list[str] = []
     seen: set[str] = set()
     for pkg in packages:
-        validate_package_name(pkg)
+        provider.validate_package_name(pkg)
         if pkg not in seen:
             seen.add(pkg)
             deduped.append(pkg)
     return " ".join(deduped)
 
 
-def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
-    validate_branch(args.branch)
-    password = args.password
-    root_password = args.root_password if args.root_password is not None else password
-    wms = list(args.wm or [])
-    if args.tiling_wms:
-        wms.extend(part for part in re.split(r"[\s,]+", args.tiling_wms.strip()) if part)
-    # Stable unique order.
-    ordered_wms: list[str] = []
+def _ordered_wms(args: argparse.Namespace) -> list[str]:
+    wms = list(getattr(args, "wm", None) or [])
+    tiling_wms = getattr(args, "tiling_wms", "") or ""
+    if tiling_wms:
+        wms.extend(part for part in re.split(r"[\s,]+", tiling_wms.strip()) if part)
+    ordered: list[str] = []
     for wm in wms:
-        if wm not in ordered_wms:
-            ordered_wms.append(wm)
+        if wm not in ordered:
+            ordered.append(wm)
+    return ordered
 
+
+def _common_env(args: argparse.Namespace, prefix: str, extra_packages: str) -> dict[str, str]:
+    password = getattr(args, "password", "") or ""
+    root_password = (
+        getattr(args, "root_password", None) if getattr(args, "root_password", None) is not None else password
+    )
     return {
-        "IMAGE_NAME": f".alpine-usb-cli-{os.getpid()}.img",
-        "IMAGE_SIZE": args.image_size,
-        "ALPINE_USB_PROFILE": getattr(args, "profile", "compatibility"),
-        "ALPINE_BRANCH": args.branch,
-        "ARCH": args.arch,
-        "ALPINE_USB_USER": args.user,
-        "ALPINE_USB_PASSWORD": password,
-        "ALPINE_USB_ROOT_PASSWORD": root_password,
-        "ALPINE_USB_HOSTNAME": args.hostname,
-        "ALPINE_USB_TIMEZONE": args.timezone,
-        "ALPINE_USB_LOCALE": args.locale,
-        "ALPINE_USB_LANGUAGE": args.language or "",
-        "ALPINE_USB_CONSOLE_KEYMAP": args.console_keymap,
-        "ALPINE_USB_XKB_LAYOUT": args.xkb_layout,
-        "ALPINE_USB_XKB_VARIANT": args.xkb_variant,
-        "ALPINE_USB_XKB_MODEL": args.xkb_model,
-        "ALPINE_USB_DESKTOP": args.desktop,
-        "ALPINE_USB_TILING_WMS": " ".join(ordered_wms),
-        "ALPINE_USB_DEFAULT_SESSION": args.default_session,
-        "ALPINE_USB_DISPLAY_MANAGER": args.display_manager,
-        "ALPINE_USB_NETWORK": args.network,
-        "ALPINE_USB_WIFI": bool_env(args.wifi),
-        "ALPINE_USB_BLUETOOTH": bool_env(args.bluetooth),
-        "ALPINE_USB_AUDIO": args.audio,
-        "ALPINE_USB_BROWSER": args.browser,
-        "ALPINE_USB_FIRMWARE": args.firmware,
-        "ALPINE_USB_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
-        "ALPINE_USB_BOOTLOADER": args.bootloader,
-        "ALPINE_USB_KERNEL_FLAVOR": args.kernel,
-        "ALPINE_USB_BOOT_TIMEOUT": str(args.boot_timeout),
-        "ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
-        "ALPINE_USB_AUTO_RESIZE": bool_env(args.auto_resize),
-        "ALPINE_USB_EXTRA_PACKAGES": split_packages(args.extra_package, args.extra_packages),
+        f"{prefix}_PROFILE": getattr(args, "profile", "compatibility"),
+        f"{prefix}_USER": args.user,
+        f"{prefix}_PASSWORD": password,
+        f"{prefix}_ROOT_PASSWORD": root_password,
+        f"{prefix}_HOSTNAME": args.hostname,
+        f"{prefix}_TIMEZONE": args.timezone,
+        f"{prefix}_LOCALE": args.locale,
+        f"{prefix}_LANGUAGE": args.language or "",
+        f"{prefix}_CONSOLE_KEYMAP": args.console_keymap,
+        f"{prefix}_XKB_LAYOUT": args.xkb_layout,
+        f"{prefix}_XKB_VARIANT": args.xkb_variant,
+        f"{prefix}_XKB_MODEL": args.xkb_model,
+        f"{prefix}_DESKTOP": args.desktop,
+        f"{prefix}_TILING_WMS": " ".join(_ordered_wms(args)),
+        f"{prefix}_DEFAULT_SESSION": args.default_session,
+        f"{prefix}_DISPLAY_MANAGER": args.display_manager,
+        f"{prefix}_NETWORK": args.network,
+        f"{prefix}_WIFI": bool_env(args.wifi),
+        f"{prefix}_BLUETOOTH": bool_env(args.bluetooth),
+        f"{prefix}_AUDIO": args.audio,
+        f"{prefix}_BROWSER": args.browser,
+        f"{prefix}_FIRMWARE": args.firmware,
+        f"{prefix}_LEGACY_X11_DRIVERS": bool_env(getattr(args, "legacy_x11_drivers", True)),
+        f"{prefix}_BOOTLOADER": args.bootloader,
+        f"{prefix}_KERNEL_FLAVOR": args.kernel,
+        f"{prefix}_BOOT_TIMEOUT": str(args.boot_timeout),
+        f"{prefix}_SYSTEMD_BOOT_CONSOLE_MODE": args.systemd_boot_console_mode,
+        f"{prefix}_AUTO_RESIZE": bool_env(args.auto_resize),
+        f"{prefix}_EXTRA_PACKAGES": extra_packages,
     }
 
 
+def _normalize_identity_defaults(args: argparse.Namespace, provider: DistroProvider) -> None:
+    if provider.id == "alpine":
+        return
+    if not getattr(args, "_explicit_user", False) and getattr(args, "user", "alpine") == "alpine":
+        args.user = provider.default_user
+    if not getattr(args, "_explicit_hostname", False) and getattr(args, "hostname", "alpine-usb") == "alpine-usb":
+        args.hostname = provider.default_hostname
+    if not getattr(args, "_explicit_arch", False) and getattr(args, "arch", "x86_64") == "x86_64":
+        args.arch = provider.default_arch
+
+
+def env_from_build_args(args: argparse.Namespace) -> dict[str, str]:
+    provider = selected_provider(args)
+    _normalize_identity_defaults(args, provider)
+    branch = provider.normalize_branch(getattr(args, "branch", provider.default_branch))
+    arch = provider.normalize_arch(getattr(args, "arch", provider.default_arch))
+    if args.bootloader == "extlinux" and not provider.supports_extlinux:
+        raise ValueError(f"{provider.label} does not support extlinux from LEDIT; choose grub or systemd-boot")
+    if args.bootloader == "systemd-boot" and not provider.supports_systemd_boot:
+        raise ValueError(f"{provider.label} backend currently supports GRUB only; choose --bootloader grub")
+
+    extra_packages = split_packages(args.extra_package, args.extra_packages, provider.id)
+    env: dict[str, str] = {
+        "IMAGE_NAME": f".{provider.id}-usb-cli-{os.getpid()}.img",
+        "IMAGE_SIZE": args.image_size,
+        "ARCH": arch,
+        "LINUX_USB_DISTRO": provider.id,
+        "LEDIT_DISTRO": provider.id,
+        provider.branch_env: branch,
+    }
+    if provider.id == "alpine":
+        env["ALPINE_BRANCH"] = branch
+    elif provider.id == "void":
+        env["ALPINE_BRANCH"] = branch
+        env["VOID_USB_EXTRA_PACKAGES"] = extra_packages
+    elif provider.id == "rhel":
+        env["RHEL_USB_DISTRO"] = rhel_variant_for_name(getattr(args, "distro", "rhel"))
+    elif provider.id == "arch":
+        env["ARCH_USB_BRANCH"] = branch
+    elif provider.id == "nixos":
+        env["NIXOS_CHANNEL"] = branch
+        env["ALPINE_BRANCH"] = branch
+
+    env.update(_common_env(args, provider.script_prefix, extra_packages))
+    if provider.env_prefix != provider.script_prefix:
+        env.update(_common_env(args, provider.env_prefix, extra_packages))
+
+    if provider.id == "fedora":
+        plan = fedora_plan_from_options(
+            release=branch,
+            arch=arch,
+            desktop=args.desktop,
+            display_manager=args.display_manager,
+            default_session=args.default_session,
+            wms=_ordered_wms(args),
+            network=args.network,
+            wifi=args.wifi,
+            bluetooth=args.bluetooth,
+            audio=args.audio,
+            browser=args.browser,
+            firmware=args.firmware,
+            kernel=args.kernel,
+            bootloader=args.bootloader,
+            auto_resize=args.auto_resize,
+            legacy_x11_drivers=getattr(args, "legacy_x11_drivers", True),
+            extra_packages=extra_packages,
+        )
+        env.update(
+            {
+                "FEDORA_RELEASE": plan.release,
+                "FEDORA_USB_PACKAGES": " ".join(plan.packages),
+                "FEDORA_USB_GROUPS": " ".join(plan.groups),
+                "FEDORA_USB_SERVICES": " ".join(plan.enabled_services),
+                "FEDORA_USB_DEFAULT_TARGET": plan.default_target,
+                "FEDORA_USB_WARNINGS": "\n".join(plan.warnings),
+                "FEDORA_USB_DISPLAY_MANAGER": plan.display_manager,
+                "FEDORA_USB_DEFAULT_SESSION": plan.default_session,
+            }
+        )
+    elif provider.id == "rhel":
+        env["RHEL_USB_PACKAGE_LIST"] = " ".join(
+            resolve_rhel_packages(
+                desktop=args.desktop,
+                display_manager=args.display_manager,
+                wms=_ordered_wms(args),
+                network=args.network,
+                wifi=args.wifi,
+                bluetooth=args.bluetooth,
+                audio=args.audio,
+                browser=args.browser,
+                firmware=args.firmware,
+                auto_resize=args.auto_resize,
+                extra_packages=extra_packages,
+            )
+        )
+    return env
+
+
 def print_build_summary(env: dict[str, str], output: Path):
+    provider = get_distro(env.get("LINUX_USB_DISTRO", "alpine"))
+    prefix = provider.script_prefix
+    branch = env.get(provider.branch_env) or env.get("ALPINE_BRANCH") or provider.default_branch
     rows = [
         ("Output", str(output)),
         ("Minimum image size", env["IMAGE_SIZE"]),
-        ("Alpine", f"{env['ALPINE_BRANCH']} / {env['ARCH']}"),
-        ("Profile", env.get("ALPINE_USB_PROFILE", "compatibility")),
-        ("Desktop", env["ALPINE_USB_DESKTOP"]),
-        ("Window managers", env["ALPINE_USB_TILING_WMS"] or "none"),
-        ("Default session", env["ALPINE_USB_DEFAULT_SESSION"]),
-        ("Display manager", env["ALPINE_USB_DISPLAY_MANAGER"]),
-        (
-            "Network",
-            f"{env['ALPINE_USB_NETWORK']} wifi={env['ALPINE_USB_WIFI']} bluetooth={env['ALPINE_USB_BLUETOOTH']}",
-        ),
-        ("Audio / browser", f"{env['ALPINE_USB_AUDIO']} / {env['ALPINE_USB_BROWSER']}"),
+        ("Distribution", f"{provider.label} {branch} / {env['ARCH']}"),
+        ("Profile", env.get(f"{prefix}_PROFILE", "compatibility")),
+        ("Desktop", env[f"{prefix}_DESKTOP"]),
+        ("Window managers", env[f"{prefix}_TILING_WMS"] or "none"),
+        ("Default session", env[f"{prefix}_DEFAULT_SESSION"]),
+        ("Display manager", env[f"{prefix}_DISPLAY_MANAGER"]),
+        ("Network", f"{env[f'{prefix}_NETWORK']} wifi={env[f'{prefix}_WIFI']} bluetooth={env[f'{prefix}_BLUETOOTH']}"),
+        ("Audio / browser", f"{env[f'{prefix}_AUDIO']} / {env[f'{prefix}_BROWSER']}"),
         (
             "Boot",
-            f"{env['ALPINE_USB_BOOTLOADER']} linux-{env['ALPINE_USB_KERNEL_FLAVOR']} firmware={env['ALPINE_USB_FIRMWARE']}",
+            f"{env[f'{prefix}_BOOTLOADER']} linux-{env[f'{prefix}_KERNEL_FLAVOR']} firmware={env[f'{prefix}_FIRMWARE']}",
         ),
-        ("Legacy X11 drivers", env.get("ALPINE_USB_LEGACY_X11_DRIVERS", "1")),
-        ("Auto-resize USB", env["ALPINE_USB_AUTO_RESIZE"]),
-        ("Keyboard", f"console={env['ALPINE_USB_CONSOLE_KEYMAP']} xkb={env['ALPINE_USB_XKB_LAYOUT']}"),
-        ("Extra packages", env["ALPINE_USB_EXTRA_PACKAGES"] or "none"),
+        ("Legacy X11 drivers", env.get(f"{prefix}_LEGACY_X11_DRIVERS", "1")),
+        ("Auto-resize USB", env[f"{prefix}_AUTO_RESIZE"]),
+        ("Keyboard", f"console={env[f'{prefix}_CONSOLE_KEYMAP']} xkb={env[f'{prefix}_XKB_LAYOUT']}"),
+        ("Extra packages", env[f"{prefix}_EXTRA_PACKAGES"] or "none"),
     ]
     print_panel("Build profile", rows)
 
@@ -263,10 +424,17 @@ def confirm(prompt: str, yes: bool = False) -> bool:
     return answer in {"y", "yes", "s", "si", "sí"}
 
 
-SECRET_ENV_TO_FILE = {
-    "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
-    "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
-}
+def secret_env_to_file() -> dict[str, str]:
+    prefixes = {provider.script_prefix for provider in DISTROS.values()} | {
+        provider.env_prefix for provider in DISTROS.values()
+    }
+    return {
+        **{f"{prefix}_PASSWORD": f"{prefix}_PASSWORD_FILE" for prefix in prefixes},
+        **{f"{prefix}_ROOT_PASSWORD": f"{prefix}_ROOT_PASSWORD_FILE" for prefix in prefixes},
+    }
+
+
+SECRET_ENV_TO_FILE = secret_env_to_file()
 
 
 def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]:
@@ -276,6 +444,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -292,14 +462,27 @@ def cleanup_secret_files(paths: list[Path]):
 
 
 def run_config_dry_run(env: dict[str, str]) -> int:
-    sys.stdout.flush()
+    provider = get_distro(env.get("LINUX_USB_DISTRO", "alpine"))
+    if provider.id == "nixos":
+        return run_nixos_dry_run(nixos_env_to_config(env))
     dry_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     dry_env.update(safe_env)
-    dry_env["ALPINE_USB_DRY_RUN"] = "1"
     dry_env.pop("IMAGE_NAME", None)
+    dry_env[f"{provider.script_prefix}_DRY_RUN"] = "1"
+    dry_env[f"{provider.env_prefix}_DRY_RUN"] = "1"
     try:
-        proc = subprocess.Popen(["./configure-alpine-usb.sh"], cwd=repo_root(), env=dry_env)
+        if provider.configure_script:
+            script = provider.configure_script_path(repo_root())
+            assert script is not None
+            script.chmod(0o755)
+            proc = subprocess.Popen([f"./{script.name}"], cwd=repo_root(), env=dry_env)
+        else:
+            script = provider.build_script_path(repo_root())
+            if script is None:
+                raise RuntimeError(f"No dry-run adapter configured for {provider.label}")
+            script.chmod(0o755)
+            proc = subprocess.Popen([f"./{script.name}", "--dry-run"], cwd=repo_root(), env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)
@@ -318,20 +501,37 @@ def cmd_build(args: argparse.Namespace) -> int:
     except ValueError as exc:
         err(str(exc))
         return 2
+    provider = get_distro(env.get("LINUX_USB_DISTRO", "alpine"))
     output = Path(args.output).expanduser().resolve()
-    print_build_summary(env, output)
+    if provider.id == "nixos":
+        config = nixos_env_to_config(env)
+        print_panel("NixOS build profile", nixos_summary_rows(config, output))
+        if args.dry_run:
+            return run_nixos_dry_run(config)
+        if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
+            warn("Cancelled.")
+            return 1
+        if not confirm("Build this NixOS USB image now?", args.yes):
+            warn("Cancelled.")
+            return 1
+        return run_nixos_build(config, output)
 
+    print_build_summary(env, output)
     if args.dry_run:
-        info("Dry-run only: validating generated Alpine configuration and package list.")
+        info(f"Dry-run only: validating generated {provider.label} configuration and package list.")
         return run_config_dry_run(env)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
         return 1
-    if not confirm("Build this Alpine USB image now?", args.yes):
+    if not confirm(f"Build this {provider.label} USB image now?", args.yes):
         warn("Cancelled.")
         return 1
 
+    script = provider.build_script_path(repo_root())
+    if script is None:
+        err(f"No build adapter configured for {provider.label}")
+        return 1
     build_env = os.environ.copy()
     safe_env, secret_files = prepare_secret_env(env)
     build_env.update(safe_env)
@@ -344,9 +544,10 @@ def cmd_build(args: argparse.Namespace) -> int:
             built_path.unlink()
         if output.exists():
             output.unlink()
+        script.chmod(0o755)
         info("Starting build. This can take a while…")
         sys.stdout.flush()
-        proc = subprocess.Popen(["./build-alpine-usb.sh"], cwd=repo_root(), env=build_env)
+        proc = subprocess.Popen([f"./{script.name}"], cwd=repo_root(), env=build_env)
         code = proc.wait()
         if code != 0:
             err(f"Build failed with exit code {code}")
@@ -364,14 +565,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    provider = selected_provider(args)
+    branch = release_override(args) or args.branch
     try:
-        validate_branch(args.branch)
+        branch = provider.normalize_branch(branch)
+        arch = provider.normalize_arch(args.arch)
     except ValueError as exc:
         err(str(exc))
         return 2
-    info(f"Searching Alpine {args.branch}/{args.arch} official repos: {', '.join(APK_SEARCH_REPOS)}")
+    info(f"Searching {provider.repo_description(branch, arch)}")
     try:
-        results = search_official_apk_packages(args.branch, args.arch, args.query, args.limit)
+        results = provider.search_packages(branch, arch, args.query, args.limit)
     except Exception as exc:
         err(f"Package search failed: {exc}")
         return 1
@@ -385,9 +589,19 @@ def cmd_search(args: argparse.Namespace) -> int:
         version = package.get("version", "")
         desc = package.get("description", "")
         rows.append((f"{idx:>2}. {name}", f"{version}  [{repo}]  {desc}"))
-    print_panel(f"Top {len(results)} suggestions for '{args.query}'", rows)
+    print_panel(f"Top {len(results)} {provider.package_manager} suggestions for '{args.query}'", rows)
     print("Add packages with:")
-    print(c(f"  {terminal_entrypoint_name()} build --extra-package {results[0]['name']}", C.dim))
+    distro_arg = "" if provider.id == "alpine" else f" --distro {provider.id}"
+    print(c(f"  {terminal_entrypoint_name()} build{distro_arg} --extra-package {results[0]['name']}", C.dim))
+    return 0
+
+
+def cmd_distros(_args: argparse.Namespace) -> int:
+    rows: list[tuple[str, str]] = []
+    for name in distro_choices(visible_only=True):
+        provider = get_distro(name)
+        rows.append((name, f"{provider.label} · {provider.branch_label}: {', '.join(provider.branch_choices)}"))
+    print_panel("Supported Linux distributions", rows)
     return 0
 
 
@@ -463,6 +677,8 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     elif sysname == "Linux":
         for name in ["sudo", "python3", "mmd", "mcopy", "mdir", "grub-mkstandalone", "dd", "lsblk"]:
             checks.append((name, shutil.which(name) is not None))
+        for optional in ["debootstrap", "pacstrap", "dnf", "zypper", "xbps-install", "nix"]:
+            checks.append((f"optional {optional}", shutil.which(optional) is not None))
     else:
         checks.append(("unsupported OS for flashing", False))
 
@@ -470,7 +686,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     rows = []
     for name, good in checks:
         rows.append((name, c("OK", C.green) if good else c("missing", C.red)))
-        failed = failed or not good
+        failed = failed or (not good and not name.startswith("optional "))
     print_panel("Host checks", rows)
     return 1 if failed else 0
 
@@ -486,20 +702,29 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument(
+        "--distro",
+        default="alpine",
+        choices=distro_choices(include_aliases=True),
+        help="Linux distribution backend",
+    )
+    parser.add_argument(
         "--profile",
         default="compatibility",
         choices=["compatibility", "minimal"],
         help="Build preset. minimal changes defaults unless explicitly overridden.",
     )
     parser.add_argument(
-        "-o",
-        "--output",
-        default=str(Path(tempfile.gettempdir()) / "alpine-usb-installer" / DEFAULT_IMAGE_NAME),
-        help="Final output image path",
+        "-o", "--output", default=str(DEFAULT_OUTPUT_DIR / DEFAULT_IMAGE_NAME), help="Final output image path"
     )
     parser.add_argument("-s", "--image-size", default="16G", help="Minimum image size used for the build, e.g. 16G")
-    parser.add_argument("--branch", default="latest-stable", help="Alpine branch: latest-stable, edge, v3.22, ...")
-    parser.add_argument("--arch", default="x86_64", choices=["x86_64"], help="Target architecture")
+    parser.add_argument(
+        "--branch", default="latest-stable", help="Distro branch/release/channel. Use 'distros' to list choices."
+    )
+    parser.add_argument("--release", default=None, help="Alias for --branch when selecting distro releases/channels")
+    parser.add_argument("--nixos-channel", default=None, help="Alias for --branch when --distro nixos")
+    parser.add_argument(
+        "--arch", default="x86_64", choices=sorted({a for p in DISTROS.values() for a in p.arch_choices})
+    )
     parser.add_argument("--hostname", default="alpine-usb")
     parser.add_argument("--user", default="alpine")
     parser.add_argument(
@@ -532,8 +757,8 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     parser.add_argument("--no-wifi", dest="wifi", action="store_false")
     parser.add_argument("--bluetooth", dest="bluetooth", action="store_true", default=True)
     parser.add_argument("--no-bluetooth", dest="bluetooth", action="store_false")
-    parser.add_argument("--bootloader", default="grub", choices=["grub", "systemd-boot"])
-    parser.add_argument("--kernel", default="lts", choices=["lts", "stable"])
+    parser.add_argument("--bootloader", default="grub", choices=["grub", "systemd-boot", "extlinux"])
+    parser.add_argument("--kernel", default="lts", choices=["lts", "stable", "generic", "huge"])
     parser.add_argument("--firmware", default="full", choices=["full", "none"])
     parser.add_argument(
         "--legacy-x11-drivers",
@@ -554,8 +779,10 @@ def add_common_build_options(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--auto-resize", dest="auto_resize", action="store_true", default=True)
     parser.add_argument("--no-auto-resize", dest="auto_resize", action="store_false")
-    parser.add_argument("--extra-package", action="append", help="Extra APK package; can be repeated or contain spaces")
-    parser.add_argument("--extra-packages", default="", help="Space-separated extra APK packages")
+    parser.add_argument(
+        "--extra-package", action="append", help="Extra distro package; can be repeated or contain spaces"
+    )
+    parser.add_argument("--extra-packages", default="", help="Space-separated extra distro packages")
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print generated package list without building"
     )
@@ -565,27 +792,35 @@ def add_common_build_options(parser: argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=Path(sys.argv[0]).name,
-        description="Unified terminal interface for Alpine USB images (TUI + CLI commands).",
+        description=f"{APP_TITLE}: {APP_DESCRIPTION} (TUI + CLI commands).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser(
-        "build", help="Build a configurable Alpine USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "build", help="Build a configurable Linux USB image", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     add_common_build_options(build)
     build.set_defaults(func=cmd_build)
 
     search = sub.add_parser(
         "search",
-        help="Search official Alpine packages and show top suggestions",
+        help="Search official distro packages and show top suggestions",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     search.add_argument("query")
+    search.add_argument("--distro", default="alpine", choices=distro_choices(include_aliases=True))
     search.add_argument("--branch", default="latest-stable")
-    search.add_argument("--arch", default="x86_64")
+    search.add_argument("--release", default=None)
+    search.add_argument("--nixos-channel", default=None)
+    search.add_argument(
+        "--arch", default="x86_64", choices=sorted({a for p in DISTROS.values() for a in p.arch_choices})
+    )
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(func=cmd_search)
+
+    distros = sub.add_parser("distros", help="List supported Linux distributions and branch/release choices")
+    distros.set_defaults(func=cmd_distros)
 
     devices = sub.add_parser("devices", help="List removable USB devices")
     devices.set_defaults(func=cmd_devices)
@@ -618,10 +853,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 0
     args = parser.parse_args(argv)
+    apply_distro_defaults(args, argv)
     apply_profile_defaults(args, argv)
     if args.command != "tui":
-        print(c(f"\n{APP_TITLE}", C.bold + C.cyan))
-        print(c("─" * len(APP_TITLE), C.cyan), flush=True)
+        print(c(f"\n{APP_TITLE} — {APP_DESCRIPTION}", C.bold + C.cyan))
+        print(c("─" * (len(APP_TITLE) + len(APP_DESCRIPTION) + 3), C.cyan), flush=True)
     try:
         return args.func(args)
     except KeyboardInterrupt:

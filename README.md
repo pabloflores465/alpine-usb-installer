@@ -1,62 +1,54 @@
-# Alpine USB Installer
+# LEDIT — Linux External Drive Installer Tool
 
-Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands).
+Build and flash configurable, preinstalled **Linux USB/external-drive images** from a Qt GUI, a full-screen TUI, or one unified CLI.
+
+LEDIT was formerly Alpine USB Installer. The legacy `./alpine-usb` launcher remains as a compatibility alias; new docs, assets, and binaries use `./ledit`.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
-## Contents
+## Supported distributions
 
-- [Features](#features)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [Interfaces](#interfaces)
-  - [GUI](#gui)
-  - [TUI](#tui)
-  - [CLI](#cli)
-- [Build profiles](#build-profiles)
-- [Configuration guide](#configuration-guide)
-- [Write to USB](#write-to-usb)
-- [Booting the USB](#booting-the-usb)
-  - [Intel Macs](#intel-macs)
-  - [x86 PCs](#x86-pcs)
-- [Initial login](#initial-login)
-- [macOS DMG packaging](#macos-dmg-packaging)
-- [Validation and tests](#validation-and-tests)
-- [Troubleshooting](#troubleshooting)
-  - [Free build space on macOS](#free-build-space-on-macos)
-- [License](#license)
+| Distro | CLI id | Branch / release choices shown by UI | Package search backend | Build backend |
+| --- | --- | --- | --- | --- |
+| Alpine Linux | `alpine` | `latest-stable`, `edge`, `v3.22`, `v3.21` | APK `main`, `community` | `build-alpine-usb.sh` |
+| Arch Linux | `arch` | `rolling`, `stable` alias | Arch package API (`core`, `extra`, `multilib`) | `build-arch-usb.sh` |
+| Debian | `debian` | `stable`, `testing`, `sid`, `trixie`, `bookworm`, `forky` | APT / `apt-cache` | `build-debian-usb.sh` |
+| Fedora | `fedora` | `stable`, `latest`, `rawhide`, numeric releases | DNF repoquery | `build-fedora-usb.sh` |
+| Gentoo | `gentoo` | `stable`, `testing` | Portage catalogue / local eix/pkgcore | `build-gentoo-usb.sh` |
+| NixOS | `nixos` | `nixos-24.11`, `nixos-25.05`, `nixos-unstable` | `nix search` / nixpkgs | Python NixOS image backend |
+| openSUSE | `opensuse` | `tumbleweed`, `leap-16.0`, `leap-15.6` | Zypper repo metadata | `build-opensuse-usb.sh` |
+| RHEL family | `rhel` | `9`, `10` | DNF repoquery | `build-rhel-usb.sh` |
+| Slackware | `slackware` | `stable`, `current`, `15.0` | Slackware `PACKAGES.TXT` | `build-slackware-usb.sh` |
+| Ubuntu | `ubuntu` | `24.04`, `noble`, `22.04`, `jammy` | APT / `apt-cache` | `build-ubuntu-usb.sh` |
+| Void Linux (glibc) | `void` | `current`, `glibc` | XBPS repositories | `build-void-usb.sh` |
+
+When you change distro in the GUI or TUI, the branch/release combo is replaced with only that distro's valid choices. Package suggestions also switch to that distro's repositories. If packages were already selected, LEDIT re-searches those names in the new distro and reports any missing package names.
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image.
-- Configure desktop/session options:
-  - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
-  - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
-- Search official Alpine `main` + `community` packages from GUI/TUI/CLI.
-- Cache package indexes on disk for fast repeated searches.
-- Build a compatibility-oriented default image or a smaller minimal image.
-- Toggle broad legacy X11 video drivers for compatibility vs smaller/faster graphical images.
-- Flash generated images to USB from macOS/Linux with whole-disk safety checks and raw-image integrity validation before writing.
-- Auto-expand the root filesystem on first boot to use the full USB drive.
-- Run compile/lint/test/smoke validation with one project check command.
+- Build bootable installed Linux USB images from distro-specific builders.
+- Configure image size, branch/release/channel, architecture, hostname, user/passwords, timezone, locale, keyboard, desktop/session, display manager, bootloader, kernel flavor, firmware, networking, Bluetooth, audio, browser, and extra packages.
+- Search distro-native package repositories from GUI/TUI/CLI.
+- Cache package indexes/search results for repeat searches.
+- Use compatibility or minimal profiles.
+- Flash generated raw images to USB from macOS/Linux with whole-disk safety checks and image validation.
+- Auto-expand root filesystem on first boot where supported by distro backend.
+- Validate code, scripts, distro dry-runs, and config matrix with project scripts.
 
 ## Requirements
 
 ### Build host
 
 - Python 3.
-- Docker Desktop on macOS. The build needs Linux/NBD support.
-  - First macOS build creates a cached `alpine-usb-builder:3.22-amd64` Docker image so later builds skip reinstalling build tools.
-  - Set `ALPINE_USB_SKIP_BUILDER_CACHE=1` to force the fresh-container path.
-  - Set `ALPINE_USB_REBUILD_BUILDER=1` to rebuild the cached builder image.
-- On native Linux: `mtools`, GRUB EFI tooling, `qemu-nbd`, `parted`, `rsync`, `dosfstools`, and normal image build tools.
+- macOS: Docker Desktop for Linux image builders that need loop/mount/chroot support.
+- Native Linux: distro backend tools as needed (`debootstrap`, `pacstrap`, `dnf`, `zypper`, `xbps-install`, `nix`/`nixos-generate`, GRUB/EFI tools, `parted`, filesystem tools, etc.).
+- Alpine APK solver validation additionally needs Docker.
 
-### Runtime tools
+### Runtime flashing tools
 
 - macOS flashing: `diskutil`, `dd`, administrator password.
 - Linux flashing: `lsblk`, `dd`, `sudo` or `pkexec`.
-- Windows raw flashing is not implemented here. Use Rufus or balenaEtcher with the generated image.
+- Windows raw flashing is not implemented; use Rufus or balenaEtcher with the generated image.
 
 ## Quick start
 
@@ -64,138 +56,120 @@ Build and flash configurable, preinstalled **Alpine Linux x86_64 USB images** fr
 # GUI
 ./gui.py
 
-# Unified terminal binary: TUI by default
-./alpine-usb
+# TUI by default
+./ledit
 
 # Explicit TUI
-./alpine-usb tui
+./ledit tui
 
-# CLI help/subcommands
-./alpine-usb --help
-./alpine-usb build --help
+# CLI help
+./ledit --help
+./ledit distros
+./ledit build --help
 ```
 
-Default output path:
+Default output directory:
 
 ```txt
-/tmp/alpine-usb-installer/alpine-usb.img
+/tmp/ledit/
 ```
 
-## Interfaces
-
-### GUI
-
-```sh
-./gui.py
-```
-
-<img src="docs/assets/gui-overview.png" alt="Alpine USB Installer GUI" width="900">
-
-
-`./gui.py` creates and uses its own `.qtvenv` automatically if PySide6 is missing. The dev GUI installs the minimal Qt runtime declared in `requirements.txt`.
-
-GUI flow:
-
-1. Set image output path.
-2. Open only the configuration sections you want to change.
-3. Review the live configuration summary.
-4. Build the image. During a build, the form stays editable for the next profile and the build can be stopped/cleaned.
-5. Select USB target.
-6. Flash USB. The image is checked before flashing to avoid writing incomplete or corrupt builds.
-
-GUI image configurations auto-save as you edit and can also be saved/loaded as JSON (`.json`) or YAML (`.yaml`/`.yml`). Saved files never include user/root passwords. Password fields stay in memory while the app is open, including when loading another configuration file or restoring defaults. After restarting the app, enter the user password again before building. By default, root password mirrors the user password; enable “Use separate root password” only when you want different credentials. The live configuration summary updates immediately, and loaded/changed fields stay marked with dirty dots until you explicitly save them.
-
-USB selection shows the full device label, size, model, serial/id, and volume info when available. Internally, flashing strips that label down to the safe whole-disk device path, for example `/dev/disk20`.
-
-If USB auto-detection fails, type the whole-disk device manually, for example `/dev/disk7` on macOS or `/dev/sdb` on Linux.
-
-### TUI
-
-```sh
-./alpine-usb
-# or explicit:
-./alpine-usb tui
-```
-
-The TUI provides full-screen menus for configuration, package search, dry-run/build, USB device selection, flashing, and host diagnostics. There is one terminal entrypoint, `alpine-usb`; `cli.py` and `tui.py` are import-only support modules.
-
-### CLI
+Legacy alias:
 
 ```sh
 ./alpine-usb --help
-./alpine-usb build --help
 ```
 
-Common commands:
+## CLI examples
 
 ```sh
-# Search packages
-./alpine-usb search firefox
+# Search packages in selected distro repositories
+./ledit search firefox --distro alpine
+./ledit search firefox --distro ubuntu --branch 24.04
+./ledit search sway --distro arch
+./ledit search app-editors/vim --distro gentoo
 
-# Validate a profile without building
-./alpine-usb build --dry-run --ask-password --desktop xfce --bootloader systemd-boot
+# Validate without building
+./ledit build --distro alpine --dry-run --ask-password --desktop xfce --bootloader systemd-boot
+./ledit build --distro ubuntu --branch 24.04 --dry-run --ask-password --desktop plasma -y
+./ledit build --distro nixos --branch nixos-25.05 --dry-run --password change-me -y
 
-# Build default profile without prompts (avoid shell history by using --ask-password instead)
-./alpine-usb build --password 'change-me' -y
-
-# Build Plasma profile
-./alpine-usb build --ask-password --desktop plasma --display-manager sddm --bootloader systemd-boot -y
-
-# Build smaller/faster minimal profile defaults
-./alpine-usb build --ask-password --profile minimal -y
+# Build minimal profiles
+./ledit build --distro debian --profile minimal --ask-password -y
+./ledit build --distro void --profile minimal --ask-password -y
 
 # Build graphical image without broad legacy X11 drivers
-./alpine-usb build --ask-password --desktop xfce --no-legacy-x11-drivers -y
+./ledit build --distro fedora --ask-password --desktop xfce --no-legacy-x11-drivers -y
 
-# List removable devices
-./alpine-usb devices
-
-# Flash image to USB
-./alpine-usb flash /tmp/alpine-usb-installer/alpine-usb.img /dev/sdX
+# List and flash devices
+./ledit devices
+./ledit flash /tmp/ledit/alpine-usb.img /dev/sdX
 ```
-
-Flash refuses partitions, non-removable/non-hotplug disks, missing images, truncated images, corrupt GPT images, and images without the expected EFI + Linux root partitions. Confirmation shows target model, size, serial/id, and device path before writing.
 
 Extra packages can be repeated or space-separated:
 
 ```sh
-./alpine-usb build --ask-password \
+./ledit build --distro arch --ask-password \
   --extra-package neovim \
   --extra-package "tmux htop" \
   --extra-package docker
 ```
 
+## GUI
+
+```sh
+./gui.py
+```
+
+The GUI creates and uses `.qtvenv` automatically if PySide6 is missing.
+
+GUI flow:
+
+1. Select distribution. Branch/release and package-search repositories update immediately.
+2. Set image output path and system settings.
+3. Open only the configuration sections you want to change.
+4. Search/add extra packages from the selected distro repositories.
+5. Build the image. The form stays editable for the next profile while a build runs.
+6. Select USB target.
+7. Flash USB. The image is checked before flashing.
+
+GUI profiles can be saved/loaded as JSON/YAML. Password fields are never saved. Existing package selections are revalidated when you switch distros.
+
+## TUI
+
+```sh
+./ledit
+# or
+./ledit tui
+```
+
+The TUI provides menus for distro selection, branch/release, package search, dry-run/build, USB selection, flashing, and host diagnostics.
+
 ## Build profiles
 
-### Default compatibility profile
+### Compatibility profile
 
-Defaults are generic and distro-like:
+Defaults are distro-like and graphical where possible:
 
 | Option | Default |
 | --- | --- |
 | Image size | `16G` |
-| Output | `/tmp/alpine-usb-installer/alpine-usb.img` |
-| Alpine branch | `latest-stable` |
-| Architecture | `x86_64` |
-| User/password | user `alpine` / password required before build |
-| Root password | same as user password unless configured separately |
-| Locale/timezone | `en_US.UTF-8` / `UTC` |
-| Keyboard | US console + XKB |
+| Branch/release | distro default |
+| Architecture | distro default (`x86_64`/equivalent) |
 | Desktop | XFCE |
-| Display manager | auto recommended, usually LightDM for XFCE/MATE |
-| Bootloader | GRUB removable UEFI |
-| Kernel | `linux-lts` |
+| Display manager | auto recommended |
+| Bootloader | GRUB, except NixOS sd-image uses extlinux |
+| Kernel | `lts` when backend supports it, else distro kernel |
 | Firmware | full firmware |
-| X11 drivers | broad legacy driver set enabled |
 | Network | NetworkManager + Wi‑Fi |
 | Bluetooth | enabled |
-| Audio | PipeWire + WirePlumber + pipewire-pulse |
+| Audio | PipeWire |
 | Browser | Firefox |
-| USB auto-resize | enabled |
+| USB auto-resize | enabled where supported |
 
 ### Minimal profile
 
-`--profile minimal` changes defaults for smaller/faster images:
+`--profile minimal` changes defaults for smaller/faster images unless explicitly overridden:
 
 | Option | Minimal default |
 | --- | --- |
@@ -206,373 +180,72 @@ Defaults are generic and distro-like:
 | Network | none |
 | Wi‑Fi | disabled |
 | Bluetooth | disabled |
-| Firmware | `linux-firmware-none` |
+| Firmware | none |
 | Legacy X11 drivers | disabled |
 
-Explicit CLI options override profile defaults. Example: `--profile minimal --desktop xfce --wifi` keeps XFCE and Wi‑Fi while using other minimal defaults.
-
-## Configuration guide
-
-### System, user, localization
-
-Configure image size, Alpine branch, hostname, username/passwords, timezone, locale, console keymap, and XKB layout.
-
-### Desktop/session
-
-Choose a desktop, display manager, default session, browser, audio backend, and optional window managers.
-
-Recommended compatibility:
-
-- Older hardware: XFCE + LightDM + GRUB + `linux-lts` + full firmware.
-- Modern KDE setup: Plasma + SDDM.
-- GNOME setup: GNOME + GDM.
-- WM-only setup: no desktop + greetd or no display manager.
-- Wayland sessions such as Sway/Hyprland/labwc: use Auto, greetd, SDDM, GDM, or no display manager. LightDM/LXDM are treated as X11-only here.
-
-### Network, Wi‑Fi, Bluetooth
-
-NetworkManager is recommended for desktop usage. Bluetooth uses `obexd-enhanced` to avoid conflicts with GNOME Bluetooth while still providing OBEX support.
-
-### Audio
-
-PipeWire is the recommended default. On Alpine/OpenRC there is no `systemd --user` manager, so the generated desktop image starts `pipewire`, `wireplumber`, and `pipewire-pulse` from XDG autostart.
-
-### Bootloader, kernel, firmware
-
-- GRUB removable UEFI is the safest default across many PCs and Intel Macs.
-- systemd-boot removable UEFI is available for UEFI-focused systems.
-- `linux-lts` is recommended for stability.
-- Full firmware is recommended for laptops and Wi‑Fi/Bluetooth hardware.
-- Disable broad legacy X11 video drivers (`--no-legacy-x11-drivers`) for smaller/faster graphical images on modern hardware.
-
-### Extra APK packages
-
-Use official Alpine package names. Package search queries Alpine `main` and `community` indexes.
-
-Search results are cached on disk under:
-
-```txt
-${XDG_CACHE_HOME:-~/.cache}/alpine-usb-installer/apkindex
-```
-
-Cache controls:
-
-```sh
-# Disable cache for one command
-ALPINE_USB_APK_CACHE=0 ./alpine-usb search firefox
-
-# Use custom cache dir
-ALPINE_USB_APK_CACHE_DIR=/tmp/alpine-apk-cache ./alpine-usb search firefox
-
-# Override TTL in seconds
-ALPINE_USB_APK_CACHE_TTL=3600 ./alpine-usb search firefox
-```
-
-If network fetch fails and a stale cache exists, search uses the stale cache instead of failing.
-
-## Write to USB
-
-> Warning: flashing completely erases the selected device.
-
-Use the whole disk (`/dev/sdX`, `/dev/diskX`), not a partition (`/dev/sdX1`, `/dev/diskXs1`). Do not copy `alpine-usb.img` as a file onto a FAT/exFAT USB; write it raw to the whole device.
-
-### macOS
-
-```sh
-diskutil list
-diskutil unmountDisk /dev/diskX
-sudo dd if=/tmp/alpine-usb-installer/alpine-usb.img of=/dev/rdiskX bs=16m status=progress
-sync
-diskutil eject /dev/diskX
-```
-
-### Linux
-
-```sh
-lsblk
-sudo dd if=/tmp/alpine-usb-installer/alpine-usb.img of=/dev/sdX bs=16M iflag=fullblock status=progress conv=fsync
-sync
-```
-
-## Booting the USB
-
-General flow:
-
-1. Shut down target computer.
-2. Insert flashed USB drive.
-3. Open one-time boot menu during power-on.
-4. Choose USB drive.
-5. If both `UEFI: <usb>` and non-UEFI USB entries exist:
-   - Modern machines: try `UEFI: <usb>` first.
-   - Older BIOS/CSM machines: try non-UEFI `USB Hard Drive` first.
-
-Firmware settings if boot fails:
-
-- Enable USB boot.
-- Disable Secure Boot unless your firmware accepts this image.
-- Disable Fast Boot if USB is skipped.
-- For older systems, enable Legacy Support / CSM / Legacy Boot.
-- Move USB above internal disk in boot order, or use one-time boot menu.
-- Try another USB port, especially USB 2.0 on older machines.
-- Reflash raw to whole disk if USB does not appear.
-
-Common keys:
-
-| Vendor | Boot menu | BIOS/Setup |
-| --- | --- | --- |
-| HP | `Esc` then `F9` | `Esc` then `F10` |
-| Dell | `F12` | `F2` |
-| Lenovo ThinkPad | `F12` | `F1` |
-| Lenovo IdeaPad | `F12` or Novo button | `F2` or Novo button |
-| Acer | `F12` | `F2` |
-| ASUS | `Esc` | `F2` or `Del` |
-| MSI | `F11` | `Del` |
-| Gigabyte | `F12` | `Del` |
-| Intel NUC | `F10` | `F2` |
-| Apple Intel Mac | hold `Option` / `Alt` | Recovery / Startup Security Utility for T2 |
-
-### Intel Macs
-
-Intel Macs can boot the generated `x86_64` image. Apple Silicon Macs can build and flash it, but cannot boot this x86_64 Alpine image natively.
-
-Recommended Intel Mac profile:
-
-- `Arch`: `x86_64`
-- `Bootloader`: GRUB
-- `Kernel`: `linux-lts`
-- `Firmware`: full firmware enabled
-- `Desktop`: XFCE
-- `Display manager`: LightDM
-- `Network`: NetworkManager
-- `Wi‑Fi`: enabled
-- `Bluetooth`: enabled
-- `Auto-resize USB`: enabled
-
-Boot:
-
-1. Shut down Mac.
-2. Insert flashed USB drive.
-3. Power on while holding `Option` / `Alt`.
-4. Choose `EFI Boot` or the orange USB icon.
-
-If USB does not appear:
-
-- Try another USB port.
-- Try a simple USB 2.0 hub on older Macs.
-- Reflash raw to whole disk.
-- Use GRUB instead of systemd-boot.
-- On T2 Intel Macs, allow external boot.
-
-T2 setup:
-
-1. Boot macOS Recovery with `Cmd` + `R`.
-2. Open `Utilities` → `Startup Security Utility`.
-3. Set `Secure Boot` to `No Security` if needed.
-4. Set `External Boot` to `Allow booting from external media`.
-5. Reboot while holding `Option` / `Alt`.
-
-### x86 PCs
-
-Use this section for most Intel/AMD desktops and laptops, including older BIOS/UEFI hybrid systems.
-
-Recommended broad-compatibility profile:
-
-- XFCE
-- LightDM
-- GRUB removable UEFI
-- `linux-lts`
-- Full firmware
-- Broad legacy X11 drivers enabled
-- NetworkManager + Wi‑Fi
-- Bluetooth enabled when needed
-- Auto-resize enabled
-
-Recommended modern/minimal profile:
-
-- GRUB or systemd-boot for UEFI-only machines
-- `linux-lts` for stability, `linux-stable` if you need newer hardware support
-- Disable broad legacy X11 drivers on modern GPUs if you want a smaller image
-- Use `--profile minimal` for server/rescue/TTY-only USBs
-
-BIOS/UEFI setup:
-
-1. Open one-time boot menu or firmware setup.
-2. Enable USB boot.
-3. Disable Secure Boot if the image is blocked.
-4. Disable Fast Boot if USB devices are skipped during startup.
-5. On older machines, enable Legacy Support / CSM if UEFI boot fails.
-6. Move USB above internal disk in boot order, or use the one-time boot menu.
-7. Try `UEFI: USB` first on modern systems.
-8. Try non-UEFI `USB Hard Drive` first on older BIOS/CSM systems.
-9. If boot fails, try another USB port, a USB 2.0 port/hub, GRUB bootloader, and full firmware.
-
-## Initial login
-
-Defaults unless changed:
-
-```txt
-user: alpine
-password: the password entered before build
-root password: same as user password unless configured separately
-```
-
-Saved GUI profiles/configuration files do not persist these passwords; enter the user password again before each build after restarting the GUI. Loading a saved file does not clear passwords already entered in the current GUI session. CLI builds require `--ask-password` or `--password`; TUI builds require filling the user password field. By default, root password mirrors the user password; enable “Use separate root password” in GUI, fill root password in TUI, or pass `--root-password` in CLI only when you want different credentials.
-
-Change passwords after first boot:
-
-```sh
-passwd
-sudo passwd root
-```
-
-## macOS DMG packaging
-
-Build a DMG on macOS with:
-
-```sh
-scripts/build-macos-dmg.sh
-```
-
-Build all release assets with:
-
-```sh
-scripts/package-release-assets.sh 0.1.16
-```
-
-The release packager creates separate GUI and terminal assets:
-
-- `alpine-usb-installer-<version>-macos-arm64-gui.dmg` contains only `Alpine USB Installer.app`.
-- `alpine-usb-installer-<version>-macos-arm64-terminal.tar.gz` contains only the standalone `alpine-usb` terminal binary.
-
-The terminal binary is shipped as `.tar.gz` because raw GitHub asset downloads do not preserve Unix executable bits. The terminal binary carries the build resources it needs and copies them to `/tmp/alpine-usb-installer/terminal-runtime` before invoking build scripts.
+## Distro notes
+
+- **Alpine**: keeps the mature `alpine-make-vm-image` builder and APK `main/community` search.
+- **Arch**: uses pacstrap-style package planning and Arch package API search.
+- **Debian/Ubuntu**: use debootstrap-based builders and APT search.
+- **Fedora/RHEL/openSUSE**: use DNF/Zypper installroot-style builders; package search may require local DNF/Zypper tooling or a warm cache.
+- **Gentoo/Slackware/Void**: use distro-specific installroot/bootstrap flows; macOS paths run through Docker where implemented.
+- **NixOS**: renders a flake/configuration and builds via `nixos-generate` or Docker.
+
+Additional notes:
+
+- [`docs/ubuntu-support.md`](docs/ubuntu-support.md)
+- [`docs/gentoo.md`](docs/gentoo.md)
+- [`docs/opensuse.md`](docs/opensuse.md)
 
 ## Validation and tests
 
-Full project compile/lint/test/smoke check:
-
 ```sh
+# Compile, lint, tests, shell syntax, smoke runs, distro dry-run checks
 scripts/check-project.sh
-```
 
-Unit tests and linter:
+# Distro dry-run compile smoke only
+scripts/check-image-compile.sh
 
-```sh
-pytest
-ruff check .
-ruff format --check .
-```
-
-Unified terminal smoke tests:
-
-```sh
-scripts/test-cli.sh
-```
-
-Dry-run option matrix (parallel by default; override with `JOBS=4`):
-
-```sh
+# Practical config matrix across all distros
 scripts/validate-config-matrix.sh
-```
 
-Check representative profiles with Alpine APK dependency solver inside Docker:
+# Exhaustive desktop/WM/DM/kernel grid
+MATRIX_FULL=1 scripts/validate-config-matrix.sh
 
-```sh
+# Limit matrix to some distros while developing
+MATRIX_DISTROS="alpine ubuntu nixos" scripts/validate-config-matrix.sh
+
+# Include every known branch/release alias too
+MATRIX_BRANCHES=all scripts/validate-config-matrix.sh
+
+# Alpine dependency solver with real apk in Docker
 scripts/check-apk-solver.sh
 ```
 
+## Repository rebrand
+
+GitHub repository name/description:
+
+- Name: `ledit`
+- Description: `Linux External Drive Installer Tool — build and flash configurable Linux USB images from GUI, TUI, or CLI.`
+
+Local `origin` should point to `https://github.com/pabloflores465/ledit.git`.
+
 ## Troubleshooting
 
-### GUI does not start
+### Docker not running on macOS
 
-- Run from the project root with `./gui.py`.
-- If `.qtvenv` is stale, remove it and relaunch:
+Start Docker Desktop and retry. GUI-launched macOS apps get a small PATH; LEDIT adds common Docker/Homebrew/Nix paths automatically.
 
-```sh
-rm -rf .qtvenv
-./gui.py
-```
+### Package search fails
 
-### USB does not boot
-
-- Confirm image was flashed raw to the whole disk.
-- Try GRUB bootloader.
-- Disable Secure Boot.
-- Try both UEFI and legacy USB boot entries.
-- Try another USB port.
-- Rebuild with full firmware.
-- For older PCs, enable CSM/Legacy Support.
-
-### No Wi‑Fi or Bluetooth
-
-- Use full firmware.
-- Enable Wi‑Fi/Bluetooth toggles.
-- Prefer NetworkManager for desktops.
-- Check device support in Alpine for that chipset.
-
-### No desktop audio control
-
-- Use PipeWire audio.
-- Rebuild with current image: generated desktops autostart PipeWire session components under OpenRC/elogind.
-- Check logs after boot:
-
-```sh
-ls /tmp/alpine-usb-*pipewire*.log /tmp/alpine-usb-wireplumber.log 2>/dev/null
-```
-
-### GUI modal appears in wrong place on macOS tiling WMs
-
-The Qt GUI forces dialogs visible and centered. If using a tiling window manager such as AeroSpace, keep Python/PySide windows floating if your WM moves modal dialogs away from their parent window.
+Some backends use host tools (`apt-cache`, `dnf`, `zypper`, `nix`, `xbps-query`). Install the relevant tool or retry after a cache has been populated. Alpine, Arch, openSUSE, Slackware, and Void can use remote metadata or cache fallbacks depending on backend.
 
 ### Free build space on macOS
 
-Failed or cancelled image builds can leave large files in each distro worktree's `.work/` directory, in `/tmp`/`/private/tmp`, or as deleted files still held open by macOS Virtualization/Docker processes. If Finder/`df` still shows disk space in use after deleting images, check for open deleted build files and then remove build artifacts from all `usb_system*` worktrees.
-
-Inspect space and open deleted files:
-
-```sh
-df -h "$HOME"
-lsof +L1 2>/dev/null | awk 'NR==1 || $7 >= 104857600 {print}'
-```
-
-Clean all local build workspaces and generated images across the main checkout plus distro worktrees:
-
-```sh
-repo="$HOME/Documents/usb_system"
-worktrees=$(cd "$repo" && git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
-
-for wt in $worktrees; do
-  [ -d "$wt" ] || continue
-  rm -rf "$wt/.work"
-  find "$wt" -maxdepth 1 -type f \
-    \( -name '*.img' -o -name '*.raw' -o -name '*.img.tmp' -o -name '*.raw.tmp' -o -name '*.iso' -o -name '*.iso.tmp' \) \
-    -delete
-done
-
-rm -rf /tmp/alpine-usb-installer /private/tmp/alpine-usb-installer 2>/dev/null || true
-find /tmp /private/tmp -maxdepth 1 -type f \
-  \( -name 'void-*.img' -o -name '*usb*.img' -o -name '*.img.tmp' -o -name '*.raw.tmp' \) \
-  -delete 2>/dev/null || true
-
-cd "$repo" && git worktree prune
-```
-
-If `lsof +L1` still shows large deleted images, stop the process holding them. Common culprit on macOS is `com.apple.Virtualization.VirtualMachine` after Docker/Virtualization builds:
-
-```sh
-lsof +L1 2>/dev/null | awk 'NR>1 && $7 >= 104857600 {print $2, $9}'
-# then stop the relevant PID, for example:
-kill -TERM <pid>
-sleep 2
-kill -KILL <pid> 2>/dev/null || true
-```
-
-Re-check free space:
-
-```sh
-df -h "$HOME"
-diskutil apfs list | awk '/Capacity In Use|Capacity Not Allocated|Purgeable/ {print}'
-```
+Large image builds can leave deleted-but-open temporary files if interrupted. Stop running Docker/build processes, run the GUI cleanup/stop path, or reboot if space is not released.
 
 ## License
 
-This project is licensed under **GNU General Public License v2.0 only**. See [`LICENSE`](LICENSE).
+GPL-2.0-only. See [`LICENSE`](LICENSE).

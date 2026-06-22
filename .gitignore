@@ -29,3 +29,6 @@ __pycache__/
 
 # Qt venv
 .qtvenv/
+
+# Pi agent local settings
+.pi/

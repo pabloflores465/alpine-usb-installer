@@ -1,28 +1,26 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 import os
 import re
-import tarfile
+import subprocess
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
-APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
-APK_SEARCH_REPOS = ("main", "community")
+DEBIAN_DEFAULT_RELEASE = "stable"
+DEBIAN_SEARCH_REPOS = ("apt-cache",)
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
-BRANCH_RE = re.compile(r"^(latest-stable|edge|v[0-9]+\.[0-9]+)$")
+RELEASE_RE = re.compile(r"^(stable|testing|sid|bookworm|trixie|forky)$")
 CACHE_VERSION = 1
 DEFAULT_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 
-def validate_branch(branch: str) -> str:
-    if not BRANCH_RE.match(branch):
-        raise ValueError("Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)")
-    return branch
+def validate_release(release: str) -> str:
+    if not RELEASE_RE.match(release):
+        raise ValueError("Debian release must be stable, testing, sid, bookworm, trixie, or forky")
+    return release
 
 
 def validate_package_name(package: str) -> str:
@@ -38,51 +36,29 @@ def validate_extra_packages(text: str) -> str | None:
     return None
 
 
-def parse_apkindex(text: str, repo: str) -> list[dict[str, str]]:
-    packages = []
-    current: dict[str, str] = {}
-    for line in [*text.splitlines(), ""]:
-        if not line:
-            name = current.get("P")
-            if name:
-                packages.append(
-                    {
-                        "name": name,
-                        "description": current.get("T", ""),
-                        "version": current.get("V", ""),
-                        "repo": repo,
-                    }
-                )
-            current = {}
-            continue
-        if len(line) > 2 and line[1] == ":":
-            current[line[0]] = line[2:]
-    return packages
-
-
-def apk_cache_dir() -> Path:
-    explicit = os.environ.get("ALPINE_USB_APK_CACHE_DIR")
+def deb_cache_dir() -> Path:
+    explicit = os.environ.get("ALPINE_USB_DEB_CACHE_DIR") or os.environ.get("LINUX_USB_DEB_CACHE_DIR")
     if explicit:
         return Path(explicit).expanduser()
     xdg = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
-    return base / "ledit" / "apkindex"
+    return base / "ledit" / "aptindex"
 
 
 def _safe_key(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
-def apk_cache_path(branch: str, arch: str) -> Path:
-    return apk_cache_dir() / _safe_key(branch) / f"{_safe_key(arch)}.json"
+def deb_cache_path(release: str, arch: str) -> Path:
+    return deb_cache_dir() / _safe_key(release) / f"{_safe_key(arch)}.json"
 
 
 def _cache_enabled() -> bool:
-    return os.environ.get("ALPINE_USB_APK_CACHE", "1").lower() not in {"0", "no", "false", "off"}
+    return os.environ.get("ALPINE_USB_DEB_CACHE", "1").lower() not in {"0", "no", "false", "off"}
 
 
 def _cache_ttl_seconds() -> int:
-    raw = os.environ.get("ALPINE_USB_APK_CACHE_TTL", str(DEFAULT_CACHE_TTL_SECONDS))
+    raw = os.environ.get("ALPINE_USB_DEB_CACHE_TTL", str(DEFAULT_CACHE_TTL_SECONDS))
     try:
         return int(raw)
     except ValueError:
@@ -112,17 +88,17 @@ def _read_cache(path: Path) -> tuple[list[dict[str, str]], float] | None:
                 "name": name,
                 "description": str(item.get("description") or ""),
                 "version": str(item.get("version") or ""),
-                "repo": str(item.get("repo") or ""),
+                "repo": str(item.get("repo") or "debian"),
             }
         )
     return clean, float(fetched_at)
 
 
-def _write_cache(path: Path, branch: str, arch: str, packages: list[dict[str, str]]) -> None:
+def _write_cache(path: Path, release: str, arch: str, packages: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": CACHE_VERSION,
-        "branch": branch,
+        "release": release,
         "arch": arch,
         "fetched_at": time.time(),
         "packages": packages,
@@ -137,57 +113,61 @@ def _write_cache(path: Path, branch: str, arch: str, packages: list[dict[str, st
             os.unlink(tmp_name)
 
 
-def _download_apk_packages(branch: str, arch: str) -> list[dict[str, str]]:
-    merged: dict[str, dict[str, str]] = {}
-    for repo in APK_SEARCH_REPOS:
-        url = f"{APK_MIRROR}/{branch}/{repo}/{arch}/APKINDEX.tar.gz"
-        with urllib.request.urlopen(url, timeout=20) as response:
-            data = response.read()
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-            member = next((m for m in tar.getmembers() if m.name.endswith("APKINDEX")), None)
-            if member is None:
-                continue
-            fh = tar.extractfile(member)
-            if fh is None:
-                continue
-            text = fh.read().decode("utf-8", errors="replace")
-        for package in parse_apkindex(text, repo):
-            # Keep main over community if a name ever appears in both repos.
-            merged.setdefault(package["name"], package)
-    return sorted(merged.values(), key=lambda item: item["name"])
+def parse_apt_cache_search(text: str) -> list[dict[str, str]]:
+    packages: list[dict[str, str]] = []
+    for line in text.splitlines():
+        if " - " not in line:
+            continue
+        name, description = line.split(" - ", 1)
+        name = name.strip()
+        if PACKAGE_RE.match(name):
+            packages.append({"name": name, "description": description.strip(), "version": "", "repo": "debian"})
+    return packages
 
 
-def fetch_official_apk_packages(branch: str, arch: str) -> list[dict[str, str]]:
-    branch = validate_branch(branch)
-    cache_path = apk_cache_path(branch, arch)
+def _apt_cache_search(query: str) -> list[dict[str, str]]:
+    proc = subprocess.run(
+        ["apt-cache", "search", "--names-only", query],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return parse_apt_cache_search(proc.stdout)
+
+
+def fetch_official_deb_packages(release: str, arch: str, query: str = "linux") -> list[dict[str, str]]:
+    validate_release(release)
+    cache_path = deb_cache_path(release, arch)
     cached = _read_cache(cache_path) if _cache_enabled() else None
     ttl = _cache_ttl_seconds()
     if cached:
         packages, fetched_at = cached
         if ttl < 0 or (ttl > 0 and time.time() - fetched_at < ttl):
             return packages
-
     try:
-        packages = _download_apk_packages(branch, arch)
+        packages = _apt_cache_search(query)
     except Exception:
         if cached:
-            # Prefer stale cache over failing interactive search while offline.
             return cached[0]
         raise
-
     if _cache_enabled():
         with contextlib.suppress(OSError):
-            _write_cache(cache_path, branch, arch, packages)
+            _write_cache(cache_path, release, arch, packages)
     return packages
 
 
-def search_official_apk_packages(branch: str, arch: str, query: str, limit: int = 10) -> list[dict[str, str]]:
+def search_official_deb_packages(release: str, arch: str, query: str, limit: int = 10) -> list[dict[str, str]]:
     query = query.strip().lower()
     if len(query) < 2:
         return []
+    validate_release(release)
     terms = [term for term in re.split(r"\s+", query) if term]
+    try:
+        candidates = _apt_cache_search(query)
+    except Exception:
+        candidates = fetch_official_deb_packages(release, arch, query=query)
     results = []
-    for package in fetch_official_apk_packages(branch, arch):
+    for package in candidates:
         name = package["name"].lower()
         desc = package.get("description", "").lower()
         haystack = f"{name} {desc}"

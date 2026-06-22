@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-PASSWORD_KEYS = frozenset({"password", "root_password", "ALPINE_USB_PASSWORD", "ALPINE_USB_ROOT_PASSWORD"})
+PASSWORD_KEYS = frozenset({"password", "root_password"})
+PASSWORD_KEY_SUFFIXES = ("_PASSWORD", "_ROOT_PASSWORD", "_PASSWORD_FILE", "_ROOT_PASSWORD_FILE")
 YAML_SUFFIXES = frozenset({".yaml", ".yml"})
 JSON_SUFFIXES = frozenset({".json"})
 
@@ -15,7 +16,11 @@ class ConfigFileError(ValueError):
 
 def scrub_config(config: dict[str, Any]) -> dict[str, Any]:
     """Return a copy with any password-like keys removed."""
-    return {key: value for key, value in config.items() if key not in PASSWORD_KEYS}
+    return {
+        key: value
+        for key, value in config.items()
+        if key not in PASSWORD_KEYS and not any(key.endswith(suffix) for suffix in PASSWORD_KEY_SUFFIXES)
+    }
 
 
 def config_format_for_path(path: str | Path) -> str:
@@ -73,7 +78,7 @@ def save_config_file(path: str | Path, config: dict[str, Any]) -> None:
 
 def _dump_simple_yaml(config: dict[str, Any]) -> str:
     lines = [
-        "# Alpine USB Installer image configuration",
+        "# LEDIT image configuration",
         "# Passwords are intentionally not saved.",
     ]
     for key, value in config.items():
