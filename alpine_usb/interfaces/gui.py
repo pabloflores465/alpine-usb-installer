@@ -773,6 +773,111 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     return safe_env, created
 
 
+DOCKER_NAME_ENV_KEYS = (
+    "ALPINE_USB_DOCKER_NAME",
+    "ARCH_USB_DOCKER_NAME",
+    "DEBIAN_USB_DOCKER_NAME",
+    "FEDORA_USB_DOCKER_NAME",
+    "GENTOO_USB_DOCKER_NAME",
+    "NIXOS_USB_DOCKER_NAME",
+    "OPENSUSE_USB_DOCKER_NAME",
+    "RHEL_USB_DOCKER_NAME",
+    "SLACKWARE_USB_DOCKER_NAME",
+    "UBUNTU_USB_DOCKER_NAME",
+    "VOID_USB_DOCKER_NAME",
+)
+
+
+def _log_cleanup(log_emit, message: str) -> None:
+    try:
+        log_emit(message)
+    except RuntimeError:
+        pass
+
+
+def _remove_cleanup_path(path: Path, log_emit) -> None:
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+            _log_cleanup(log_emit, f"Removed build workspace: {path}")
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+            _log_cleanup(log_emit, f"Removed partial image: {path}")
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        _log_cleanup(log_emit, f"Could not remove build artifact {path}: {exc}")
+
+
+def cleanup_build_artifacts(output_path: str, image_name: str, log_emit) -> None:
+    output = Path(output_path).expanduser()
+    candidates = {
+        output,
+        Path(str(output) + ".tmp"),
+        SCRIPT_DIR / image_name,
+        SCRIPT_DIR / f"{image_name}.tmp",
+        DEFAULT_OUTPUT_DIR / image_name,
+        DEFAULT_OUTPUT_DIR / f"{image_name}.tmp",
+    }
+    for pattern in ("*.img.tmp", "*.raw.tmp", "*.img", "*.raw"):
+        candidates.update(SCRIPT_DIR.glob(pattern))
+    for candidate in sorted(candidates, key=lambda item: str(item)):
+        _remove_cleanup_path(candidate, log_emit)
+    _remove_cleanup_path(SCRIPT_DIR / ".work", log_emit)
+    release_deleted_build_file_holders(
+        [SCRIPT_DIR, output.parent, DEFAULT_OUTPUT_DIR, Path(tempfile.gettempdir()) / "alpine-usb-installer"],
+        log_emit,
+    )
+
+
+def release_deleted_build_file_holders(roots: list[Path], log_emit) -> None:
+    if platform.system() != "Darwin":
+        return
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return
+    try:
+        proc = subprocess.run([lsof, "+L1"], text=True, capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    root_text = [str(root.expanduser()) for root in roots if root]
+    pids: set[int] = set()
+    for line in proc.stdout.splitlines()[1:]:
+        parts = line.split(None, 8)
+        if len(parts) < 9:
+            continue
+        try:
+            pid = int(parts[1])
+            size = int(parts[6])
+        except ValueError:
+            continue
+        if pid == os.getpid() or size < 100 * 1024 * 1024:
+            continue
+        name = parts[8]
+        if not any(name.startswith(root) for root in root_text):
+            continue
+        if not any(token in name for token in (".img", ".raw", ".zst", "/.work/", "alpine-usb-installer")):
+            continue
+        pids.add(pid)
+    for pid in sorted(pids):
+        _log_cleanup(log_emit, f"Stopping process {pid} still holding deleted build image data...")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    if pids:
+        time.sleep(1)
+    for pid in sorted(pids):
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def cleanup_secret_files(paths: list[Path]):
     for path in paths:
         try:
@@ -798,12 +903,14 @@ class BuildWorker(QThread):
         if not docker:
             return
         try:
-            subprocess.Popen(
+            subprocess.run(
                 [docker, "rm", "-f", self.docker_container_name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=20,
+                check=False,
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             pass
 
     def stop_process_group(self, sig: signal.Signals):
@@ -837,13 +944,8 @@ class BuildWorker(QThread):
         QTimer.singleShot(5000, self.force_cancel)
 
     def cleanup_partial_output(self):
-        for candidate in [Path(self.output_path).expanduser(), SCRIPT_DIR / DEFAULT_IMAGE_NAME]:
-            try:
-                if candidate.exists():
-                    candidate.unlink()
-                    self.log.emit(f"Removed partial image: {candidate}")
-            except OSError as exc:
-                self.log.emit(f"Could not remove partial image {candidate}: {exc}")
+        image_name = str(self.config_env.get("IMAGE_NAME", DEFAULT_IMAGE_NAME))
+        cleanup_build_artifacts(self.output_path, image_name, self.log.emit)
 
     def run(self):
         try:
@@ -896,6 +998,7 @@ class BuildWorker(QThread):
                 raise RuntimeError(f"Build finished but expected image was not found: {final}")
             self.done.emit(True, f"Image build complete: {final}")
         except Exception as e:
+            self.cleanup_partial_output()
             self.done.emit(False, str(e))
         finally:
             self.proc = None
@@ -1084,6 +1187,7 @@ class Main(QWidget):
         self.build_status.hide()
         self.builder = None
         self.worker = None
+        self.close_after_build_cleanup = False
 
         self.make_config_widgets()
 
@@ -2513,6 +2617,10 @@ class Main(QWidget):
         self.stop_build_button.setEnabled(False)
         self.stop_build_button.hide()
         self.set_busy(False)
+        if getattr(self, "close_after_build_cleanup", False):
+            self.close_after_build_cleanup = False
+            QTimer.singleShot(0, self.close)
+            return
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
     def stop_build(self):
@@ -2627,12 +2735,32 @@ class Main(QWidget):
             self.worker = None
 
     def closeEvent(self, event):
-        if self.has_running_worker():
+        if self.thread_running(self.worker):
             modal(
-                self, "error", APP_TITLE, "An operation is still running. Wait for it to finish before closing the app."
+                self, "error", APP_TITLE, "USB flashing is still running. Wait for it to finish before closing the app."
             )
             event.ignore()
             return
+        if self.thread_running(self.builder):
+            if modal(
+                self,
+                "question",
+                APP_TITLE,
+                "Stop the running build, clean partial images, and close the app?",
+                question=True,
+            ):
+                self.close_after_build_cleanup = True
+                self.stop_build_button.setEnabled(False)
+                self.build_status.show()
+                self.build_status.setText("Stopping build and cleaning partial image...")
+                self.append_log("Stopping build and cleaning partial image before close...")
+                self.builder.cancel()
+            event.ignore()
+            return
+        if self.thread_running(self.package_search_worker):
+            self.package_search_worker.terminate()
+            self.package_search_worker.wait(1000)
+            self.package_search_worker = None
         event.accept()
 
 

@@ -104,7 +104,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${DEBIAN_USB_BUILD_IN_DOCKER:-0}" != "1" ]
     if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then value="/work/${value#"$SCRIPT_DIR"/}"; fi
     docker_env+=( -e "$name=$value" )
   done
-  exec docker run --rm --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work "$DOCKER_IMAGE" sh -ceu '
+  docker_name_args=()
+  if [ -n "${DEBIAN_USB_DOCKER_NAME:-}" ]; then
+    if [[ "$DEBIAN_USB_DOCKER_NAME" == *[!A-Za-z0-9_.-]* ]]; then echo "Invalid Docker container name: $DEBIAN_USB_DOCKER_NAME" >&2; exit 1; fi
+    docker_name_args=(--name "$DEBIAN_USB_DOCKER_NAME")
+  fi
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work "$DOCKER_IMAGE" sh -ceu '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update >/dev/null
     apt-get install -y --no-install-recommends bash ca-certificates debootstrap dosfstools e2fsprogs fdisk grub2-common grub-efi-amd64-bin kpartx mtools parted udev util-linux xz-utils >/dev/null
