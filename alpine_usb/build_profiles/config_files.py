@@ -4,7 +4,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-PASSWORD_KEYS = frozenset({"password", "root_password", "ALPINE_USB_PASSWORD", "ALPINE_USB_ROOT_PASSWORD"})
+PASSWORD_KEYS = frozenset(
+    {
+        "password",
+        "root_password",
+        "ALPINE_USB_PASSWORD",
+        "ALPINE_USB_ROOT_PASSWORD",
+        "UBUNTU_USB_PASSWORD",
+        "UBUNTU_USB_ROOT_PASSWORD",
+    }
+)
 YAML_SUFFIXES = frozenset({".yaml", ".yml"})
 JSON_SUFFIXES = frozenset({".json"})
 

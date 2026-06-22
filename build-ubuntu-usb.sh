@@ -110,7 +110,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${UBUNTU_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   done
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   if [ -n "$OUTPUT_PATH" ]; then mkdir -p "$(dirname "$OUTPUT_PATH")"; docker_mounts+=( -v "$(dirname "$OUTPUT_PATH"):/out" ); docker_env+=( -e "OUTPUT_PATH=/out/$(basename "$OUTPUT_PATH")" ); fi
-  exec docker run --rm --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work ubuntu:24.04 bash -ceu '
+  docker_name_args=()
+  if [ -n "${UBUNTU_USB_DOCKER_NAME:-}" ]; then
+    if [[ "$UBUNTU_USB_DOCKER_NAME" == *[!A-Za-z0-9_.-]* ]]; then echo "Invalid Docker container name: $UBUNTU_USB_DOCKER_NAME" >&2; exit 1; fi
+    docker_name_args=(--name "$UBUNTU_USB_DOCKER_NAME")
+  fi
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work ubuntu:24.04 bash -ceu '
     apt-get update >/dev/null
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash debootstrap gdisk parted dosfstools e2fsprogs util-linux grub2-common grub-efi-amd64-bin grub-pc-bin kpartx mtools rsync sudo udev >/dev/null
     chmod +x build-ubuntu-usb.sh configure-ubuntu-usb.sh

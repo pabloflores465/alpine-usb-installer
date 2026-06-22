@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
+from alpine_usb.apt_packages.index import search_official_apt_packages, validate_ubuntu_release
 from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
 from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
@@ -57,6 +58,8 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
     for name in [
         "build-alpine-usb.sh",
         "configure-alpine-usb.sh",
+        "build-ubuntu-usb.sh",
+        "configure-ubuntu-usb.sh",
         "README.md",
         "LICENSE",
         "scripts/Dockerfile.builder",
@@ -558,6 +561,23 @@ class ApkSearchWorker(QThread):
             self.failed.emit(self.query, str(exc))
 
 
+class AptSearchWorker(QThread):
+    done = Signal(str, list)
+    failed = Signal(str, str)
+
+    def __init__(self, release: str, arch: str, query: str):
+        super().__init__()
+        self.release = release
+        self.arch = arch
+        self.query = query
+
+    def run(self):
+        try:
+            self.done.emit(self.query, search_official_apt_packages(self.release, self.arch, self.query, limit=10))
+        except Exception as exc:
+            self.failed.emit(self.query, str(exc))
+
+
 class DeviceDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -741,6 +761,8 @@ class PackageSuggestionList(QListWidget):
 SECRET_ENV_TO_FILE = {
     "ALPINE_USB_PASSWORD": "ALPINE_USB_PASSWORD_FILE",
     "ALPINE_USB_ROOT_PASSWORD": "ALPINE_USB_ROOT_PASSWORD_FILE",
+    "UBUNTU_USB_PASSWORD": "UBUNTU_USB_PASSWORD_FILE",
+    "UBUNTU_USB_ROOT_PASSWORD": "UBUNTU_USB_ROOT_PASSWORD_FILE",
 }
 
 
@@ -751,6 +773,8 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
     secret_dir.mkdir(parents=True, exist_ok=True)
     secret_dir.chmod(0o700)
     for key, file_key in SECRET_ENV_TO_FILE.items():
+        if key not in safe_env:
+            continue
         value = safe_env.pop(key, "")
         path = secret_dir / f"{key.lower()}-{os.getpid()}.secret"
         path.write_text(value)
@@ -758,6 +782,111 @@ def prepare_secret_env(env: dict[str, str]) -> tuple[dict[str, str], list[Path]]
         safe_env[file_key] = str(path)
         created.append(path)
     return safe_env, created
+
+
+DOCKER_NAME_ENV_KEYS = (
+    "ALPINE_USB_DOCKER_NAME",
+    "ARCH_USB_DOCKER_NAME",
+    "DEBIAN_USB_DOCKER_NAME",
+    "FEDORA_USB_DOCKER_NAME",
+    "GENTOO_USB_DOCKER_NAME",
+    "NIXOS_USB_DOCKER_NAME",
+    "OPENSUSE_USB_DOCKER_NAME",
+    "RHEL_USB_DOCKER_NAME",
+    "SLACKWARE_USB_DOCKER_NAME",
+    "UBUNTU_USB_DOCKER_NAME",
+    "VOID_USB_DOCKER_NAME",
+)
+
+
+def _log_cleanup(log_emit, message: str) -> None:
+    try:
+        log_emit(message)
+    except RuntimeError:
+        pass
+
+
+def _remove_cleanup_path(path: Path, log_emit) -> None:
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+            _log_cleanup(log_emit, f"Removed build workspace: {path}")
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+            _log_cleanup(log_emit, f"Removed partial image: {path}")
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        _log_cleanup(log_emit, f"Could not remove build artifact {path}: {exc}")
+
+
+def cleanup_build_artifacts(output_path: str, image_name: str, log_emit) -> None:
+    output = Path(output_path).expanduser()
+    candidates = {
+        output,
+        Path(str(output) + ".tmp"),
+        SCRIPT_DIR / image_name,
+        SCRIPT_DIR / f"{image_name}.tmp",
+        DEFAULT_OUTPUT_DIR / image_name,
+        DEFAULT_OUTPUT_DIR / f"{image_name}.tmp",
+    }
+    for pattern in ("*.img.tmp", "*.raw.tmp", "*.img", "*.raw"):
+        candidates.update(SCRIPT_DIR.glob(pattern))
+    for candidate in sorted(candidates, key=lambda item: str(item)):
+        _remove_cleanup_path(candidate, log_emit)
+    _remove_cleanup_path(SCRIPT_DIR / ".work", log_emit)
+    release_deleted_build_file_holders(
+        [SCRIPT_DIR, output.parent, DEFAULT_OUTPUT_DIR, Path(tempfile.gettempdir()) / "alpine-usb-installer"],
+        log_emit,
+    )
+
+
+def release_deleted_build_file_holders(roots: list[Path], log_emit) -> None:
+    if platform.system() != "Darwin":
+        return
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return
+    try:
+        proc = subprocess.run([lsof, "+L1"], text=True, capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    root_text = [str(root.expanduser()) for root in roots if root]
+    pids: set[int] = set()
+    for line in proc.stdout.splitlines()[1:]:
+        parts = line.split(None, 8)
+        if len(parts) < 9:
+            continue
+        try:
+            pid = int(parts[1])
+            size = int(parts[6])
+        except ValueError:
+            continue
+        if pid == os.getpid() or size < 100 * 1024 * 1024:
+            continue
+        name = parts[8]
+        if not any(name.startswith(root) for root in root_text):
+            continue
+        if not any(token in name for token in (".img", ".raw", ".zst", "/.work/", "alpine-usb-installer")):
+            continue
+        pids.add(pid)
+    for pid in sorted(pids):
+        _log_cleanup(log_emit, f"Stopping process {pid} still holding deleted build image data...")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    if pids:
+        time.sleep(1)
+    for pid in sorted(pids):
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 def cleanup_secret_files(paths: list[Path]):
@@ -785,12 +914,14 @@ class BuildWorker(QThread):
         if not docker:
             return
         try:
-            subprocess.Popen(
+            subprocess.run(
                 [docker, "rm", "-f", self.docker_container_name],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=20,
+                check=False,
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             pass
 
     def stop_process_group(self, sig: signal.Signals):
@@ -824,13 +955,8 @@ class BuildWorker(QThread):
         QTimer.singleShot(5000, self.force_cancel)
 
     def cleanup_partial_output(self):
-        for candidate in [Path(self.output_path).expanduser(), SCRIPT_DIR / DEFAULT_IMAGE_NAME]:
-            try:
-                if candidate.exists():
-                    candidate.unlink()
-                    self.log.emit(f"Removed partial image: {candidate}")
-            except OSError as exc:
-                self.log.emit(f"Could not remove partial image {candidate}: {exc}")
+        image_name = str(self.config_env.get("IMAGE_NAME", DEFAULT_IMAGE_NAME))
+        cleanup_build_artifacts(self.output_path, image_name, self.log.emit)
 
     def run(self):
         try:
@@ -838,19 +964,22 @@ class BuildWorker(QThread):
             safe_config_env, secret_files = prepare_secret_env({k: str(v) for k, v in self.config_env.items()})
             env.update(safe_config_env)
             env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
-            env["ALPINE_USB_DOCKER_NAME"] = self.docker_container_name
+            for docker_name_var in DOCKER_NAME_ENV_KEYS:
+                env[docker_name_var] = self.docker_container_name
             final = str(Path(self.output_path).expanduser().resolve())
             Path(final).parent.mkdir(parents=True, exist_ok=True)
             env["OUTPUT_PATH"] = final
             if os.path.exists(final):
                 os.remove(final)
-            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            script_name = "build-ubuntu-usb.sh" if env.get("DISTRO", "alpine") == "ubuntu" else "build-alpine-usb.sh"
+            script = SCRIPT_DIR / script_name
             if not script.exists():
                 raise RuntimeError(f"Build script not found: {script}")
             script.chmod(0o755)
-            configure = SCRIPT_DIR / "configure-alpine-usb.sh"
-            if configure.exists():
-                configure.chmod(0o755)
+            for configure_name in ["configure-alpine-usb.sh", "configure-ubuntu-usb.sh"]:
+                configure = SCRIPT_DIR / configure_name
+                if configure.exists():
+                    configure.chmod(0o755)
             cmd = [str(script)]
             self.proc = subprocess.Popen(
                 cmd,
@@ -874,6 +1003,7 @@ class BuildWorker(QThread):
                 raise RuntimeError(f"Build finished but expected image was not found: {final}")
             self.done.emit(True, f"Image build complete: {final}")
         except Exception as e:
+            self.cleanup_partial_output()
             self.done.emit(False, str(e))
         finally:
             self.proc = None
@@ -1062,6 +1192,7 @@ class Main(QWidget):
         self.build_status.hide()
         self.builder = None
         self.worker = None
+        self.close_after_build_cleanup = False
 
         self.make_config_widgets()
 
@@ -1086,6 +1217,7 @@ class Main(QWidget):
         self.build()
         self.console_stack.hide()
         self.update_console_style(expanded=False)
+        self.update_distro_ui()
         self.refresh()
 
     def make_config_widgets(self):
@@ -1097,9 +1229,14 @@ class Main(QWidget):
         self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
+        self.distro = QComboBox()
+        add_combo_items(self.distro, [("Alpine Linux", "alpine"), ("Ubuntu", "ubuntu")])
         self.alpine_branch = QComboBox()
         self.alpine_branch.setEditable(True)
         add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        self.ubuntu_release = QComboBox()
+        self.ubuntu_release.setEditable(True)
+        add_combo_items(self.ubuntu_release, ["24.04", "noble", "22.04", "jammy"])
         self.arch = QComboBox()
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
@@ -1282,12 +1419,54 @@ class Main(QWidget):
         if combo.isEditable():
             combo.setCurrentText(value)
 
+    def selected_distro(self) -> str:
+        if not hasattr(self, "distro"):
+            return "alpine"
+        value = combo_value(self.distro) or "alpine"
+        return "ubuntu" if value == "ubuntu" else "alpine"
+
+    def is_ubuntu_selected(self) -> bool:
+        return self.selected_distro() == "ubuntu"
+
+    def update_distro_defaults(self, distro: str):
+        if distro == "ubuntu":
+            if self.hostname.text().strip() in {"", "alpine-usb"}:
+                self.hostname.setText("ubuntu-usb")
+            if self.username.text().strip() in {"", "alpine"}:
+                self.username.setText("ubuntu")
+        else:
+            if self.hostname.text().strip() == "ubuntu-usb":
+                self.hostname.setText("alpine-usb")
+            if self.username.text().strip() == "ubuntu":
+                self.username.setText("alpine")
+
+    def update_distro_ui(self, apply_defaults: bool = False):
+        if not hasattr(self, "distro"):
+            return
+        distro = self.selected_distro()
+        is_ubuntu = distro == "ubuntu"
+        if apply_defaults:
+            self.update_distro_defaults(distro)
+        if hasattr(self, "alpine_branch"):
+            self.alpine_branch.setEnabled(not is_ubuntu)
+        if hasattr(self, "ubuntu_release"):
+            self.ubuntu_release.setEnabled(is_ubuntu)
+        if hasattr(self, "build_button"):
+            self.build_button.setText("Build Ubuntu image" if is_ubuntu else "Build image")
+        if hasattr(self, "package_search_empty"):
+            self.show_package_search_message("Type a package to search")
+            self.set_package_search_status("")
+        if hasattr(self, "sections") and "extra" in self.sections:
+            self.sections["extra"].title = "Extra apt packages" if is_ubuntu else "Extra APK packages"
+            self.sections["extra"].update_state()
+
     def snapshot_config(self) -> dict:
         return {
             "image": self.image.text(),
             "image_size": self.image_size.currentText(),
-            "distro": "alpine",
+            "distro": self.selected_distro(),
             "alpine_branch": self.alpine_branch.currentText(),
+            "ubuntu_release": self.ubuntu_release.currentText(),
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
             "username": self.username.text(),
@@ -1321,7 +1500,9 @@ class Main(QWidget):
     def apply_config(self, cfg: dict):
         self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.set_combo_value(self.distro, str(cfg.get("distro", "alpine")))
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
+        self.ubuntu_release.setCurrentText(str(cfg.get("ubuntu_release", cfg.get("release", "24.04"))))
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
         self.username.setText(str(cfg.get("username", "alpine")))
@@ -1361,6 +1542,7 @@ class Main(QWidget):
             selected = set()
         for key, cb in self.wm_checks.items():
             cb.setChecked(key in selected)
+        self.update_distro_ui()
         self.update_selected()
         self.update_dirty_indicators()
 
@@ -1526,9 +1708,11 @@ class Main(QWidget):
             self.refresh_build_summary()
             self.update_dirty_indicators()
 
+        self.distro.currentTextChanged.connect(lambda *_args: (self.update_distro_ui(apply_defaults=True), changed()))
         for widget in [
             self.image_size,
             self.alpine_branch,
+            self.ubuntu_release,
             self.arch,
             self.timezone,
             self.locale,
@@ -1574,8 +1758,8 @@ class Main(QWidget):
         layout.setSpacing(8)
         label = self.config_label(key, text) if key else QLabel(text)
         label.setStyleSheet(f"background:transparent;border:0;color:{BREEZE_TEXT};")
-        label.mousePressEvent = lambda _event: checkbox.toggle()
-        row.mousePressEvent = lambda _event: checkbox.toggle()
+        label.mousePressEvent = lambda _event: checkbox.toggle() if checkbox.isEnabled() else None
+        row.mousePressEvent = lambda _event: checkbox.toggle() if checkbox.isEnabled() else None
         layout.addWidget(checkbox)
         layout.addWidget(label)
         layout.addStretch(1)
@@ -1633,9 +1817,7 @@ class Main(QWidget):
         """)
         title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel(
-            "Build and flash customizable preinstalled Linux USB images. Ubuntu support is available in CLI/TUI with --distro ubuntu."
-        )
+        subtitle = QLabel("Build and flash customizable preinstalled Alpine Linux or Ubuntu USB images.")
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -1802,7 +1984,9 @@ class Main(QWidget):
         self.section_fields = {
             "system": [
                 "image_size",
+                "distro",
                 "alpine_branch",
+                "ubuntu_release",
                 "arch",
                 "hostname",
                 "username",
@@ -1830,7 +2014,9 @@ class Main(QWidget):
         form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size),
+            ("distro", "Distribution:", self.distro),
             ("alpine_branch", "Alpine branch:", self.alpine_branch),
+            ("ubuntu_release", "Ubuntu release:", self.ubuntu_release),
             ("arch", "Architecture:", self.arch),
             ("hostname", "Hostname:", self.hostname),
             ("username", "User:", self.username),
@@ -1919,9 +2105,7 @@ class Main(QWidget):
         boot.body_layout.addLayout(bform)
         parent_layout.addWidget(boot)
 
-        extra = CollapsibleSection(
-            "Extra APK packages (Ubuntu apt search is available in CLI/TUI)", collapsed=True, icon_kind="package"
-        )
+        extra = CollapsibleSection("Extra APK packages", collapsed=True, icon_kind="package")
         self.sections["extra"] = extra
         extra.body_layout.addWidget(self.config_label("extra_packages", "Packages:"))
         extra.body_layout.addWidget(self.extra_packages)
@@ -1981,12 +2165,18 @@ class Main(QWidget):
             self.package_search_pending = True
             self.set_package_search_status("Search running; queued latest text…")
             return
+        distro = self.selected_distro()
         branch = self.alpine_branch.currentText().strip() or "latest-stable"
+        release = self.ubuntu_release.currentText().strip() or "24.04"
         arch = combo_value(self.arch) or "x86_64"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
-        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        if distro == "ubuntu":
+            self.set_package_search_status(f"Searching Ubuntu {release}/{arch} apt packages…")
+            self.package_search_worker = AptSearchWorker(release, arch, query)
+        else:
+            self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
+            self.package_search_worker = ApkSearchWorker(branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
         self.package_search_worker.finished.connect(self.package_search_finished)
@@ -2149,7 +2339,9 @@ class Main(QWidget):
                 self.device,
                 self.image,
                 self.image_size,
+                self.distro,
                 self.alpine_branch,
+                self.ubuntu_release,
                 self.arch,
                 self.hostname,
                 self.username,
@@ -2183,6 +2375,8 @@ class Main(QWidget):
             ]
             for widget in widgets:
                 widget.setEnabled(not busy)
+            if not busy:
+                self.update_distro_ui()
         if not lock_inputs:
             self.build_button.setEnabled(not busy)
         self.flash_button.setEnabled(False if busy else bool(self.device.text().strip() and self.image.text().strip()))
@@ -2193,122 +2387,152 @@ class Main(QWidget):
     def collect_build_env(self) -> dict[str, str]:
         password = self.password.text()
         root_password = self.root_password.text() if self.separate_root_password.isChecked() else password
-        return {
-            "IMAGE_NAME": DEFAULT_IMAGE_NAME,
+        distro = self.selected_distro()
+        prefix = "UBUNTU_USB" if distro == "ubuntu" else "ALPINE_USB"
+        image_name = "ubuntu-usb.img" if distro == "ubuntu" else DEFAULT_IMAGE_NAME
+        env = {
+            "DISTRO": distro,
+            "IMAGE_NAME": image_name,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
-            "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
             "ARCH": combo_value(self.arch) or "x86_64",
-            "ALPINE_USB_USER": self.username.text().strip() or "alpine",
-            "ALPINE_USB_PASSWORD": password,
-            "ALPINE_USB_ROOT_PASSWORD": root_password,
-            "ALPINE_USB_HOSTNAME": self.hostname.text().strip() or "alpine-usb",
-            "ALPINE_USB_TIMEZONE": self.timezone.currentText().strip() or "UTC",
-            "ALPINE_USB_LOCALE": self.locale.currentText().strip() or "en_US.UTF-8",
-            "ALPINE_USB_CONSOLE_KEYMAP": self.console_keymap.currentText().strip() or "us",
-            "ALPINE_USB_XKB_LAYOUT": combo_value(self.xkb_layout) or "us",
-            "ALPINE_USB_XKB_VARIANT": self.xkb_variant.text().strip(),
-            "ALPINE_USB_XKB_MODEL": self.xkb_model.text().strip() or "pc105",
-            "ALPINE_USB_DESKTOP": combo_value(self.desktop),
-            "ALPINE_USB_TILING_WMS": " ".join(self.selected_wms()),
-            "ALPINE_USB_DEFAULT_SESSION": combo_value(self.default_session),
-            "ALPINE_USB_DISPLAY_MANAGER": combo_value(self.display_manager),
-            "ALPINE_USB_NETWORK": combo_value(self.network),
-            "ALPINE_USB_WIFI": "1" if self.wifi.isChecked() else "0",
-            "ALPINE_USB_BLUETOOTH": "1" if self.bluetooth.isChecked() else "0",
-            "ALPINE_USB_AUDIO": combo_value(self.audio),
-            "ALPINE_USB_BROWSER": combo_value(self.browser),
-            "ALPINE_USB_FIRMWARE": combo_value(self.firmware),
-            "ALPINE_USB_LEGACY_X11_DRIVERS": "1" if self.legacy_x11_drivers.isChecked() else "0",
-            "ALPINE_USB_BOOTLOADER": combo_value(self.bootloader),
-            "ALPINE_USB_KERNEL_FLAVOR": combo_value(self.kernel),
-            "ALPINE_USB_BOOT_TIMEOUT": self.boot_timeout.text().strip() or "3",
-            "ALPINE_USB_AUTO_RESIZE": "1" if self.auto_resize.isChecked() else "0",
-            "ALPINE_USB_EXTRA_PACKAGES": self.extra_packages.text().strip(),
+            f"{prefix}_PROFILE": "compatibility",
+            f"{prefix}_USER": self.username.text().strip() or ("ubuntu" if distro == "ubuntu" else "alpine"),
+            f"{prefix}_PASSWORD": password,
+            f"{prefix}_ROOT_PASSWORD": root_password,
+            f"{prefix}_HOSTNAME": self.hostname.text().strip()
+            or ("ubuntu-usb" if distro == "ubuntu" else "alpine-usb"),
+            f"{prefix}_TIMEZONE": self.timezone.currentText().strip() or "UTC",
+            f"{prefix}_LOCALE": self.locale.currentText().strip() or "en_US.UTF-8",
+            f"{prefix}_LANGUAGE": "",
+            f"{prefix}_CONSOLE_KEYMAP": self.console_keymap.currentText().strip() or "us",
+            f"{prefix}_XKB_LAYOUT": combo_value(self.xkb_layout) or "us",
+            f"{prefix}_XKB_VARIANT": self.xkb_variant.text().strip(),
+            f"{prefix}_XKB_MODEL": self.xkb_model.text().strip() or "pc105",
+            f"{prefix}_DESKTOP": combo_value(self.desktop),
+            f"{prefix}_TILING_WMS": " ".join(self.selected_wms()),
+            f"{prefix}_DEFAULT_SESSION": combo_value(self.default_session),
+            f"{prefix}_DISPLAY_MANAGER": combo_value(self.display_manager),
+            f"{prefix}_NETWORK": combo_value(self.network),
+            f"{prefix}_WIFI": "1" if self.wifi.isChecked() else "0",
+            f"{prefix}_BLUETOOTH": "1" if self.bluetooth.isChecked() else "0",
+            f"{prefix}_AUDIO": combo_value(self.audio),
+            f"{prefix}_BROWSER": combo_value(self.browser),
+            f"{prefix}_FIRMWARE": combo_value(self.firmware),
+            f"{prefix}_LEGACY_X11_DRIVERS": "1" if self.legacy_x11_drivers.isChecked() else "0",
+            f"{prefix}_BOOTLOADER": combo_value(self.bootloader),
+            f"{prefix}_KERNEL_FLAVOR": combo_value(self.kernel),
+            f"{prefix}_BOOT_TIMEOUT": self.boot_timeout.text().strip() or "3",
+            f"{prefix}_SYSTEMD_BOOT_CONSOLE_MODE": "max",
+            f"{prefix}_AUTO_RESIZE": "1" if self.auto_resize.isChecked() else "0",
+            f"{prefix}_EXTRA_PACKAGES": self.extra_packages.text().strip(),
         }
+        if distro == "ubuntu":
+            env["UBUNTU_RELEASE"] = self.ubuntu_release.currentText().strip() or "24.04"
+        else:
+            env["ALPINE_BRANCH"] = self.alpine_branch.currentText().strip() or "latest-stable"
+        return env
+
+    def build_env_prefix(self, env: dict[str, str]) -> str:
+        return "UBUNTU_USB" if env.get("DISTRO", "alpine") == "ubuntu" else "ALPINE_USB"
+
+    def build_release_label(self, env: dict[str, str]) -> str:
+        if env.get("DISTRO", "alpine") == "ubuntu":
+            return f"Ubuntu {env['UBUNTU_RELEASE']}"
+        return f"Alpine {env['ALPINE_BRANCH']}"
 
     def validate_build_config(self, env: dict[str, str]) -> str | None:
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
-        if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
+        distro = env.get("DISTRO", "alpine")
+        prefix = self.build_env_prefix(env)
+        if distro == "ubuntu":
+            try:
+                validate_ubuntu_release(env["UBUNTU_RELEASE"])
+            except ValueError as exc:
+                return str(exc)
+        elif not BRANCH_RE.match(env["ALPINE_BRANCH"]):
             return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
-        if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
+        if not re.match(r"^[a-z_][a-z0-9_-]*$", env[f"{prefix}_USER"]):
             return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
-        if not env["ALPINE_USB_PASSWORD"]:
+        if not env[f"{prefix}_PASSWORD"]:
             return "User password cannot be empty."
-        if self.separate_root_password.isChecked() and not env["ALPINE_USB_ROOT_PASSWORD"]:
+        if self.separate_root_password.isChecked() and not env[f"{prefix}_ROOT_PASSWORD"]:
             return "Root password cannot be empty when separate root password is enabled."
-        package_error = validate_extra_packages(env["ALPINE_USB_EXTRA_PACKAGES"])
+        package_error = validate_extra_packages(env[f"{prefix}_EXTRA_PACKAGES"])
         if package_error:
             return package_error
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env["ALPINE_USB_HOSTNAME"]):
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$|^[A-Za-z0-9]$", env[f"{prefix}_HOSTNAME"]):
             return "Hostname may contain only letters, numbers and dash; it cannot start/end with dash."
-        if not env["ALPINE_USB_BOOT_TIMEOUT"].isdigit():
+        if not env[f"{prefix}_BOOT_TIMEOUT"].isdigit():
             return "Boot menu timeout must be a number."
         if (
-            env["ALPINE_USB_DESKTOP"] == "none"
-            and not env["ALPINE_USB_TILING_WMS"]
-            and env["ALPINE_USB_DISPLAY_MANAGER"] not in {"auto", "none", "greetd"}
+            env[f"{prefix}_DESKTOP"] == "none"
+            and not env[f"{prefix}_TILING_WMS"]
+            and env[f"{prefix}_DISPLAY_MANAGER"] not in {"auto", "none", "greetd"}
         ):
             return "Select a desktop/WM or use display manager Auto/None/greetd."
-        session = env["ALPINE_USB_DEFAULT_SESSION"]
+        session = env[f"{prefix}_DEFAULT_SESSION"]
         if session == "auto":
             session = (
-                env["ALPINE_USB_DESKTOP"]
-                if env["ALPINE_USB_DESKTOP"] != "none"
-                else (env["ALPINE_USB_TILING_WMS"].split() or ["shell"])[0]
+                env[f"{prefix}_DESKTOP"]
+                if env[f"{prefix}_DESKTOP"] != "none"
+                else (env[f"{prefix}_TILING_WMS"].split() or ["shell"])[0]
             )
-        if session in {"sway", "hyprland", "labwc"} and env["ALPINE_USB_DISPLAY_MANAGER"] in {"lightdm", "lxdm"}:
+        if session in {"sway", "hyprland", "labwc"} and env[f"{prefix}_DISPLAY_MANAGER"] in {"lightdm", "lxdm"}:
             return "Wayland sessions (Sway/Hyprland/labwc) need Auto, greetd, SDDM, GDM or no display manager; LightDM/LXDM are X11-only here."
         return None
 
     def config_summary_text(self, env: dict[str, str]) -> str:
+        prefix = self.build_env_prefix(env)
         return (
-            f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
-            f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
-            f"Locale: {env['ALPINE_USB_LOCALE']} | TZ: {env['ALPINE_USB_TIMEZONE']} | console={env['ALPINE_USB_CONSOLE_KEYMAP']} | xkb={env['ALPINE_USB_XKB_LAYOUT']} {env['ALPINE_USB_XKB_VARIANT'] or ''} model={env['ALPINE_USB_XKB_MODEL']}\n"
-            f"Desktop: {env['ALPINE_USB_DESKTOP']} | DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Session: {env['ALPINE_USB_DEFAULT_SESSION']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'}\n"
-            f"Apps: browser={env['ALPINE_USB_BROWSER']} | audio={env['ALPINE_USB_AUDIO']}\n"
-            f"Hardware/network: network={env['ALPINE_USB_NETWORK']} | Wi‑Fi={env['ALPINE_USB_WIFI']} | Bluetooth={env['ALPINE_USB_BLUETOOTH']}\n"
-            f"Boot: {env['ALPINE_USB_BOOTLOADER']} | linux-{env['ALPINE_USB_KERNEL_FLAVOR']} | firmware={env['ALPINE_USB_FIRMWARE']} | legacy-X11={env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1')} | timeout={env['ALPINE_USB_BOOT_TIMEOUT']} | auto-resize={env['ALPINE_USB_AUTO_RESIZE']}\n"
-            f"Extra packages: {env['ALPINE_USB_EXTRA_PACKAGES'] or 'none'}"
+            f"Image: {env['IMAGE_SIZE']} | Distro: {self.build_release_label(env)} | Arch: {env['ARCH']}\n"
+            f"System: hostname={env[f'{prefix}_HOSTNAME']} | user={env[f'{prefix}_USER']} | passwords hidden\n"
+            f"Locale: {env[f'{prefix}_LOCALE']} | TZ: {env[f'{prefix}_TIMEZONE']} | console={env[f'{prefix}_CONSOLE_KEYMAP']} | xkb={env[f'{prefix}_XKB_LAYOUT']} {env[f'{prefix}_XKB_VARIANT'] or ''} model={env[f'{prefix}_XKB_MODEL']}\n"
+            f"Desktop: {env[f'{prefix}_DESKTOP']} | DM: {env[f'{prefix}_DISPLAY_MANAGER']} | Session: {env[f'{prefix}_DEFAULT_SESSION']} | WMs: {env[f'{prefix}_TILING_WMS'] or 'none'}\n"
+            f"Apps: browser={env[f'{prefix}_BROWSER']} | audio={env[f'{prefix}_AUDIO']}\n"
+            f"Hardware/network: network={env[f'{prefix}_NETWORK']} | Wi‑Fi={env[f'{prefix}_WIFI']} | Bluetooth={env[f'{prefix}_BLUETOOTH']}\n"
+            f"Boot: {env[f'{prefix}_BOOTLOADER']} | linux-{env[f'{prefix}_KERNEL_FLAVOR']} | firmware={env[f'{prefix}_FIRMWARE']} | legacy-X11={env.get(f'{prefix}_LEGACY_X11_DRIVERS', '1')} | timeout={env[f'{prefix}_BOOT_TIMEOUT']} | auto-resize={env[f'{prefix}_AUTO_RESIZE']}\n"
+            f"Extra packages: {env[f'{prefix}_EXTRA_PACKAGES'] or 'none'}"
         )
 
     def config_summary_html(self, output_path: str, env: dict[str, str]) -> str:
         def esc(value: object) -> str:
             return html.escape(str(value))
 
+        prefix = self.build_env_prefix(env)
+        title = "Build Ubuntu image?" if env.get("DISTRO", "alpine") == "ubuntu" else "Build Alpine image?"
         rows = [
             ("Output", html_soft_break(output_path)),
-            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+            ("Image", f"{esc(env['IMAGE_SIZE'])} · {esc(self.build_release_label(env))} · Arch {esc(env['ARCH'])}"),
             (
                 "System",
-                f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
+                f"hostname={esc(env[f'{prefix}_HOSTNAME'])} · user={esc(env[f'{prefix}_USER'])} · passwords hidden",
             ),
             (
                 "Locale",
-                f"{esc(env['ALPINE_USB_LOCALE'])} · TZ {esc(env['ALPINE_USB_TIMEZONE'])} · console {esc(env['ALPINE_USB_CONSOLE_KEYMAP'])} · XKB {esc(env['ALPINE_USB_XKB_LAYOUT'])} {esc(env['ALPINE_USB_XKB_VARIANT'] or '')} · model {esc(env['ALPINE_USB_XKB_MODEL'])}",
+                f"{esc(env[f'{prefix}_LOCALE'])} · TZ {esc(env[f'{prefix}_TIMEZONE'])} · console {esc(env[f'{prefix}_CONSOLE_KEYMAP'])} · XKB {esc(env[f'{prefix}_XKB_LAYOUT'])} {esc(env[f'{prefix}_XKB_VARIANT'] or '')} · model {esc(env[f'{prefix}_XKB_MODEL'])}",
             ),
             (
                 "Desktop",
-                f"{esc(env['ALPINE_USB_DESKTOP'])} · DM {esc(env['ALPINE_USB_DISPLAY_MANAGER'])} · Session {esc(env['ALPINE_USB_DEFAULT_SESSION'])} · WMs {esc(env['ALPINE_USB_TILING_WMS'] or 'none')}",
+                f"{esc(env[f'{prefix}_DESKTOP'])} · DM {esc(env[f'{prefix}_DISPLAY_MANAGER'])} · Session {esc(env[f'{prefix}_DEFAULT_SESSION'])} · WMs {esc(env[f'{prefix}_TILING_WMS'] or 'none')}",
             ),
-            ("Apps", f"browser={esc(env['ALPINE_USB_BROWSER'])} · audio={esc(env['ALPINE_USB_AUDIO'])}"),
+            ("Apps", f"browser={esc(env[f'{prefix}_BROWSER'])} · audio={esc(env[f'{prefix}_AUDIO'])}"),
             (
                 "Hardware/network",
-                f"network={esc(env['ALPINE_USB_NETWORK'])} · Wi‑Fi={esc(env['ALPINE_USB_WIFI'])} · Bluetooth={esc(env['ALPINE_USB_BLUETOOTH'])}",
+                f"network={esc(env[f'{prefix}_NETWORK'])} · Wi‑Fi={esc(env[f'{prefix}_WIFI'])} · Bluetooth={esc(env[f'{prefix}_BLUETOOTH'])}",
             ),
             (
                 "Boot",
-                f"{esc(env['ALPINE_USB_BOOTLOADER'])} · linux-{esc(env['ALPINE_USB_KERNEL_FLAVOR'])} · firmware={esc(env['ALPINE_USB_FIRMWARE'])} · legacy-X11={esc(env.get('ALPINE_USB_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env['ALPINE_USB_BOOT_TIMEOUT'])} · auto-resize={esc(env['ALPINE_USB_AUTO_RESIZE'])}",
+                f"{esc(env[f'{prefix}_BOOTLOADER'])} · linux-{esc(env[f'{prefix}_KERNEL_FLAVOR'])} · firmware={esc(env[f'{prefix}_FIRMWARE'])} · legacy-X11={esc(env.get(f'{prefix}_LEGACY_X11_DRIVERS', '1'))} · timeout={esc(env[f'{prefix}_BOOT_TIMEOUT'])} · auto-resize={esc(env[f'{prefix}_AUTO_RESIZE'])}",
             ),
-            ("Extra packages", esc(env["ALPINE_USB_EXTRA_PACKAGES"] or "none")),
+            ("Extra packages", esc(env[f"{prefix}_EXTRA_PACKAGES"] or "none")),
         ]
         lines = "".join(
-            f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
-            for title, value in rows
+            f"<div style='margin:4px 0;'><b>{row_title}:</b> <span style='font-weight:400;'>{value}</span></div>"
+            for row_title, value in rows
         )
-        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        return f"<div style='min-width:440px; max-width:520px;'><h2>{title}</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(
@@ -2333,13 +2557,18 @@ class Main(QWidget):
         return ""
 
     def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
+        distro = str(cfg.get("distro", "alpine"))
+        if distro not in {"alpine", "ubuntu"}:
+            distro = "alpine"
         return {
             "image": str(cfg.get("image", DEFAULT_OUTPUT_PATH)),
             "image_size": str(cfg.get("image_size", "16G")),
+            "distro": distro,
             "alpine_branch": str(cfg.get("alpine_branch", "latest-stable")),
+            "ubuntu_release": str(cfg.get("ubuntu_release", cfg.get("release", "24.04"))),
             "arch": str(cfg.get("arch", "x86_64")),
-            "hostname": str(cfg.get("hostname", "alpine-usb")),
-            "username": str(cfg.get("username", "alpine")),
+            "hostname": str(cfg.get("hostname", "ubuntu-usb" if distro == "ubuntu" else "alpine-usb")),
+            "username": str(cfg.get("username", "ubuntu" if distro == "ubuntu" else "alpine")),
             "timezone": str(cfg.get("timezone", "UTC")),
             "locale": str(cfg.get("locale", "en_US.UTF-8")),
             "console_keymap": str(cfg.get("console_keymap", "us")),
@@ -2371,9 +2600,10 @@ class Main(QWidget):
         e = {key: html.escape(str(value)) for key, value in env.items()}
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
+        distro_label = f"Ubuntu {e['ubuntu_release']}" if env["distro"] == "ubuntu" else f"Alpine {e['alpine_branch']}"
         self.build_summary.setText(
             f"<b>Output:</b> {e['image']}<br>"
-            f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
+            f"<b>Image:</b> size {e['image_size']} · {distro_label} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
             f"<b>Locale:</b> {e['locale']} · timezone {e['timezone']} · console keymap {e['console_keymap']} · XKB {e['xkb_layout']} · variant {e['xkb_variant'] or 'none'} · model {e['xkb_model']}<br>"
             f"<b>Desktop:</b> {e['desktop']} · display manager {e['display_manager']} · session {e['default_session']} · WMs {wms}<br>"
@@ -2437,6 +2667,10 @@ class Main(QWidget):
         self.stop_build_button.setEnabled(False)
         self.stop_build_button.hide()
         self.set_busy(False)
+        if getattr(self, "close_after_build_cleanup", False):
+            self.close_after_build_cleanup = False
+            QTimer.singleShot(0, self.close)
+            return
         modal(self, "info" if ok else "error", APP_TITLE, msg)
 
     def stop_build(self):
@@ -2551,12 +2785,32 @@ class Main(QWidget):
             self.worker = None
 
     def closeEvent(self, event):
-        if self.has_running_worker():
+        if self.thread_running(self.worker):
             modal(
-                self, "error", APP_TITLE, "An operation is still running. Wait for it to finish before closing the app."
+                self, "error", APP_TITLE, "USB flashing is still running. Wait for it to finish before closing the app."
             )
             event.ignore()
             return
+        if self.thread_running(self.builder):
+            if modal(
+                self,
+                "question",
+                APP_TITLE,
+                "Stop the running build, clean partial images, and close the app?",
+                question=True,
+            ):
+                self.close_after_build_cleanup = True
+                self.stop_build_button.setEnabled(False)
+                self.build_status.show()
+                self.build_status.setText("Stopping build and cleaning partial image...")
+                self.append_log("Stopping build and cleaning partial image before close...")
+                self.builder.cancel()
+            event.ignore()
+            return
+        if self.thread_running(self.package_search_worker):
+            self.package_search_worker.terminate()
+            self.package_search_worker.wait(1000)
+            self.package_search_worker = None
         event.accept()
 
 
