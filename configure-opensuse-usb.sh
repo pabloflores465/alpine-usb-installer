@@ -66,7 +66,7 @@ if [ "$DEFAULT_SESSION" = auto ]; then [ "$DESKTOP" != none ] && DEFAULT_SESSION
 case "$DEFAULT_SESSION" in xfce|gnome|plasma|mate|lxqt|i3|sway|hyprland|awesome|bspwm|openbox|labwc|shell) ;; *) die "Unsupported default session: $DEFAULT_SESSION" ;; esac
 [ "$DISPLAY_MANAGER" = auto ] && case "$DESKTOP" in gnome) DISPLAY_MANAGER=gdm ;; plasma|lxqt) DISPLAY_MANAGER=sddm ;; xfce|mate) DISPLAY_MANAGER=lightdm ;; none) [ -n "$TILING_WMS" ] && DISPLAY_MANAGER=greetd || DISPLAY_MANAGER=none ;; esac
 
-append_packages patterns-base-base kernel-default systemd udev grub2 grub2-x86_64-efi shim sudo bash curl wget vim timezone ca-certificates e2fsprogs dosfstools
+append_packages patterns-base-base kernel-default dracut systemd udev grub2 grub2-x86_64-efi shim sudo bash curl wget vim timezone ca-certificates e2fsprogs dosfstools
 is_enabled "$AUTO_RESIZE" && append_packages growpart
 [ "$NETWORK_BACKEND" = networkmanager ] && append_packages NetworkManager
 is_enabled "$WIFI" && append_packages wpa_supplicant iw wireless-regdb

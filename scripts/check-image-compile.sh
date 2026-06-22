@@ -95,7 +95,7 @@ if [ "${LINUX_USB_FULL_IMAGE_COMPILE:-0}" = "1" ]; then
       ;;
     Linux)
       missing=()
-      for tool in zypper qemu-img parted mkfs.ext4 grub2-install; do
+      for tool in zypper qemu-img parted mkfs.ext4 mkfs.fat losetup blkid findmnt chroot; do
         have "$tool" || missing+=("$tool")
       done
       if [ "${#missing[@]}" -gt 0 ]; then
