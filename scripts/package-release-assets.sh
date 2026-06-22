@@ -42,10 +42,13 @@ scripts/build-macos-dmg.sh
   --hidden-import "alpine_usb.interfaces.cli" \
   --hidden-import "alpine_usb.interfaces.tui" \
   --hidden-import "alpine_usb.apk_packages.index" \
+  --hidden-import "alpine_usb.rhel_packages.packages" \
   --hidden-import "alpine_usb.build_profiles.config_files" \
   --hidden-import "alpine_usb.images.validation" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
+  --add-data "build-rhel-usb.sh:." \
+  --add-data "configure-rhel-usb.sh:." \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
@@ -78,6 +81,8 @@ files = [
     "alpine_usb",
     "build-alpine-usb.sh",
     "configure-alpine-usb.sh",
+    "build-rhel-usb.sh",
+    "configure-rhel-usb.sh",
     "README.md",
     "LICENSE",
     "requirements.txt",

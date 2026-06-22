@@ -34,7 +34,7 @@ if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; th
       output_base=$(basename "$OUTPUT_PATH")
       printf '%s\n' "OUTPUT_PATH=/out/$output_base"
     fi
-    for name in RHEL_USB_PACKAGE_LIST RHEL_USB_USER RHEL_USB_PASSWORD_FILE RHEL_USB_ROOT_PASSWORD_FILE RHEL_USB_HOSTNAME RHEL_USB_TIMEZONE RHEL_USB_LOCALE RHEL_USB_CONSOLE_KEYMAP RHEL_USB_XKB_LAYOUT RHEL_USB_BOOTLOADER RHEL_USB_BOOT_TIMEOUT; do
+    for name in RHEL_USB_DISTRO RHEL_USB_PACKAGE_LIST RHEL_USB_PROFILE RHEL_USB_USER RHEL_USB_PASSWORD_FILE RHEL_USB_ROOT_PASSWORD_FILE RHEL_USB_HOSTNAME RHEL_USB_TIMEZONE RHEL_USB_LOCALE RHEL_USB_CONSOLE_KEYMAP RHEL_USB_XKB_LAYOUT RHEL_USB_XKB_VARIANT RHEL_USB_XKB_MODEL RHEL_USB_DESKTOP RHEL_USB_TILING_WMS RHEL_USB_DEFAULT_SESSION RHEL_USB_DISPLAY_MANAGER RHEL_USB_NETWORK RHEL_USB_WIFI RHEL_USB_BLUETOOTH RHEL_USB_AUDIO RHEL_USB_BROWSER RHEL_USB_FIRMWARE RHEL_USB_BOOTLOADER RHEL_USB_KERNEL_FLAVOR RHEL_USB_BOOT_TIMEOUT RHEL_USB_AUTO_RESIZE RHEL_USB_EXTRA_PACKAGES; do
       eval "value=\${$name:-}"
       case "$name:$value" in *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;; esac
       printf '%s=%s\n' "$name" "$value"
@@ -44,8 +44,13 @@ if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; th
   if [ -n "$OUTPUT_PATH" ]; then
     docker_mounts="$docker_mounts -v $output_dir:/out"
   fi
+  docker_name_args=""
+  if [ -n "${RHEL_USB_DOCKER_NAME:-}" ]; then
+    case "$RHEL_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") die "Invalid Docker container name: $RHEL_USB_DOCKER_NAME" ;; esac
+    docker_name_args="--name $RHEL_USB_DOCKER_NAME"
+  fi
   # shellcheck disable=SC2086
-  exec docker run --rm --platform linux/amd64 --privileged --env-file "$docker_env_file" $docker_mounts -w /work rockylinux:9 bash -ceu '
+  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --env-file "$docker_env_file" $docker_mounts -w /work rockylinux:9 bash -ceu '
     dnf -y install dnf-plugins-core parted dosfstools xfsprogs util-linux kpartx grub2-tools grub2-efi-x64 grub2-efi-x64-modules shim-x64 efibootmgr passwd systemd >/dev/null
     chmod +x build-rhel-usb.sh configure-rhel-usb.sh
     exec ./build-rhel-usb.sh
