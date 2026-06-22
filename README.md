@@ -1,6 +1,6 @@
 # Linux USB Installer
 
-Build and flash configurable, preinstalled **Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine remains the fully implemented installed-image builder; Slackware support is selectable with package search/cache, dry-run planning, and a verified official `usbboot.img` full-compile artifact.
+Build and flash configurable, preinstalled **Linux x86_64 USB images** from a Qt GUI or one unified terminal binary (TUI + CLI commands). Alpine and Slackware builds create installed raw USB images from package repositories using your selected users, desktop/session, network, audio, browser, firmware, bootloader, and extra-package settings.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
@@ -27,11 +27,11 @@ Build and flash configurable, preinstalled **Linux x86_64 USB images** from a Qt
 
 ## Features
 
-- Build a bootable, installed Alpine Linux USB image; select Slackware for validated package/configuration planning.
+- Build bootable, installed Alpine Linux or Slackware USB images from package repositories.
 - Configure desktop/session options:
   - XFCE, GNOME, KDE Plasma, MATE, LXQt, or no full desktop.
   - Optional i3, Sway, Hyprland, AwesomeWM, bspwm, Openbox, labwc.
-- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra APK packages.
+- Configure bootloader, kernel, firmware, keyboard, locale, users, Wi‑Fi, Bluetooth, audio, browser, and extra packages.
 - Search official Alpine `main` + `community` packages and Slackware `PACKAGES.TXT` package indexes from GUI/TUI/CLI.
 - Cache package indexes on disk for fast repeated searches.
 - Build a compatibility-oriented default image or a smaller minimal image.
@@ -172,7 +172,7 @@ Extra packages can be repeated or space-separated:
 
 Slackware is selectable with `--distro slackware` in CLI, and from the GUI/TUI distribution controls. The backend validates the same high-level options as Alpine where feasible: profiles, desktop/session/window-manager choices, display manager, bootloader/kernel/firmware, localization/users/passwords, network/Wi‑Fi/Bluetooth/audio/browser, extra packages, package search/cache, and dry-run validation. Package search downloads/caches the official Slackware `PACKAGES.TXT` metadata for `stable`, `current`, or an explicit release such as `15.0`.
 
-Full compile mode now produces a verified official Slackware `usbboot.img` artifact using `CHECKSUMS.md5`. Current gap: custom installed Slackware raw-image assembly from mirror packages is still future work. USB flashing/image validation remains distro-agnostic and unchanged for completed raw images.
+Full builds create an installed, bootable raw Slackware USB image from mirror packages. The builder bootstraps Slackware `pkgtools`, installs package series into an ext4 root filesystem, writes the selected user/locale/session/service configuration, installs GRUB removable UEFI, and assembles GPT ESP + root partitions. It does not fall back to the stock Slackware `usbboot.img` artifact.
 
 ## Build profiles
 
