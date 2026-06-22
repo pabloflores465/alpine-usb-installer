@@ -78,7 +78,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
   } > "$docker_env_file"
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   if [ -n "$OUTPUT_PATH" ]; then docker_mounts+=(-v "$output_dir:/out"); fi
-  if docker run --rm --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work ghcr.io/void-linux/void-glibc-full:latest sh -ceu '
+  docker_name_args=()
+  if [ -n "${VOID_USB_DOCKER_NAME:-}" ]; then
+    if [[ "$VOID_USB_DOCKER_NAME" == *[!A-Za-z0-9_.-]* ]]; then echo "Invalid Docker container name: $VOID_USB_DOCKER_NAME" >&2; exit 1; fi
+    docker_name_args=(--name "$VOID_USB_DOCKER_NAME")
+  fi
+  if docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work ghcr.io/void-linux/void-glibc-full:latest sh -ceu '
     mkdir -p /etc/xbps.d /var/cache/xbps /var/db/xbps/https___repo-fastly_voidlinux_org_current
     printf "%s\n" "repository=https://repo-fastly.voidlinux.org/current" > /etc/xbps.d/00-repository-main.conf
     find /var/db/xbps /var/cache/xbps -name '*repodata*' -type f -delete 2>/dev/null || true
