@@ -88,8 +88,10 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
   docker_env=(-e FEDORA_USB_BUILD_IN_DOCKER=1)
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   docker_name_args=()
-  if [[ -n "${ALPINE_USB_DOCKER_NAME:-}" ]]; then
-    docker_name_args=(--name "$ALPINE_USB_DOCKER_NAME")
+  docker_name="${FEDORA_USB_DOCKER_NAME:-${ALPINE_USB_DOCKER_NAME:-}}"
+  if [[ -n "$docker_name" ]]; then
+    if [[ "$docker_name" == *[!A-Za-z0-9_.-]* ]]; then echo "Invalid Docker container name: $docker_name" >&2; exit 1; fi
+    docker_name_args=(--name "$docker_name")
   fi
   for name in "${pass_env[@]}"; do
     value="${!name-}"
