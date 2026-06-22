@@ -197,15 +197,19 @@ def generate_configuration_nix(config: NixosBuildConfig) -> str:
     ]
     lines.extend(desktop_lines)
     if config.audio == "pipewire":
+        # PipeWire provides a PulseAudio-compatible server via services.pipewire.pulse.
+        # hardware.pulseaudio defaults to false on NixOS >= 24.11, so we do not
+        # (and must not) reference the removed services.pulseaudio option.
         lines.extend(
             [
-                "  services.pulseaudio.enable = false;",
                 "  security.rtkit.enable = true;",
                 "  services.pipewire = { enable = true; alsa.enable = true; pulse.enable = true; };",
             ]
         )
     elif config.audio == "alsa":
-        lines.append("  sound.enable = true;")
+        # The sound.enable option was removed in NixOS 25.05; ALSA stays in the
+        # kernel by default, so emit nothing channel-specific here.
+        pass
     if package_exprs:
         lines.append(f"  environment.systemPackages = with pkgs; [ {package_exprs} ];")
     else:

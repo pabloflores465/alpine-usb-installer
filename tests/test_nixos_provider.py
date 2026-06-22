@@ -64,6 +64,9 @@ def test_generate_configuration_nix_contains_desktop_boot_network_and_packages()
     assert "networking.networkmanager.enable = true;" in text
     assert "boot.growPartition = true;" in text
     assert "pkgs.vim" in text
+    assert "services.pipewire = { enable = true; alsa.enable = true; pulse.enable = true; };" in text
+    assert "services.pulseaudio" not in text
+    assert "sound.enable" not in text
     assert "pkgs.firefox" in text
     assert "pkgs.sway" in text
 
