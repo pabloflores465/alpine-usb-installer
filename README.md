@@ -90,7 +90,7 @@ Void Linux is selectable from the CLI and TUI:
 ./alpine-usb search --distro void firefox
 ```
 
-The Void backend targets glibc `x86_64` and uses the official `current` repository by default. It validates the same profile/session/network/audio/browser/firmware/user options and maps them to XBPS package names. Full image builds use `xbps-install -r` on native Linux; USB flashing and image validation are shared with Alpine.
+The Void backend targets glibc `x86_64` and uses the official `current` repository by default. It validates the same profile/session/network/audio/browser/firmware/user options and maps them to XBPS package names. Full image builds create a customized installroot raw USB image with `xbps-install -r`/local XBPS package mirroring; USB flashing and image validation are shared with Alpine. Build failures stop instead of copying the official Void live ISO; there is no stock live-ISO fallback path.
 
 ## Interfaces
 

@@ -18,42 +18,9 @@ case "$VOID_REPOSITORY" in current|glibc) REPO_URL="${VOID_REPOSITORY_URL:-https
 if [[ -z "$IMAGE_NAME" || "$IMAGE_NAME" == *"/"* || "$IMAGE_NAME" == *".."* || "$IMAGE_NAME" == -* || ! "$IMAGE_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then echo "Invalid image name: $IMAGE_NAME" >&2; exit 1; fi
 if [ -n "$OUTPUT_PATH" ]; then case "$OUTPUT_PATH" in /*) ;; *) echo "OUTPUT_PATH must be absolute: $OUTPUT_PATH" >&2; exit 1 ;; esac; fi
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
-
-download_void_live_iso_fallback() {
-  need curl
-  local live_base="${VOID_LIVE_BASE_URL:-https://repo-default.voidlinux.org/live/current}"
-  local live_name="${VOID_LIVE_ISO:-void-live-x86_64-20250202-base.iso}"
-  local target="${OUTPUT_PATH:-$IMAGE_PATH}"
-  local cache_dir="$WORK_DIR/void-live"
-  local image="$cache_dir/$live_name"
-  local sums="$cache_dir/sha256sum.txt"
-  mkdir -p "$cache_dir" "$(dirname "$target")"
-  echo "Void xbps installroot build failed; falling back to official bootable Void live image: $live_name" >&2
-  curl --fail --location "$live_base/sha256sum.txt" -o "$sums"
-  local expected valid_cache=0
-  expected="$(awk -v f="$live_name" '$2 == f || $2 == "*" f {print $1; exit} $2 == "(" f ")" && $3 == "=" {print $4; exit}' "$sums")"
-  if [ -n "$expected" ] && [ -s "$image" ] && (cd "$cache_dir" && printf '%s  %s\n' "$expected" "$live_name" | shasum -a 256 -c - >/dev/null 2>&1); then
-    valid_cache=1
-  fi
-  if [ "$valid_cache" -ne 1 ]; then
-    curl --fail --location "$live_base/$live_name" -o "$image"
-  fi
-  if [ -n "$expected" ]; then
-    (cd "$cache_dir" && printf '%s  %s\n' "$expected" "$live_name" | shasum -a 256 -c -)
-  else
-    echo "WARNING: checksum for $live_name not found in $sums" >&2
-  fi
-  cp "$image" "$target"
-  echo "Void live ISO fallback image ready: $target"
-}
-
 if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || { echo "Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
-  mkdir -p "$SCRIPT_DIR/.work/void-repodata"
-  need curl
-  VOID_REPODATA_FILE="$SCRIPT_DIR/.work/void-repodata/x86_64-repodata"
-  curl --fail --location "${VOID_REPOSITORY_URL:-https://repo-fastly.voidlinux.org/current}/x86_64-repodata" -o "$VOID_REPODATA_FILE"
   docker_env_file="$SCRIPT_DIR/.work/void-docker-env-$$"
   {
     printf '%s\n' \
@@ -63,7 +30,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
       "VOID_REPOSITORY=$VOID_REPOSITORY" \
       "ARCH=$ARCH" \
       "WORK_DIR=/tmp/void-work" \
-      "VOID_REPODATA_FILE=/work/.work/void-repodata/x86_64-repodata"
+      "VOID_LOCALREPO=/work/.work/void-localrepo-cache"
     if [ -n "$OUTPUT_PATH" ]; then
       mkdir -p "$(dirname "$OUTPUT_PATH")"
       output_dir="$(cd "$(dirname "$OUTPUT_PATH")" && pwd -P)"
@@ -84,12 +51,25 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     docker_name_args=(--name "$VOID_USB_DOCKER_NAME")
   fi
   if docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work ghcr.io/void-linux/void-glibc-full:latest sh -ceu '
-    mkdir -p /etc/xbps.d /var/cache/xbps /var/db/xbps/https___repo-fastly_voidlinux_org_current
-    printf "%s\n" "repository=https://repo-fastly.voidlinux.org/current" > /etc/xbps.d/00-repository-main.conf
-    find /var/db/xbps /var/cache/xbps -name '*repodata*' -type f -delete 2>/dev/null || true
-    cp "$VOID_REPODATA_FILE" /var/db/xbps/https___repo-fastly_voidlinux_org_current/x86_64-repodata
-    xbps-install -yu xbps >/dev/null || true
-    xbps-install -yu qemu parted dosfstools e2fsprogs grub-x86_64-efi efibootmgr kpartx bash >/dev/null
+    # The Void xbps-install HTTP fetcher (libfetch) issues range requests that some
+    # CDNs reject with HTTP 416 under x86 emulation on Apple Silicon (Rosetta),
+    # which breaks repo sync. xbps-fetch uses a different code path that works, so
+    # we build a local file mirror: fetch repodata with xbps-fetch, resolve the
+    # dependency closure with xbps-install -n, fetch every needed .xbps with
+    # xbps-fetch, then install purely from the local repo (no network fetch).
+    set -e
+    REPO=https://repo-default.voidlinux.org/current
+    LR=/tmp/void-localrepo
+    rm -rf "$LR"; mkdir -p "$LR"
+    xbps-fetch -o "$LR/x86_64-repodata" "$REPO/x86_64-repodata" 2>&1 | tail -1
+    TOOLS="xbps bash parted dosfstools e2fsprogs grub grub-x86_64-efi efibootmgr kpartx"
+    echo "[void-build] Resolving build-tool dependencies via local mirror"
+    for p in $(xbps-install -n -R "$LR" $TOOLS 2>/dev/null | awk "{print \$1}"); do
+      fn="$p.x86_64.xbps"
+      [ -f "$LR/$fn" ] || xbps-fetch -o "$LR/$fn" "$REPO/$fn" 2>&1 | tail -1
+    done
+    echo "[void-build] Installing build tools from local mirror"
+    xbps-install -y -R "$LR" $TOOLS 2>&1 | tail -3
     chmod +x build-void-usb.sh configure-void-usb.sh
     exec ./build-void-usb.sh
   '; then
@@ -97,10 +77,10 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     exit 0
   fi
   rm -f "$docker_env_file"
-  download_void_live_iso_fallback
-  exit 0
+  echo "[void-build] Custom Void installroot build failed; no live-ISO fallback is used." >&2
+  exit 1
 fi
-for tool in xbps-install xbps-reconfigure qemu-img parted mkfs.vfat mkfs.ext4 mount umount blkid; do need "$tool"; done
+for tool in xbps-install xbps-reconfigure parted mkfs.vfat mkfs.ext4 mount umount blkid truncate; do need "$tool"; done
 if [ "$(uname -s)" = "Darwin" ]; then echo "Void image builds require native Linux for loop mounts; use a Linux VM/container." >&2; exit 1; fi
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo "Void image build must run as root (xbps-install -r + loop mounts)." >&2; exit 1; fi
 if [ "${VOID_USB_BUILD_IN_DOCKER:-0}" = "1" ]; then
@@ -108,12 +88,33 @@ if [ "${VOID_USB_BUILD_IN_DOCKER:-0}" = "1" ]; then
   for i in $(seq 0 15); do [ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i" || true; done
 fi
 
+# Install Void packages into a target root using a local file:// mirror.
+# xbps-install's internal HTTP fetcher (libfetch) issues range requests that some
+# CDNs reject with HTTP 416 under x86 emulation on Apple Silicon (Rosetta).
+# xbps-fetch uses a different code path that works, so we fetch repodata + every
+# resolved .xbps with xbps-fetch into a local dir, then install from there.
+# Args: <repo_url> <arch> <localrepo_dir> <root_dir> <pkg...>
+void_local_install() {
+  repo_url="$1"; varch="$2"; localrepo="$3"; root_dir="$4"; shift 4
+  mkdir -p "$localrepo"
+  repodata="$localrepo/${varch}-repodata"
+  [ -s "$repodata" ] || xbps-fetch -o "$repodata" "$repo_url/${varch}-repodata" 2>&1 | tail -1
+  echo "[void-build] Resolving package closure: $*"
+  pkgs=$(XBPS_ARCH="$varch" xbps-install -n -R "$localrepo" -r "$root_dir" "$@" 2>/dev/null | awk '{print $1}')
+  for p in $pkgs; do
+    fn="$p.${varch}.xbps"
+    [ -f "$localrepo/$fn" ] || xbps-fetch -o "$localrepo/$fn" "$repo_url/$fn" 2>&1 | tail -1
+  done
+  echo "[void-build] Installing $(echo "$pkgs" | wc -w) packages into $root_dir from local mirror"
+  XBPS_ARCH="$varch" xbps-install -y -R "$localrepo" -r "$root_dir" "$@" 2>&1 | tail -3
+}
+
 mkdir -p "$WORK_DIR"
 chmod 700 "$WORK_DIR" 2>/dev/null || true
 rm -rf "$ROOT_DIR" "$MOUNT_DIR"
 mkdir -p "$ROOT_DIR" "$MOUNT_DIR"
 rm -f "$IMAGE_PATH"
-qemu-img create -f raw "$IMAGE_PATH" "$IMAGE_SIZE"
+truncate -s "$IMAGE_SIZE" "$IMAGE_PATH"
 parted -s "$IMAGE_PATH" mklabel gpt
 parted -s "$IMAGE_PATH" mkpart ESP fat32 1MiB 513MiB
 parted -s "$IMAGE_PATH" set 1 esp on
@@ -137,19 +138,19 @@ mount "$ROOT_PART" "$MOUNT_DIR"
 mkdir -p "$MOUNT_DIR/boot/efi"
 mount "$EFI_PART" "$MOUNT_DIR/boot/efi"
 
-if [ -n "${VOID_REPODATA_FILE:-}" ] && [ -f "$VOID_REPODATA_FILE" ]; then
-  mkdir -p "$MOUNT_DIR/var/db/xbps/https___repo-fastly_voidlinux_org_current"
-  cp "$VOID_REPODATA_FILE" "$MOUNT_DIR/var/db/xbps/https___repo-fastly_voidlinux_org_current/x86_64-repodata"
-  XBPS_ARCH="$ARCH" xbps-install -y -R "$REPO_URL" -r "$MOUNT_DIR" base-system xbps grub-x86_64-efi efibootmgr bash
-else
-  XBPS_ARCH="$ARCH" xbps-install -Syy -R "$REPO_URL" -r "$MOUNT_DIR" base-system xbps grub-x86_64-efi efibootmgr bash
-fi
+VOID_LOCALREPO="${VOID_LOCALREPO:-$WORK_DIR/void-localrepo}"
+void_local_install "$REPO_URL" "$ARCH" "$VOID_LOCALREPO" "$MOUNT_DIR" base-system xbps grub-x86_64-efi efibootmgr bash
 for fs in dev proc sys run; do mount --rbind "/$fs" "$MOUNT_DIR/$fs"; done
 cleanup_chroot_binds() { set +e; for fs in run sys proc dev; do mountpoint -q "$MOUNT_DIR/$fs" && umount -R "$MOUNT_DIR/$fs"; done; }
 trap 'cleanup_chroot_binds; cleanup' EXIT
 cp "$SCRIPT_DIR/configure-void-usb.sh" "$MOUNT_DIR/root/configure-void-usb.sh"
 chmod +x "$MOUNT_DIR/root/configure-void-usb.sh"
-chroot "$MOUNT_DIR" /root/configure-void-usb.sh
+CONFIG_PACKAGES="$(ALPINE_USB_DRY_RUN=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh | awk '/^ packages:/ {sub(/^ packages:[[:space:]]*/, ""); print; exit}')"
+if [ -n "$CONFIG_PACKAGES" ]; then
+  # shellcheck disable=SC2086
+  void_local_install "$REPO_URL" "$ARCH" "$VOID_LOCALREPO" "$MOUNT_DIR" $CONFIG_PACKAGES
+fi
+ALPINE_USB_SKIP_PACKAGE_INSTALL=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh
 xbps-reconfigure -r "$MOUNT_DIR" -fa
 ROOT_UUID="$(blkid -s UUID -o value "$ROOT_PART")"
 mkdir -p "$MOUNT_DIR/boot/grub"

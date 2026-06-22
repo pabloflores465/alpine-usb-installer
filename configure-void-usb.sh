@@ -82,7 +82,7 @@ case "$DESKTOP" in xfce) append_packages xfce4 xfce4-terminal xfce4-screensaver 
 for wm in $TILING_WMS; do case "$wm" in i3) append_packages i3 i3status i3lock dmenu xterm feh picom ;; sway) append_packages sway swaybg swayidle swaylock foot Waybar mako grim slurp xorg-server-xwayland xdg-desktop-portal-wlr ;; hyprland) append_packages Hyprland foot Waybar mako xorg-server-xwayland xdg-desktop-portal ;; awesome) append_packages awesome xterm rofi picom ;; bspwm) append_packages bspwm sxhkd polybar xterm dmenu feh picom ;; openbox) append_packages openbox tint2 xterm dmenu feh picom ;; labwc) append_packages labwc foot swaybg Waybar mako xdg-desktop-portal-wlr ;; esac; done
 case "$DISPLAY_MANAGER" in lightdm) append_packages lightdm lightdm-gtk3-greeter accountsservice ;; sddm) append_packages sddm accountsservice ;; gdm) append_packages gdm accountsservice ;; lxdm) append_packages lxdm ;; greetd) append_packages greetd tuigreet ;; none) ;; esac
 if [ "$NETWORK_BACKEND" = networkmanager ]; then append_packages NetworkManager; is_enabled "$WIFI" && append_packages wpa_supplicant wireless-regdb; [ "$GRAPHICAL" = 1 ] && append_packages network-manager-applet gnome-keyring; fi
-case "$AUDIO" in pipewire) append_packages pipewire wireplumber pipewire-pulse alsa-utils pavucontrol ;; alsa) append_packages alsa-utils ;; none) ;; esac
+case "$AUDIO" in pipewire) append_packages pipewire wireplumber wireplumber-elogind alsa-pipewire alsa-utils pwvucontrol ;; alsa) append_packages alsa-utils ;; none) ;; esac
 is_enabled "$BLUETOOTH" && { append_packages bluez; [ "$GRAPHICAL" = 1 ] && append_packages blueman; }
 case "$BROWSER" in firefox-esr) append_packages firefox-esr ;; firefox) append_packages firefox ;; chromium) append_packages chromium ;; none) ;; esac
 for pkg in $EXTRA_PACKAGES; do safe_package_name "$pkg"; append_packages "$pkg"; done
@@ -101,18 +101,26 @@ DRY RUN OK
 EOF
 exit 0; fi
 
-command -v xbps-install >/dev/null 2>&1 || die "xbps-install is required inside the Void target root"
-# shellcheck disable=SC2086
-xbps-install -Sy $PACKAGES
+if is_enabled "${ALPINE_USB_SKIP_PACKAGE_INSTALL:-${VOID_USB_SKIP_PACKAGE_INSTALL:-0}}"; then
+  echo "Skipping package install; packages were preinstalled by build-void-usb.sh"
+else
+  command -v xbps-install >/dev/null 2>&1 || die "xbps-install is required inside the Void target root"
+  # shellcheck disable=SC2086
+  xbps-install -Sy $PACKAGES
+fi
 printf '%s\n' "$HOSTNAME" > /etc/hostname
 printf 'LANG=%s\nLANGUAGE=%s\nLC_MESSAGES=%s\n' "$LOCALE" "$LANGUAGE_VALUE" "$LOCALE" > /etc/locale.conf
 printf '%s\n' "$TIMEZONE" > /etc/timezone
 ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime 2>/dev/null || true
 printf 'KEYMAP=%s\n' "$CONSOLE_KEYMAP" > /etc/vconsole.conf
 printf 'root:%s\n%s:%s\n' "$ROOT_PASSWORD" "$USER_NAME" "$USER_PASSWORD" | chpasswd
+for group in wheel audio video input storage network bluetooth; do
+  getent group "$group" >/dev/null 2>&1 || groupadd -r "$group"
+done
 id "$USER_NAME" >/dev/null 2>&1 || useradd -m -G wheel,audio,video,input,storage,network,bluetooth -s /bin/bash "$USER_NAME"
 printf 'permit persist :wheel\n' > /etc/doas.conf 2>/dev/null || true
 mkdir -p /etc/sv
+mkdir -p /var/service 2>/dev/null || { rm -f /var/service; mkdir -p /var/service; }
 for svc in dbus elogind polkitd chronyd NetworkManager bluetoothd lightdm sddm gdm lxdm greetd; do [ -d "/etc/sv/$svc" ] && ln -snf "/etc/sv/$svc" "/var/service/$svc"; done
 mkdir -p /etc/X11/xorg.conf.d
 cat > /etc/X11/xorg.conf.d/00-keyboard.conf <<EOF

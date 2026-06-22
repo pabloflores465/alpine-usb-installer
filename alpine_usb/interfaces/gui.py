@@ -23,8 +23,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from alpine_usb.apk_packages.index import BRANCH_RE, search_official_apk_packages, validate_extra_packages
 from alpine_usb.build_profiles.config_files import ConfigFileError, load_config_file, save_config_file, scrub_config
+from alpine_usb.distros import get_distro
 from alpine_usb.images.validation import validate_usb_image
 from alpine_usb.usb_devices.detection import device_safety_report, list_devices
+from alpine_usb.void_packages.index import search_official_void_packages, validate_void_repository
 
 
 def secure_runtime_dir(name: str) -> Path:
@@ -145,6 +147,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedLayout,
+    QStackedWidget,
     QStyleFactory,
     QTextEdit,
     QToolButton,
@@ -558,6 +561,23 @@ class ApkSearchWorker(QThread):
             self.failed.emit(self.query, str(exc))
 
 
+class VoidSearchWorker(QThread):
+    done = Signal(str, list)
+    failed = Signal(str, str)
+
+    def __init__(self, repository: str, arch: str, query: str):
+        super().__init__()
+        self.repository = repository
+        self.arch = arch
+        self.query = query
+
+    def run(self):
+        try:
+            self.done.emit(self.query, search_official_void_packages(self.repository, self.arch, self.query, limit=10))
+        except Exception as exc:
+            self.failed.emit(self.query, str(exc))
+
+
 class DeviceDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -940,6 +960,9 @@ class BuildWorker(QThread):
             safe_config_env, secret_files = prepare_secret_env({k: str(v) for k, v in self.config_env.items()})
             env.update(safe_config_env)
             env.setdefault("IMAGE_NAME", DEFAULT_IMAGE_NAME)
+            distro_id = str(self.config_env.get("LINUX_USB_DISTRO", "alpine"))
+            provider = get_distro(distro_id)
+            env["IMAGE_NAME"] = provider.default_image_name
             for docker_name_var in DOCKER_NAME_ENV_KEYS:
                 env[docker_name_var] = self.docker_container_name
             final = str(Path(self.output_path).expanduser().resolve())
@@ -947,11 +970,11 @@ class BuildWorker(QThread):
             env["OUTPUT_PATH"] = final
             if os.path.exists(final):
                 os.remove(final)
-            script = SCRIPT_DIR / "build-alpine-usb.sh"
+            script = SCRIPT_DIR / provider.build_script
             if not script.exists():
                 raise RuntimeError(f"Build script not found: {script}")
             script.chmod(0o755)
-            configure = SCRIPT_DIR / "configure-alpine-usb.sh"
+            configure = SCRIPT_DIR / provider.configure_script
             if configure.exists():
                 configure.chmod(0o755)
             cmd = [str(script)]
@@ -1202,9 +1225,19 @@ class Main(QWidget):
         self.auto_resize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.auto_resize.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.auto_resize.setChecked(True)
+        self.distro = QComboBox()
+        add_combo_items(self.distro, [("Alpine Linux", "alpine"), ("Void Linux (glibc)", "void")])
         self.alpine_branch = QComboBox()
         self.alpine_branch.setEditable(True)
         add_combo_items(self.alpine_branch, ["latest-stable", "edge", "v3.22", "v3.21"])
+        self.void_repository = QComboBox()
+        self.void_repository.setEditable(True)
+        add_combo_items(self.void_repository, ["current", "glibc"])
+        self.branch_stack = QStackedWidget()
+        self.branch_stack.addWidget(self.alpine_branch)
+        self.branch_stack.addWidget(self.void_repository)
+        self.branch_label = QLabel("Alpine branch:")
+        self.branch_label.setStyleSheet(f"color:{BREEZE_TEXT};border:0;background:transparent;")
         self.arch = QComboBox()
         add_combo_items(self.arch, ["x86_64"])
         self.hostname = QLineEdit("alpine-usb")
@@ -1373,6 +1406,8 @@ class Main(QWidget):
         self.extra_packages.installEventFilter(self)
         self.extra_packages.textChanged.connect(self.schedule_package_search)
         self.package_search_results.itemDoubleClicked.connect(lambda _item: self.add_selected_packages())
+        self.distro.currentIndexChanged.connect(self.on_distro_changed)
+        self.update_branch_visibility()
         self.default_config = self.snapshot_config()
         self.saved_config_snapshot = dict(self.default_config)
         self.connect_config_change_signals()
@@ -1391,7 +1426,9 @@ class Main(QWidget):
         return {
             "image": self.image.text(),
             "image_size": self.image_size.currentText(),
+            "distro": self.current_distro_id(),
             "alpine_branch": self.alpine_branch.currentText(),
+            "void_repository": self.void_repository.currentText(),
             "arch": combo_value(self.arch),
             "hostname": self.hostname.text(),
             "username": self.username.text(),
@@ -1425,7 +1462,10 @@ class Main(QWidget):
     def apply_config(self, cfg: dict):
         self.image.setText(str(cfg.get("image", DEFAULT_OUTPUT_PATH)))
         self.image_size.setCurrentText(str(cfg.get("image_size", "16G")))
+        self.set_combo_value(self.distro, str(cfg.get("distro", "alpine")))
         self.alpine_branch.setCurrentText(str(cfg.get("alpine_branch", "latest-stable")))
+        self.void_repository.setCurrentText(str(cfg.get("void_repository", "current")))
+        self.update_branch_visibility()
         self.set_combo_value(self.arch, str(cfg.get("arch", "x86_64")))
         self.hostname.setText(str(cfg.get("hostname", "alpine-usb")))
         self.username.setText(str(cfg.get("username", "alpine")))
@@ -1621,6 +1661,22 @@ class Main(QWidget):
         self.update_dirty_indicators()
         modal(self, "info", APP_TITLE, "Default image configuration restored.")
 
+    def current_distro_id(self) -> str:
+        return combo_value(self.distro) or "alpine"
+
+    def update_branch_visibility(self):
+        if self.current_distro_id() == "void":
+            self.branch_label.setText("Void repository:")
+            self.branch_stack.setCurrentWidget(self.void_repository)
+        else:
+            self.branch_label.setText("Alpine branch:")
+            self.branch_stack.setCurrentWidget(self.alpine_branch)
+
+    def on_distro_changed(self):
+        self.update_branch_visibility()
+        self.refresh_build_summary()
+        self.update_dirty_indicators()
+
     def connect_config_change_signals(self):
         def changed(*_args):
             # Keep default GUI config and live summary current as the user edits.
@@ -1632,7 +1688,9 @@ class Main(QWidget):
 
         for widget in [
             self.image_size,
+            self.distro,
             self.alpine_branch,
+            self.void_repository,
             self.arch,
             self.timezone,
             self.locale,
@@ -1737,7 +1795,9 @@ class Main(QWidget):
         """)
         title = QLabel("Linux USB Installer")
         title.setStyleSheet(f"font-size:22px;font-weight:bold;color:{BREEZE_TEXT};margin:0px;padding:0px;")
-        subtitle = QLabel("Build and flash customizable preinstalled Alpine Linux and Void Linux USB images.")
+        subtitle = QLabel(
+            "Build and flash customizable preinstalled Alpine Linux and Void Linux USB images. Pick the distribution above."
+        )
         subtitle.setStyleSheet(f"color:{BREEZE_SUBTLE};margin:0px;padding:0px;font-size:12px;")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 10)
@@ -1932,7 +1992,8 @@ class Main(QWidget):
         form.setVerticalSpacing(8)
         for key, label, widget in [
             ("image_size", "Minimum image size:", self.image_size),
-            ("alpine_branch", "Alpine branch / Void repo:", self.alpine_branch),
+            ("distro", "Distribution:", self.distro),
+            ("branch", self.branch_label, self.branch_stack),
             ("arch", "Architecture:", self.arch),
             ("hostname", "Hostname:", self.hostname),
             ("username", "User:", self.username),
@@ -1952,7 +2013,10 @@ class Main(QWidget):
             ("xkb_variant", "XKB variant:", self.xkb_variant),
             ("xkb_model", "XKB model:", self.xkb_model),
         ]:
-            form.addRow(self.config_label(key, label) if label else QLabel(""), widget)
+            form.addRow(
+                label if isinstance(label, QWidget) else (self.config_label(key, label) if label else QLabel("")),
+                widget,
+            )
         system.body_layout.addLayout(form)
         parent_layout.addWidget(system)
 
@@ -2083,10 +2147,15 @@ class Main(QWidget):
             return
         branch = self.alpine_branch.currentText().strip() or "latest-stable"
         arch = combo_value(self.arch) or "x86_64"
+        repository = self.void_repository.currentText().strip() or "current"
         self.package_search_active_query = query
         self.show_package_search_message("Searching packages…")
-        self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
-        self.package_search_worker = ApkSearchWorker(branch, arch, query)
+        if self.current_distro_id() == "void":
+            self.set_package_search_status(f"Searching Void {repository}/{arch} repository…")
+            self.package_search_worker = VoidSearchWorker(repository, arch, query)
+        else:
+            self.set_package_search_status(f"Searching {branch}/{arch} main + community…")
+            self.package_search_worker = ApkSearchWorker(branch, arch, query)
         self.package_search_worker.done.connect(self.package_search_done)
         self.package_search_worker.failed.connect(self.package_search_failed)
         self.package_search_worker.finished.connect(self.package_search_finished)
@@ -2249,7 +2318,9 @@ class Main(QWidget):
                 self.device,
                 self.image,
                 self.image_size,
+                self.distro,
                 self.alpine_branch,
+                self.void_repository,
                 self.arch,
                 self.hostname,
                 self.username,
@@ -2296,7 +2367,9 @@ class Main(QWidget):
         return {
             "IMAGE_NAME": DEFAULT_IMAGE_NAME,
             "IMAGE_SIZE": self.image_size.currentText().strip() or "16G",
+            "LINUX_USB_DISTRO": self.current_distro_id(),
             "ALPINE_BRANCH": self.alpine_branch.currentText().strip() or "latest-stable",
+            "VOID_REPOSITORY": self.void_repository.currentText().strip() or "current",
             "ARCH": combo_value(self.arch) or "x86_64",
             "ALPINE_USB_USER": self.username.text().strip() or "alpine",
             "ALPINE_USB_PASSWORD": password,
@@ -2330,7 +2403,13 @@ class Main(QWidget):
         size = env["IMAGE_SIZE"]
         if not re.match(r"^[0-9]+([KMGTP]?)$", size, re.I):
             return "Image size must look like 16G, 32768M, etc."
-        if not BRANCH_RE.match(env["ALPINE_BRANCH"]):
+        distro = env.get("LINUX_USB_DISTRO", "alpine")
+        if distro == "void":
+            try:
+                validate_void_repository(env.get("VOID_REPOSITORY", "current"))
+            except ValueError as exc:
+                return str(exc)
+        elif not BRANCH_RE.match(env["ALPINE_BRANCH"]):
             return "Alpine branch must be latest-stable, edge, or v<major>.<minor> (for example v3.22)."
         if not re.match(r"^[a-z_][a-z0-9_-]*$", env["ALPINE_USB_USER"]):
             return "Username must start with lowercase letter/_ and contain only lowercase letters, numbers, _ or -."
@@ -2362,9 +2441,17 @@ class Main(QWidget):
             return "Wayland sessions (Sway/Hyprland/labwc) need Auto, greetd, SDDM, GDM or no display manager; LightDM/LXDM are X11-only here."
         return None
 
+    def _distro_summary_pair(self, env: dict[str, str]) -> tuple[str, str]:
+        """Return (distro_label, branch_display) for build-env summaries."""
+        distro = env.get("LINUX_USB_DISTRO", "alpine")
+        provider = get_distro(distro)
+        branch = env.get("VOID_REPOSITORY") if distro == "void" else env.get("ALPINE_BRANCH")
+        return provider.label, branch or provider.default_branch
+
     def config_summary_text(self, env: dict[str, str]) -> str:
+        label, branch = self._distro_summary_pair(env)
         return (
-            f"Image: {env['IMAGE_SIZE']} | Alpine: {env['ALPINE_BRANCH']} | Arch: {env['ARCH']}\n"
+            f"Image: {env['IMAGE_SIZE']} | {label}: {branch} | Arch: {env['ARCH']}\n"
             f"System: hostname={env['ALPINE_USB_HOSTNAME']} | user={env['ALPINE_USB_USER']} | passwords hidden\n"
             f"Locale: {env['ALPINE_USB_LOCALE']} | TZ: {env['ALPINE_USB_TIMEZONE']} | console={env['ALPINE_USB_CONSOLE_KEYMAP']} | xkb={env['ALPINE_USB_XKB_LAYOUT']} {env['ALPINE_USB_XKB_VARIANT'] or ''} model={env['ALPINE_USB_XKB_MODEL']}\n"
             f"Desktop: {env['ALPINE_USB_DESKTOP']} | DM: {env['ALPINE_USB_DISPLAY_MANAGER']} | Session: {env['ALPINE_USB_DEFAULT_SESSION']} | WMs: {env['ALPINE_USB_TILING_WMS'] or 'none'}\n"
@@ -2378,9 +2465,10 @@ class Main(QWidget):
         def esc(value: object) -> str:
             return html.escape(str(value))
 
+        label, branch = self._distro_summary_pair(env)
         rows = [
             ("Output", html_soft_break(output_path)),
-            ("Image", f"{esc(env['IMAGE_SIZE'])} · Alpine {esc(env['ALPINE_BRANCH'])} · Arch {esc(env['ARCH'])}"),
+            ("Image", f"{esc(env['IMAGE_SIZE'])} · {esc(label)} {esc(branch)} · Arch {esc(env['ARCH'])}"),
             (
                 "System",
                 f"hostname={esc(env['ALPINE_USB_HOSTNAME'])} · user={esc(env['ALPINE_USB_USER'])} · passwords hidden",
@@ -2408,7 +2496,7 @@ class Main(QWidget):
             f"<div style='margin:4px 0;'><b>{title}:</b> <span style='font-weight:400;'>{value}</span></div>"
             for title, value in rows
         )
-        return f"<div style='min-width:440px; max-width:520px;'><h2>Build Alpine image?</h2>{lines}</div>"
+        return f"<div style='min-width:440px; max-width:520px;'><h2>Build {label} image?</h2>{lines}</div>"
 
     def flash_confirmation_html(self, device_rows: list[tuple[str, str]], image_path: str) -> str:
         rows = "".join(
@@ -2433,10 +2521,19 @@ class Main(QWidget):
         return ""
 
     def summary_env_from_config(self, cfg: dict) -> dict[str, str]:
+        distro = str(cfg.get("distro", "alpine"))
+        provider = get_distro(distro)
         return {
             "image": str(cfg.get("image", DEFAULT_OUTPUT_PATH)),
             "image_size": str(cfg.get("image_size", "16G")),
-            "alpine_branch": str(cfg.get("alpine_branch", "latest-stable")),
+            "distro": distro,
+            "distro_label": provider.label,
+            "alpine_branch": str(
+                cfg.get("alpine_branch", provider.default_branch if distro != "void" else "latest-stable")
+            ),
+            "void_repository": str(
+                cfg.get("void_repository", provider.default_branch if distro == "void" else "current")
+            ),
             "arch": str(cfg.get("arch", "x86_64")),
             "hostname": str(cfg.get("hostname", "alpine-usb")),
             "username": str(cfg.get("username", "alpine")),
@@ -2471,9 +2568,10 @@ class Main(QWidget):
         e = {key: html.escape(str(value)) for key, value in env.items()}
         extra = e.get("extra_packages", "").strip() or "none"
         wms = e.get("wms", "").strip() or "none"
+        branch = e.get("void_repository") if env.get("distro") == "void" else e.get("alpine_branch")
         self.build_summary.setText(
             f"<b>Output:</b> {e['image']}<br>"
-            f"<b>Image:</b> size {e['image_size']} · Alpine {e['alpine_branch']} · arch {e['arch']}<br>"
+            f"<b>Image:</b> size {e['image_size']} · {e['distro_label']} {html.escape(str(branch))} · arch {e['arch']}<br>"
             f"<b>System:</b> hostname {e['hostname']} · user {e['username']} · passwords hidden<br>"
             f"<b>Locale:</b> {e['locale']} · timezone {e['timezone']} · console keymap {e['console_keymap']} · XKB {e['xkb_layout']} · variant {e['xkb_variant'] or 'none'} · model {e['xkb_model']}<br>"
             f"<b>Desktop:</b> {e['desktop']} · display manager {e['display_manager']} · session {e['default_session']} · WMs {wms}<br>"
