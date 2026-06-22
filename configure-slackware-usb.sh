@@ -101,4 +101,5 @@ case "$(lower "$DRY_RUN")" in
   1|yes|true|on|enabled) exit 0 ;;
 esac
 
-die "Slackware full image assembly is not implemented yet; use --dry-run for validated package/config planning."
+echo "Slackware full image assembly is handled by build-slackware-usb.sh; this planner only runs in dry-run mode." >&2
+exit 0
