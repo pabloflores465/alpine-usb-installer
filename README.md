@@ -1,104 +1,338 @@
 # LEDIT — Linux External Drive Installer Tool
 
-Build and flash configurable, preinstalled **Linux USB/external-drive images** from a Qt GUI, a full-screen TUI, or one unified CLI.
+LEDIT builds configurable, preinstalled Linux images for USB drives and external disks. It gives you three interfaces over the same build system:
+
+- **Qt GUI** for visual configuration and package search.
+- **Full-screen TUI** for terminal-first workflows.
+- **CLI** for repeatable builds, dry-runs, package search, device listing, and flashing.
+
+The goal is not to make a live ISO. LEDIT creates installed Linux images that can be written to a drive and booted as a portable system.
 
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
-## Supported distributions
+## Documentation map
 
-| Distro | CLI id | Branch / release choices shown by UI | Package search backend | Build backend |
+This README is the product entry point: what LEDIT does, how to install it, how to run it, and where to go next. The deeper pages are split by task and by distro so the root README stays readable.
+
+| Need | Go here |
+| --- | --- |
+| First run | [Quick start](#quick-start) |
+| GUI details | [GUI workflow](#gui-workflow) |
+| CLI commands | [CLI reference](#cli-reference) |
+| Build options | [Configuration reference](docs/configuration.md) |
+| Errors and host checks | [Troubleshooting](docs/troubleshooting.md) |
+| Distro-specific behavior | [Per-distro docs](docs/distros/README.md) |
+| License | [`LICENSE`](LICENSE) |
+
+The documentation follows a simple pattern inspired by task-oriented documentation frameworks: quick start first, how-to recipes next, reference tables after that, and explanations/troubleshooting at the end.
+
+## What LEDIT can build
+
+| Distro | CLI id | Branch / release choices | Package search backend | Build backend |
 | --- | --- | --- | --- | --- |
-| Alpine Linux | `alpine` | `latest-stable`, `edge`, `v3.22`, `v3.21` | APK `main`, `community` | `backend/scripts/build-alpine-usb.sh` |
-| Arch Linux | `arch` | `rolling`, `stable` alias | Arch package API (`core`, `extra`, `multilib`) | `backend/scripts/build-arch-usb.sh` |
-| Debian | `debian` | `stable`, `testing`, `sid`, `trixie`, `bookworm`, `forky` | APT / `apt-cache` | `backend/scripts/build-debian-usb.sh` |
-| Fedora | `fedora` | `stable`, `latest`, `rawhide`, numeric releases | DNF repoquery | `backend/scripts/build-fedora-usb.sh` |
-| Gentoo | `gentoo` | `stable`, `testing` | Portage catalogue / local eix/pkgcore | `backend/scripts/build-gentoo-usb.sh` |
-| NixOS | `nixos` | `nixos-24.11`, `nixos-25.05`, `nixos-unstable` | `nix search` / nixpkgs | Python NixOS image backend (`ledit_core/nixos`) |
-| openSUSE | `opensuse` | `tumbleweed`, `leap-16.0`, `leap-15.6` | Zypper repo metadata | `backend/scripts/build-opensuse-usb.sh` |
-| RHEL family | `rhel` | `9`, `10` | DNF repoquery | `backend/scripts/build-rhel-usb.sh` |
-| Slackware | `slackware` | `stable`, `current`, `15.0` | Slackware `PACKAGES.TXT` | `backend/scripts/build-slackware-usb.sh` |
-| Ubuntu | `ubuntu` | `24.04`, `noble`, `22.04`, `jammy` | APT / `apt-cache` | `backend/scripts/build-ubuntu-usb.sh` |
-| Void Linux (glibc) | `void` | `current`, `glibc` | XBPS repositories | `backend/scripts/build-void-usb.sh` |
+| Alpine Linux | `alpine` | `latest-stable`, `edge`, `v3.22`, `v3.21` | APK `main`, `community` | [`docs/distros/alpine.md`](docs/distros/alpine.md) |
+| Arch Linux | `arch` | `rolling`, `stable` alias | Arch package API (`core`, `extra`, `multilib`) | [`docs/distros/arch.md`](docs/distros/arch.md) |
+| Debian | `debian` | `stable`, `testing`, `sid`, `trixie`, `bookworm`, `forky` | APT / Debian package metadata | [`docs/distros/debian.md`](docs/distros/debian.md) |
+| Fedora | `fedora` | `stable`, `latest`, `rawhide`, `42`, `41` | DNF metadata | [`docs/distros/fedora.md`](docs/distros/fedora.md) |
+| Gentoo | `gentoo` | `stable`, `testing` | Portage package atoms | [`docs/distros/gentoo.md`](docs/distros/gentoo.md) |
+| NixOS | `nixos` | `nixos-24.11`, `nixos-25.05`, `nixos-unstable` | nixpkgs | [`docs/distros/nixos.md`](docs/distros/nixos.md) |
+| openSUSE | `opensuse` | `tumbleweed`, `leap-16.0`, `leap-15.6` | Zypper metadata | [`docs/distros/opensuse.md`](docs/distros/opensuse.md) |
+| RHEL family | `rhel`, `rocky`, `alma`, `centos`, `centos-stream` | `9`, `10` | DNF metadata (`baseos`, `appstream`) | [`docs/distros/rhel.md`](docs/distros/rhel.md) |
+| Slackware | `slackware` | `stable`, `current`, `15.0` | `PACKAGES.TXT` | [`docs/distros/slackware.md`](docs/distros/slackware.md) |
+| Ubuntu | `ubuntu` | `24.04`, `noble`, `22.04`, `jammy` | APT / Ubuntu package metadata | [`docs/distros/ubuntu.md`](docs/distros/ubuntu.md) |
+| Void Linux (glibc) | `void` | `current`, `glibc` | XBPS metadata | [`docs/distros/void.md`](docs/distros/void.md) |
 
-Detailed, Distrobox-style pages per distro are in [`docs/distros/`](docs/distros/README.md): branches, host tools, environment variables, CLI usage, and notes.
+Run this any time to see the currently wired choices from the application itself:
 
-When you change distro in the GUI or TUI, the branch/release combo is replaced with only that distro's valid choices. Package suggestions also switch to that distro's repositories. If packages were already selected, LEDIT re-searches those names in the new distro and reports any missing package names.
+```sh
+./ledit distros
+```
 
 ## Features
 
-- Build bootable installed Linux USB images from distro-specific builders.
-- Configure image size, branch/release/channel, architecture, hostname, user/passwords, timezone, locale, keyboard, desktop/session, display manager, bootloader, kernel flavor, firmware, networking, Bluetooth, audio, browser, and extra packages.
-- Search distro-native package repositories from GUI/TUI/CLI.
-- Cache package indexes/search results for repeat searches.
-- Use compatibility or minimal profiles.
-- Flash generated raw images to USB from macOS/Linux with whole-disk safety checks and image validation.
-- Auto-expand root filesystem on first boot where supported by distro backend.
-- Validate code, scripts, distro dry-runs, and config matrix with project scripts.
+- Build installed Linux USB/external-drive images from distro-specific backends.
+- Configure image size, output path, distro branch, architecture, user, hostname, password handling, timezone, locale, keyboard, desktop, display manager, window managers, browser, audio, network, Wi-Fi, Bluetooth, firmware, bootloader, kernel flavor, boot timeout, and auto-resize.
+- Search distro-native package repositories before adding extra packages.
+- Re-search selected packages when switching distro in GUI/TUI.
+- Use `compatibility` or `minimal` build profiles.
+- Validate profiles with `--dry-run` before writing an image.
+- Flash generated images to removable drives with whole-disk safety checks.
+- Use Docker on macOS for Linux image builders that need mount/chroot/loop tooling.
+- Use a `.qtvenv` bootstrap for GUI dependencies so the GUI can start even when the active project virtualenv lacks PySide6.
 
 ## Requirements
 
+### Python
+
+- Python 3.9+ is supported by the GUI dependency pins in `requirements.txt`.
+- Python 3.10+ is recommended when available.
+- The GUI creates `.qtvenv` automatically and installs Qt dependencies there.
+
 ### Build host
 
-- Python 3.
-- macOS: Docker Desktop for Linux image builders that need loop/mount/chroot support.
-- Native Linux: distro backend tools as needed (`debootstrap`, `pacstrap`, `dnf`, `zypper`, `xbps-install`, `nix`/`nixos-generate`, GRUB/EFI tools, `parted`, filesystem tools, etc.).
-- Alpine APK solver validation additionally needs Docker.
+| Host | Status | Notes |
+| --- | --- | --- |
+| macOS | Supported through Docker for most builders | Docker Desktop must be installed and running. |
+| Native Linux | Supported | Install the distro-specific build tools documented in each distro page. |
+| Windows | Build not implemented | Use Windows only to flash an already generated raw image with Rufus or balenaEtcher. |
 
-### Runtime flashing tools
+### Flashing tools
 
-- macOS flashing: `diskutil`, `dd`, administrator password.
-- Linux flashing: `lsblk`, `dd`, `sudo` or `pkexec`.
-- Windows raw flashing is not implemented; use Rufus or balenaEtcher with the generated image.
+| Host | Required tools |
+| --- | --- |
+| macOS | `diskutil`, `dd`, administrator password |
+| Linux | `lsblk`, `dd`, `sudo` or `pkexec` |
+| Windows | Not implemented in LEDIT; use an external flasher |
 
 ## Quick start
 
+Clone the repo and enter it:
+
 ```sh
-# GUI
-./gui.py
-
-# TUI by default
-./ledit
-
-# Explicit TUI
-./ledit tui
-
-# CLI help
-./ledit --help
-./ledit distros
-./ledit build --help
+git clone https://github.com/pabloflores465/ledit.git
+cd ledit
 ```
 
-Default output directory:
+Open the GUI:
+
+```sh
+python gui.py
+```
+
+Open the terminal UI:
+
+```sh
+./ledit tui
+```
+
+List supported distros:
+
+```sh
+./ledit distros
+```
+
+Run a safe dry-run before building:
+
+```sh
+./ledit build --distro alpine --dry-run --ask-password -y
+```
+
+Build an image:
+
+```sh
+./ledit build --distro alpine --ask-password -y
+```
+
+The default output directory is:
 
 ```txt
 /tmp/ledit/
 ```
 
-## CLI examples
+## Recommended workflow
+
+1. Run `./ledit doctor`.
+2. Pick a distro with `./ledit distros`.
+3. Search for packages with `./ledit search <name> --distro <id>`.
+4. Run a dry-run with the same options you plan to build.
+5. Build the image.
+6. List removable drives with `./ledit devices`.
+7. Flash only after confirming the target device is correct.
+
+Example:
 
 ```sh
-# Search packages in selected distro repositories
-./ledit search firefox --distro alpine
+./ledit doctor
 ./ledit search firefox --distro ubuntu --branch 24.04
+./ledit build --distro ubuntu --branch 24.04 --dry-run --ask-password -y
+./ledit build --distro ubuntu --branch 24.04 --ask-password -y
+./ledit devices
+./ledit flash /tmp/ledit/ledit-ubuntu.img /dev/diskX
+```
+
+## GUI workflow
+
+Start the GUI:
+
+```sh
+python gui.py
+```
+
+What happens on first run:
+
+1. `gui.py` checks whether it is already running inside `.qtvenv`.
+2. If not, it creates `.qtvenv`.
+3. It installs `requirements.txt`.
+4. It re-executes itself through `.qtvenv/bin/python`.
+5. Only then does it import the Qt GUI modules.
+
+This avoids `ModuleNotFoundError: No module named 'PySide6'` when your project virtualenv does not include Qt.
+
+Typical GUI flow:
+
+1. Select a distro.
+2. Choose the branch/release.
+3. Choose image size and output path.
+4. Configure user, hostname, timezone, locale, keyboard, and password behavior.
+5. Choose desktop, display manager, browser, audio, networking, firmware, bootloader, and extra packages.
+6. Use package search to validate package names.
+7. Run the build.
+8. Flash the generated image only after checking the device list.
+
+## TUI workflow
+
+Open the full-screen terminal interface:
+
+```sh
+./ledit tui
+```
+
+The TUI is useful when you want the same guided flow as the GUI but are working over SSH, inside a terminal emulator, or on a machine without a desktop environment.
+
+Running `./ledit` without a subcommand opens the TUI by default.
+
+## CLI reference
+
+### `build`
+
+Build or validate a Linux image.
+
+```sh
+./ledit build --distro <id> [options]
+```
+
+Common examples:
+
+```sh
+# Dry-run only.
+./ledit build --distro arch --dry-run --ask-password -y
+
+# Minimal, no desktop.
+./ledit build --distro debian --profile minimal --desktop none --browser none --ask-password -y
+
+# Larger image with extra packages.
+./ledit build --distro ubuntu \
+  --branch 24.04 \
+  --image-size 32G \
+  --extra-package neovim \
+  --extra-package "tmux htop" \
+  --ask-password \
+  -y
+
+# Pin output path.
+./ledit build --distro void \
+  --output "$HOME/Downloads/ledit-void.img" \
+  --ask-password \
+  -y
+```
+
+Important build options:
+
+| Option | Purpose |
+| --- | --- |
+| `--distro` | Select the distro backend. |
+| `--branch`, `--release`, `--nixos-channel` | Select the distro branch/release/channel. |
+| `--profile` | `compatibility` or `minimal`. |
+| `--output`, `-o` | Final raw image path. |
+| `--image-size`, `-s` | Minimum image size, for example `16G`. |
+| `--arch` | Target architecture choice exposed by the selected distro. |
+| `--hostname`, `--user` | Initial system identity. |
+| `--ask-password` | Prompt for passwords without writing them to shell history. |
+| `--password`, `--root-password` | Non-interactive password values; prefer `--ask-password` for manual runs. |
+| `--desktop` | `xfce`, `gnome`, `plasma`, `mate`, `lxqt`, or `none`. |
+| `--display-manager` | `auto`, `lightdm`, `sddm`, `gdm`, `lxdm`, `greetd`, or `none`. |
+| `--default-session` | Desktop or WM session to start by default. |
+| `--wm`, `--tiling-wms` | Add optional window managers. |
+| `--browser` | `firefox-esr`, `firefox`, `chromium`, or `none`. |
+| `--audio` | `pipewire`, `alsa`, or `none`. |
+| `--network` | `networkmanager` or `none`. |
+| `--wifi`, `--no-wifi` | Toggle Wi-Fi support packages/services. |
+| `--bluetooth`, `--no-bluetooth` | Toggle Bluetooth packages/services. |
+| `--bootloader` | `grub`, `systemd-boot`, or `extlinux` when supported by the distro. |
+| `--kernel` | `lts`, `stable`, `generic`, or `huge`, depending on backend mapping. |
+| `--firmware` | `full` or `none`. |
+| `--legacy-x11-drivers`, `--no-legacy-x11-drivers` | Keep or skip broad Xorg video drivers. |
+| `--auto-resize`, `--no-auto-resize` | Enable/disable first-boot root expansion where supported. |
+| `--extra-package`, `--extra-packages` | Add distro-native packages. |
+| `--dry-run` | Validate and print the generated plan without creating an image. |
+| `--yes`, `-y` | Skip confirmation prompts. |
+
+For a complete explanation of configuration behavior, see [`docs/configuration.md`](docs/configuration.md).
+
+### `search`
+
+Search official package repositories for a distro.
+
+```sh
+./ledit search firefox --distro alpine --limit 5
 ./ledit search sway --distro arch
 ./ledit search app-editors/vim --distro gentoo
-
-# Validate without building
-./ledit build --distro alpine --dry-run --ask-password --desktop xfce --bootloader systemd-boot
-./ledit build --distro ubuntu --branch 24.04 --dry-run --ask-password --desktop plasma -y
-./ledit build --distro nixos --branch nixos-25.05 --dry-run --password change-me -y
-
-# Build minimal profiles
-./ledit build --distro debian --profile minimal --ask-password -y
-./ledit build --distro void --profile minimal --ask-password -y
-
-# Build graphical image without broad legacy X11 drivers
-./ledit build --distro fedora --ask-password --desktop xfce --no-legacy-x11-drivers -y
-
-# List and flash devices
-./ledit devices
-./ledit flash /tmp/ledit/ledit.img /dev/sdX
+./ledit search docker --distro void
 ```
+
+### `distros`
+
+Show supported distro ids and branch choices:
+
+```sh
+./ledit distros
+```
+
+### `devices`
+
+List removable USB-like devices:
+
+```sh
+./ledit devices
+```
+
+### `flash`
+
+Write an image to a whole removable drive.
+
+```sh
+./ledit flash /path/to/ledit.img /dev/diskX
+```
+
+Flashing permanently erases the target drive. LEDIT performs image validation and whole-disk safety checks, but you must still verify the selected device.
+
+### `doctor`
+
+Check whether common host tools are available:
+
+```sh
+./ledit doctor
+```
+
+## Configuration model
+
+LEDIT normalizes GUI, TUI, and CLI choices into environment variables before calling a distro backend. The key pieces are:
+
+- `IMAGE_SIZE`
+- `OUTPUT_PATH`
+- `LINUX_USB_DISTRO`
+- `LEDIT_DISTRO`
+- distro branch variable such as `ALPINE_BRANCH`, `ARCH_USB_BRANCH`, `UBUNTU_RELEASE`, or `NIXOS_CHANNEL`
+- shared profile variables such as `*_USER`, `*_HOSTNAME`, `*_DESKTOP`, `*_BOOTLOADER`, and `*_EXTRA_PACKAGES`
+
+The selected distro decides which prefix the backend uses. Some backends consume only `LEDIT_USB_*`; others receive both a distro prefix and the shared prefix.
+
+Detailed reference: [`docs/configuration.md`](docs/configuration.md).
+
+## Build profiles
+
+| Profile | Purpose |
+| --- | --- |
+| `compatibility` | Default profile. Keeps broadly useful desktop, firmware, networking, audio, browser, and video compatibility choices enabled unless overridden. |
+| `minimal` | Smaller image baseline. Use it when you want to explicitly add only what you need. |
+
+Profiles are defaults, not locks. You can still override individual options:
+
+```sh
+./ledit build --distro fedora --profile minimal --desktop xfce --browser none --ask-password -y
+```
+
+## Extra packages
 
 Extra packages can be repeated or space-separated:
 
@@ -109,164 +343,79 @@ Extra packages can be repeated or space-separated:
   --extra-package docker
 ```
 
-## GUI
+LEDIT validates package names with the selected distro provider before sending them to the backend. When using the GUI/TUI, changing distro re-searches selected packages so you can catch package-name differences early.
+
+## Flashing safety
+
+Use the whole-disk device path, not a partition path.
+
+Examples:
+
+| Host | Whole disk example | Avoid |
+| --- | --- | --- |
+| macOS | `/dev/disk4` | `/dev/disk4s1` |
+| Linux | `/dev/sdb` | `/dev/sdb1` |
+
+Recommended sequence:
 
 ```sh
-./gui.py
+./ledit devices
+./ledit flash /tmp/ledit/ledit.img /dev/diskX
 ```
 
-The GUI creates and uses `.qtvenv` automatically if PySide6 is missing.
-
-GUI flow:
-
-1. Select distribution. Branch/release and package-search repositories update immediately.
-2. Set image output path and system settings.
-3. Open only the configuration sections you want to change.
-4. Search/add extra packages from the selected distro repositories.
-5. Build the image. The form stays editable for the next profile while a build runs.
-6. Select USB target.
-7. Flash USB. The image is checked before flashing.
-
-GUI profiles can be saved/loaded as JSON/YAML. Password fields are never saved. Existing package selections are revalidated when you switch distros.
-
-## TUI
-
-```sh
-./ledit
-# or
-./ledit tui
-```
-
-The TUI provides menus for distro selection, branch/release, package search, dry-run/build, USB selection, flashing, and host diagnostics.
-
-## Build profiles
-
-### Compatibility profile
-
-Defaults are distro-like and graphical where possible:
-
-| Option | Default |
-| --- | --- |
-| Image size | `16G` |
-| Branch/release | distro default |
-| Architecture | distro default (`x86_64`/equivalent) |
-| Desktop | XFCE |
-| Display manager | auto recommended |
-| Bootloader | GRUB, except NixOS sd-image uses extlinux |
-| Kernel | `lts` when backend supports it, else distro kernel |
-| Firmware | full firmware |
-| Network | NetworkManager + Wi‑Fi |
-| Bluetooth | enabled |
-| Audio | PipeWire |
-| Browser | Firefox |
-| USB auto-resize | enabled where supported |
-
-### Minimal profile
-
-`--profile minimal` changes defaults for smaller/faster images unless explicitly overridden:
-
-| Option | Minimal default |
-| --- | --- |
-| Desktop | none |
-| Display manager | none |
-| Browser | none |
-| Audio | none |
-| Network | none |
-| Wi‑Fi | disabled |
-| Bluetooth | disabled |
-| Firmware | none |
-| Legacy X11 drivers | disabled |
-
-## Distro notes
-
-- **Alpine**: keeps the mature `alpine-make-vm-image` builder and APK `main/community` search.
-- **Arch**: uses pacstrap-style package planning and Arch package API search.
-- **Debian/Ubuntu**: use debootstrap-based builders and APT search.
-- **Fedora/RHEL/openSUSE**: use DNF/Zypper installroot-style builders; package search may require local DNF/Zypper tooling or a warm cache.
-- **Gentoo/Slackware/Void**: use distro-specific installroot/bootstrap flows; macOS paths run through Docker where implemented.
-- **NixOS**: renders a flake/configuration and builds via `nixos-generate` or Docker.
-
-Additional notes:
-
-- Per-distro backends (Distrobox-style pages): [`docs/distros/`](docs/distros/README.md)
-- [`docs/ubuntu-support.md`](docs/ubuntu-support.md)
-- [`docs/gentoo.md`](docs/gentoo.md)
-- [`docs/opensuse.md`](docs/opensuse.md)
-
-## Repository layout
-
-```
-ledit                      # unified entrypoint (TUI default + CLI)
-cli.py / gui.py / tui.py   # thin compatibility wrappers
-apk_index.py              # thin wrapper over ledit_core.apk_packages
-ledit_core/               # Python core package
-├── frontends/            # CLI / GUI / TUI adapters (one folder each)
-│   ├── cli/app.py
-│   ├── gui/{app.py,workers.py}
-│   └── tui/{app.py,state.py}
-├── image_builds/         # build env, runtime workspace, secrets, dry-run, runners
-├── package_search/       # distro-native package search service
-├── linux_distros/        # provider registry + per-distro modules (fedora/gentoo/opensuse)
-├── nixos/                # NixOS Python backend
-├── {apk,apt,arch,deb,fedora,rhel,slackware,void}_packages/  # package index/search/cache per family
-├── build_profiles/       # presets, config files, Arch profile
-├── images/               # image validation
-└── usb_devices/          # USB detection and safety
-backend/
-├── scripts/              # build-<distro>-usb.sh and configure-<distro>-usb.sh (all distros)
-└── docker/               # Dockerfile.builder, Dockerfile.gentoo-builder
-scripts/                  # project checks, builds, release assets, matrix
-efi-fallback/             # standalone GRUB EFI + configs
-docs/                     # README, per-distro pages, support notes
-```
-
-## Validation and tests
-
-```sh
-# Compile, lint, tests, shell syntax, smoke runs, distro dry-run checks
-scripts/check-project.sh
-
-# Distro dry-run compile smoke only
-scripts/check-image-compile.sh
-
-# Practical config matrix across all distros
-scripts/validate-config-matrix.sh
-
-# Exhaustive desktop/WM/DM/kernel grid
-MATRIX_FULL=1 scripts/validate-config-matrix.sh
-
-# Limit matrix to some distros while developing
-MATRIX_DISTROS="alpine ubuntu nixos" scripts/validate-config-matrix.sh
-
-# Include every known branch/release alias too
-MATRIX_BRANCHES=all scripts/validate-config-matrix.sh
-
-# Alpine dependency solver with real apk in Docker
-scripts/check-apk-solver.sh
-```
-
-## Repository rebrand
-
-GitHub repository name/description:
-
-- Name: `ledit`
-- Description: `Linux External Drive Installer Tool — build and flash configurable Linux USB images from GUI, TUI, or CLI.`
-
-Local `origin` should point to `https://github.com/pabloflores465/ledit.git`.
+On macOS, LEDIT writes through the raw disk path (`/dev/rdiskX`) after unmounting the disk. On Linux, it uses `dd` with `conv=fsync`.
 
 ## Troubleshooting
 
-### Docker not running on macOS
+| Problem | Likely cause | Fix |
+| --- | --- | --- |
+| `ModuleNotFoundError: No module named 'PySide6'` | GUI dependencies are missing from the current venv or `.qtvenv` was created before dependency pins changed. | Pull latest, remove `.qtvenv`, then run `python gui.py`. |
+| Docker error on macOS | Docker Desktop is not running or cannot access the repo/output path. | Start Docker Desktop and retry from a normal terminal. |
+| Package not found | Package name differs between distros or branch metadata. | Run `./ledit search <name> --distro <id> --branch <branch>`. |
+| Unsupported bootloader | Not every backend supports every bootloader. | Use `--bootloader grub` unless a distro page says otherwise. |
+| Dry-run fails | Invalid branch, package, desktop, bootloader, or architecture. | Check the selected distro page and rerun with `--dry-run`. |
+| Flash command refuses target | The selected target is not a safe whole removable disk. | Run `./ledit devices` and verify the exact device path. |
 
-Start Docker Desktop and retry. GUI-launched macOS apps get a small PATH; LEDIT adds common Docker/Homebrew/Nix paths automatically.
+More help: [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
-### Package search fails
+## Distro docs
 
-Some backends use host tools (`apt-cache`, `dnf`, `zypper`, `nix`, `xbps-query`). Install the relevant tool or retry after a cache has been populated. Alpine, Arch, openSUSE, Slackware, and Void can use remote metadata or cache fallbacks depending on backend.
+Each distro has its own page with:
 
-### Free build space on macOS
+- when to choose it,
+- supported branch/release values,
+- default user/hostname/image name,
+- backend script paths,
+- host requirements,
+- quick commands,
+- GUI/TUI notes,
+- bootloader support,
+- environment variable reference,
+- distro-specific troubleshooting.
 
-Large image builds can leave deleted-but-open temporary files if interrupted. Stop running Docker/build processes, run the GUI cleanup/stop path, or reboot if space is not released.
+Start here: [`docs/distros/README.md`](docs/distros/README.md).
+
+## Development notes
+
+Run tests:
+
+```sh
+python -m pytest
+```
+
+Run linting if installed:
+
+```sh
+python -m ruff check .
+```
+
+The README intentionally avoids a long repository tree. For navigation, use the documentation map above and the source names themselves:
+
+- frontends live under `ledit_core/frontends/`,
+- distro providers live under `ledit_core/linux_distros/`,
+- image build orchestration lives under `ledit_core/image_builds/`,
+- shell build adapters live under `backend/scripts/`,
+- distro docs live under `docs/distros/`.
 
 ## License
 
