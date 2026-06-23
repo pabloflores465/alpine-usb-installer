@@ -19,17 +19,17 @@ Fix:
 ```sh
 git pull
 rm -rf .qtvenv
-python gui.py
+./ledit gui
 ```
 
-`gui.py` should recreate `.qtvenv`, install `requirements.txt`, and re-run through the Qt virtualenv before importing GUI modules.
+`./ledit gui` recreates `.qtvenv`, installs `requirements.txt`, and re-runs through the Qt virtualenv before importing GUI modules.
 
 ## GUI opens from terminal but not Finder
 
 Finder-launched macOS apps often receive a reduced `PATH`. Start from Terminal while troubleshooting:
 
 ```sh
-python gui.py
+./ledit gui
 ```
 
 Then check whether Docker is visible:
