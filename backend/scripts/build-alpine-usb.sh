@@ -10,6 +10,7 @@ ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
+REPOSITORIES_FILE="$WORK_DIR/repositories"
 MAKE_VM_IMAGE="$WORK_DIR/alpine-make-vm-image.uefi"
 MAKE_VM_IMAGE_SOURCE="$WORK_DIR/alpine-make-vm-image.uefi.source"
 MAKE_VM_IMAGE_COMMIT="dda77715d4dfe8704eb55f310dc1318920d5fd75"
@@ -347,7 +348,7 @@ validate_systemd_bootloader() {
   echo "Validated removable systemd-boot UEFI bootloader: /EFI/BOOT/$efi_name (root UUID $root_uuid)"
 }
 
-cat > "$PROJECT_ROOT/repositories" <<EOF
+cat > "$REPOSITORIES_FILE" <<EOF
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/main
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/community
 EOF
@@ -426,7 +427,7 @@ sudo env \
   --kernel-flavor "$LEDIT_USB_KERNEL_FLAVOR" \
   --rootfs "$LEDIT_USB_ROOTFS" \
   --initfs-features "$LEDIT_USB_INITFS_FEATURES" \
-  --repositories-file "$PROJECT_ROOT/repositories" \
+  --repositories-file "$REPOSITORIES_FILE" \
   --script-chroot \
   "$BUILD_IMAGE_PATH" \
   "$CONFIGURE_SCRIPT_FOR_BUILD"
