@@ -83,7 +83,6 @@ out = root / "dist" / "release-assets"
 base = f"ledit-{version}-terminal-source"
 files = [
     "ledit",
-    "gui.py",
     "ledit_core",
     "README.md",
     "LICENSE",
