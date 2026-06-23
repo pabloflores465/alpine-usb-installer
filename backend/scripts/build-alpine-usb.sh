@@ -8,7 +8,8 @@ IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ALPINE_BRANCH="${ALPINE_BRANCH:-latest-stable}"
 ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 MAKE_VM_IMAGE="$WORK_DIR/alpine-make-vm-image.uefi"
 MAKE_VM_IMAGE_SOURCE="$WORK_DIR/alpine-make-vm-image.uefi.source"
 MAKE_VM_IMAGE_COMMIT="dda77715d4dfe8704eb55f310dc1318920d5fd75"
@@ -16,7 +17,7 @@ MAKE_VM_IMAGE_SHA256="860b2b9efb73869085ba0a9401555ff0eac29072d102ffd39884ddb90a
 MAKE_VM_IMAGE_URL="https://raw.githubusercontent.com/alpinelinux/alpine-make-vm-image/$MAKE_VM_IMAGE_COMMIT/alpine-make-vm-image"
 DOCKER_IMAGE="${LEDIT_USB_DOCKER_IMAGE:-alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601}"
 BUILDER_IMAGE="${LEDIT_USB_BUILDER_IMAGE:-ledit-linux-builder:3.22-amd64}"
-BUILDER_DOCKERFILE="${LEDIT_USB_BUILDER_DOCKERFILE:-$SCRIPT_DIR/scripts/Dockerfile.builder}"
+BUILDER_DOCKERFILE="${LEDIT_USB_BUILDER_DOCKERFILE:-$PROJECT_ROOT/backend/docker/Dockerfile.builder}"
 
 LEDIT_USB_KERNEL_FLAVOR="${LEDIT_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
 LEDIT_USB_BOOTLOADER="${LEDIT_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
@@ -101,7 +102,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${LEDIT_USB_BUILD_IN_DOCKER:-0}" != "1" ];
     LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE
   )
   docker_env=(-e LEDIT_USB_BUILD_IN_DOCKER=1)
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   docker_name_args=()
   if [ -n "${LEDIT_USB_DOCKER_NAME:-}" ]; then
     docker_name_args=(--name "$LEDIT_USB_DOCKER_NAME")
@@ -116,8 +117,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${LEDIT_USB_BUILD_IN_DOCKER:-0}" != "1" ];
       docker_env+=( -e "OUTPUT_PATH=/out/$output_base" )
       continue
     fi
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
-      value="/work/${value#"$SCRIPT_DIR"/}"
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then
+      value="/work/${value#"$PROJECT_ROOT"/}"
     fi
     docker_env+=( -e "$name=$value" )
   done
@@ -133,7 +134,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${LEDIT_USB_BUILD_IN_DOCKER:-0}" != "1" ];
       "${docker_mounts[@]}" \
       -w /work \
       "$BUILDER_IMAGE" \
-      sh -ceu 'chmod +x build-alpine-usb.sh configure-alpine-usb.sh; exec ./build-alpine-usb.sh'
+      sh -ceu 'chmod +x backend/scripts/build-alpine-usb.sh backend/scripts/configure-alpine-usb.sh; exec backend/scripts/build-alpine-usb.sh'
   fi
 
   echo "Starting fresh Docker build container with Alpine build tools ($DOCKER_IMAGE)..."
@@ -146,8 +147,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${LEDIT_USB_BUILD_IN_DOCKER:-0}" != "1" ];
       apk add --no-cache bash curl sudo python3 e2fsprogs dosfstools util-linux sfdisk \
         multipath-tools qemu-img qemu-system-x86_64 parted grub grub-efi mtools \
         xorriso rsync kmod >/dev/null
-      chmod +x build-alpine-usb.sh configure-alpine-usb.sh
-      exec ./build-alpine-usb.sh
+      chmod +x backend/scripts/build-alpine-usb.sh backend/scripts/configure-alpine-usb.sh
+      exec backend/scripts/build-alpine-usb.sh
     '
 fi
 
@@ -269,7 +270,7 @@ install_grub_removable_bootloader() {
   # Many real PCs only list USB media as bootable when the removable-media
   # fallback path exists: /EFI/BOOT/BOOTX64.EFI.
   local image="$1"
-  local fallback="$SCRIPT_DIR/efi-fallback/BOOTX64.EFI"
+  local fallback="$PROJECT_ROOT/efi-fallback/BOOTX64.EFI"
   local standalone_cfg="$WORK_DIR/grub-standalone.cfg"
   local esp_offset root_uuid grub_cfg modules_csv
 
@@ -277,7 +278,7 @@ install_grub_removable_bootloader() {
   modules_csv="$(printf '%s' "$LEDIT_USB_INITFS_FEATURES" | tr ' ' ',')"
 
   grub_cfg="$WORK_DIR/grub-usb.cfg"
-  mkdir -p "$SCRIPT_DIR/efi-fallback"
+  mkdir -p "$PROJECT_ROOT/efi-fallback"
   cat > "$grub_cfg" <<EOF
 set default=0
 set timeout=$LEDIT_USB_BOOT_TIMEOUT
@@ -346,14 +347,14 @@ validate_systemd_bootloader() {
   echo "Validated removable systemd-boot UEFI bootloader: /EFI/BOOT/$efi_name (root UUID $root_uuid)"
 }
 
-cat > "$SCRIPT_DIR/repositories" <<EOF
+cat > "$PROJECT_ROOT/repositories" <<EOF
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/main
 https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/community
 EOF
 
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
-BUILD_IMAGE_PATH="$SCRIPT_DIR/$IMAGE_NAME"
+BUILD_IMAGE_PATH="$PROJECT_ROOT/$IMAGE_NAME"
 if [ -n "$OUTPUT_PATH" ]; then
   BUILD_IMAGE_PATH="$OUTPUT_PATH"
 fi
@@ -425,7 +426,7 @@ sudo env \
   --kernel-flavor "$LEDIT_USB_KERNEL_FLAVOR" \
   --rootfs "$LEDIT_USB_ROOTFS" \
   --initfs-features "$LEDIT_USB_INITFS_FEATURES" \
-  --repositories-file "$SCRIPT_DIR/repositories" \
+  --repositories-file "$PROJECT_ROOT/repositories" \
   --script-chroot \
   "$BUILD_IMAGE_PATH" \
   "$CONFIGURE_SCRIPT_FOR_BUILD"

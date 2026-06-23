@@ -34,11 +34,12 @@ release_path() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-ledit-slackware.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ARCH_VALUE="${ARCH:-x86_64}"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 PKG_CACHE_DIR="${SLACKWARE_PKG_CACHE_DIR:-$WORK_DIR/slackware-pkgs}"
 BUILD_DIR="${SLACKWARE_BUILD_DIR:-/var/tmp/slackware-usb-build-$$}"
 BUILDER_BASE_IMAGE="alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601"
@@ -74,7 +75,7 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${SLACKWARE_USB_FORCE_DOCKER:-0
     SLACKWARE_RELEASE SLACKWARE_MIRROR_BASE_URL SLACKWARE_PKG_CACHE_DIR SLACKWARE_BUILD_DIR
   )
   docker_env=(-e SLACKWARE_USB_BUILD_IN_DOCKER=1)
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   docker_name_args=()
   [ -n "${SLACKWARE_USB_DOCKER_NAME:-}" ] && docker_name_args=(--name "$SLACKWARE_USB_DOCKER_NAME")
   for name in "${pass_env[@]}"; do
@@ -87,8 +88,8 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${SLACKWARE_USB_FORCE_DOCKER:-0
       docker_env+=(-e "OUTPUT_PATH=/out/$output_base")
       continue
     fi
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then value="/work/${value#"$SCRIPT_DIR"/}"; fi
-    if [ "$name" = "SLACKWARE_PKG_CACHE_DIR" ] && [ -n "$value" ] && [[ "$value" == "$SCRIPT_DIR/"* ]]; then value="/work/${value#"$SCRIPT_DIR"/}"; fi
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then value="/work/${value#"$PROJECT_ROOT"/}"; fi
+    if [ "$name" = "SLACKWARE_PKG_CACHE_DIR" ] && [ -n "$value" ] && [[ "$value" == "$PROJECT_ROOT/"* ]]; then value="/work/${value#"$PROJECT_ROOT"/}"; fi
     docker_env+=(-e "$name=$value")
   done
   log "Starting Slackware build container"
@@ -97,8 +98,8 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${SLACKWARE_USB_FORCE_DOCKER:-0
     sh -ceu '
       apk add --no-cache bash curl tar xz zstd gzip bzip2 gawk coreutils findutils grep sed file \
         parted dosfstools e2fsprogs util-linux grub grub-efi mtools shadow cpio python3 >/dev/null
-      chmod +x build-slackware-usb.sh configure-slackware-usb.sh
-      exec ./build-slackware-usb.sh
+      chmod +x backend/scripts/build-slackware-usb.sh backend/scripts/configure-slackware-usb.sh
+      exec backend/scripts/build-slackware-usb.sh
     '
 fi
 
@@ -110,7 +111,7 @@ if [ "${SLACKWARE_USB_BUILD_IN_DOCKER:-0}" = "1" ]; then
   for i in $(seq 0 15); do [ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i" 2>/dev/null || true; done
 fi
 
-OUTPUT=${OUTPUT_PATH:-$SCRIPT_DIR/$IMAGE_NAME}
+OUTPUT=${OUTPUT_PATH:-$PROJECT_ROOT/$IMAGE_NAME}
 RELEASE=${SLACKWARE_RELEASE:-stable}
 TREE=$(release_path "$RELEASE")
 MIRROR=${SLACKWARE_MIRROR_BASE_URL:-https://mirrors.slackware.com/slackware/$TREE}

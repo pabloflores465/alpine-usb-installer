@@ -72,6 +72,7 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
   docker info >/dev/null 2>&1 || die "Docker is not running. Start Docker Desktop and try again."
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
   docker_image="${FEDORA_USB_DOCKER_IMAGE:-fedora:latest}"
   pass_env=(
     IMAGE_NAME OUTPUT_PATH IMAGE_SIZE ARCH LINUX_USB_DISTRO
@@ -86,7 +87,7 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
     FEDORA_USB_DEFAULT_TARGET FEDORA_USB_WARNINGS FEDORA_USB_WORKDIR
   )
   docker_env=(-e FEDORA_USB_BUILD_IN_DOCKER=1)
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   docker_name_args=()
   docker_name="${FEDORA_USB_DOCKER_NAME:-${LEDIT_USB_DOCKER_NAME:-}}"
   if [[ -n "$docker_name" ]]; then
@@ -103,8 +104,8 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
       docker_env+=(-e "OUTPUT_PATH=/out/$output_base")
       continue
     fi
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
-      value="/work/${value#"$SCRIPT_DIR"/}"
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then
+      value="/work/${value#"$PROJECT_ROOT"/}"
     fi
     docker_env+=(-e "$name=$value")
   done
@@ -118,8 +119,8 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
     bash -ceu '
       dnf -y install dnf-plugins-core parted dosfstools e2fsprogs util-linux util-linux-core \
         rsync grub2-tools grub2-tools-extra grub2-efi-x64 shim-x64 passwd policycoreutils kpartx >/dev/null
-      chmod +x build-fedora-usb.sh
-      exec ./build-fedora-usb.sh
+      chmod +x backend/scripts/build-fedora-usb.sh
+      exec backend/scripts/build-fedora-usb.sh
     '
 fi
 

@@ -5,7 +5,7 @@ LEDIT includes a real Gentoo provider and installed-image builder while preservi
 ## Implemented
 
 - `--distro gentoo` in the unified CLI build/search commands.
-- Gentoo dry-run validation through `configure-gentoo-usb.sh`:
+- Gentoo dry-run validation through `backend/scripts/configure-gentoo-usb.sh`:
   - stage3 channel: `stable` or `testing` (default `stable`)
   - desktop/session choices: XFCE, GNOME, Plasma, MATE, LXQt, none, and supported WMs
   - display manager, bootloader, kernel, firmware, localization, users/passwords, network, Wi-Fi, Bluetooth, audio, browser, extra packages, and auto-resize package planning
@@ -24,7 +24,7 @@ LEDIT includes a real Gentoo provider and installed-image builder while preservi
 
 ## Docker/Linux build model
 
-On macOS, `build-gentoo-usb.sh` automatically re-enters itself in a privileged `linux/amd64` Docker container, matching the shared Linux builder pattern. The first run builds a cached `gentoo builder image` image from `scripts/Dockerfile.gentoo-builder`; later runs reuse it.
+On macOS, `backend/scripts/build-gentoo-usb.sh` automatically re-enters itself in a privileged `linux/amd64` Docker container, matching the shared Linux builder pattern. The first run builds a cached `gentoo builder image` image from `backend/docker/Dockerfile.gentoo-builder`; later runs reuse it.
 
 Useful knobs:
 

@@ -8,17 +8,19 @@ Build and flash configurable, preinstalled **Linux USB/external-drive images** f
 
 | Distro | CLI id | Branch / release choices shown by UI | Package search backend | Build backend |
 | --- | --- | --- | --- | --- |
-| Alpine Linux | `alpine` | `latest-stable`, `edge`, `v3.22`, `v3.21` | APK `main`, `community` | `build-alpine-usb.sh` |
-| Arch Linux | `arch` | `rolling`, `stable` alias | Arch package API (`core`, `extra`, `multilib`) | `build-arch-usb.sh` |
-| Debian | `debian` | `stable`, `testing`, `sid`, `trixie`, `bookworm`, `forky` | APT / `apt-cache` | `build-debian-usb.sh` |
-| Fedora | `fedora` | `stable`, `latest`, `rawhide`, numeric releases | DNF repoquery | `build-fedora-usb.sh` |
-| Gentoo | `gentoo` | `stable`, `testing` | Portage catalogue / local eix/pkgcore | `build-gentoo-usb.sh` |
-| NixOS | `nixos` | `nixos-24.11`, `nixos-25.05`, `nixos-unstable` | `nix search` / nixpkgs | Python NixOS image backend |
-| openSUSE | `opensuse` | `tumbleweed`, `leap-16.0`, `leap-15.6` | Zypper repo metadata | `build-opensuse-usb.sh` |
-| RHEL family | `rhel` | `9`, `10` | DNF repoquery | `build-rhel-usb.sh` |
-| Slackware | `slackware` | `stable`, `current`, `15.0` | Slackware `PACKAGES.TXT` | `build-slackware-usb.sh` |
-| Ubuntu | `ubuntu` | `24.04`, `noble`, `22.04`, `jammy` | APT / `apt-cache` | `build-ubuntu-usb.sh` |
-| Void Linux (glibc) | `void` | `current`, `glibc` | XBPS repositories | `build-void-usb.sh` |
+| Alpine Linux | `alpine` | `latest-stable`, `edge`, `v3.22`, `v3.21` | APK `main`, `community` | `backend/scripts/build-alpine-usb.sh` |
+| Arch Linux | `arch` | `rolling`, `stable` alias | Arch package API (`core`, `extra`, `multilib`) | `backend/scripts/build-arch-usb.sh` |
+| Debian | `debian` | `stable`, `testing`, `sid`, `trixie`, `bookworm`, `forky` | APT / `apt-cache` | `backend/scripts/build-debian-usb.sh` |
+| Fedora | `fedora` | `stable`, `latest`, `rawhide`, numeric releases | DNF repoquery | `backend/scripts/build-fedora-usb.sh` |
+| Gentoo | `gentoo` | `stable`, `testing` | Portage catalogue / local eix/pkgcore | `backend/scripts/build-gentoo-usb.sh` |
+| NixOS | `nixos` | `nixos-24.11`, `nixos-25.05`, `nixos-unstable` | `nix search` / nixpkgs | Python NixOS image backend (`ledit_core/nixos`) |
+| openSUSE | `opensuse` | `tumbleweed`, `leap-16.0`, `leap-15.6` | Zypper repo metadata | `backend/scripts/build-opensuse-usb.sh` |
+| RHEL family | `rhel` | `9`, `10` | DNF repoquery | `backend/scripts/build-rhel-usb.sh` |
+| Slackware | `slackware` | `stable`, `current`, `15.0` | Slackware `PACKAGES.TXT` | `backend/scripts/build-slackware-usb.sh` |
+| Ubuntu | `ubuntu` | `24.04`, `noble`, `22.04`, `jammy` | APT / `apt-cache` | `backend/scripts/build-ubuntu-usb.sh` |
+| Void Linux (glibc) | `void` | `current`, `glibc` | XBPS repositories | `backend/scripts/build-void-usb.sh` |
+
+Detailed, Distrobox-style pages per distro are in [`docs/distros/`](docs/distros/README.md): branches, host tools, environment variables, CLI usage, and notes.
 
 When you change distro in the GUI or TUI, the branch/release combo is replaced with only that distro's valid choices. Package suggestions also switch to that distro's repositories. If packages were already selected, LEDIT re-searches those names in the new distro and reports any missing package names.
 
@@ -186,9 +188,37 @@ Defaults are distro-like and graphical where possible:
 
 Additional notes:
 
+- Per-distro backends (Distrobox-style pages): [`docs/distros/`](docs/distros/README.md)
 - [`docs/ubuntu-support.md`](docs/ubuntu-support.md)
 - [`docs/gentoo.md`](docs/gentoo.md)
 - [`docs/opensuse.md`](docs/opensuse.md)
+
+## Repository layout
+
+```
+ledit                      # unified entrypoint (TUI default + CLI)
+cli.py / gui.py / tui.py   # thin compatibility wrappers
+apk_index.py              # thin wrapper over ledit_core.apk_packages
+ledit_core/               # Python core package
+├── frontends/            # CLI / GUI / TUI adapters (one folder each)
+│   ├── cli/app.py
+│   ├── gui/{app.py,workers.py}
+│   └── tui/{app.py,state.py}
+├── image_builds/         # build env, runtime workspace, secrets, dry-run, runners
+├── package_search/       # distro-native package search service
+├── linux_distros/        # provider registry + per-distro modules (fedora/gentoo/opensuse)
+├── nixos/                # NixOS Python backend
+├── {apk,apt,arch,deb,fedora,rhel,slackware,void}_packages/  # package index/search/cache per family
+├── build_profiles/       # presets, config files, Arch profile
+├── images/               # image validation
+└── usb_devices/          # USB detection and safety
+backend/
+├── scripts/              # build-<distro>-usb.sh and configure-<distro>-usb.sh (all distros)
+└── docker/               # Dockerfile.builder, Dockerfile.gentoo-builder
+scripts/                  # project checks, builds, release assets, matrix
+efi-fallback/             # standalone GRUB EFI + configs
+docs/                     # README, per-distro pages, support notes
+```
 
 ## Validation and tests
 

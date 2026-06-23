@@ -35,6 +35,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"ledit_core/interfaces/gui.py" = ["E402", "E701", "E702", "SIM105"]
-"ledit_core/interfaces/tui.py" = ["E701", "E702"]
+"ledit_core/frontends/gui/app.py" = ["E402", "E701", "E702", "SIM105"]
+"ledit_core/frontends/tui/app.py" = ["E701", "E702"]
 "tests/*" = ["S101"]

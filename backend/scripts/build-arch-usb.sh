@@ -8,6 +8,7 @@ IMAGE_NAME=${IMAGE_NAME:-ledit-arch.img}
 OUTPUT_PATH=${OUTPUT_PATH:-$IMAGE_NAME}
 IMAGE_SIZE=${IMAGE_SIZE:-16G}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 WORK_DIR=${WORK_DIR:-.work/arch-build}
 ROOT_DIR=$WORK_DIR/root
 MNT_DIR=$WORK_DIR/mnt
@@ -19,8 +20,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing required tool
 if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || { echo "ERROR: Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
-  mkdir -p "$SCRIPT_DIR/.work"
-  docker_env_file="$SCRIPT_DIR/.work/arch-docker-env-$$"
+  mkdir -p "$PROJECT_ROOT/.work"
+  docker_env_file="$PROJECT_ROOT/.work/arch-docker-env-$$"
   {
     printf '%s\n' \
       "ARCH_USB_BUILD_IN_DOCKER=1" \
@@ -35,12 +36,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     for name in LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE LEDIT_USB_CONSOLE_KEYMAP LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE ARCH_USB_BRANCH; do
       eval "value=\${$name:-}"
       case "$name:$value" in
-        *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;;
+        *_FILE:$PROJECT_ROOT/*) value="/work/${value#"$PROJECT_ROOT"/}" ;;
       esac
       printf '%s=%s\n' "$name" "$value"
     done
   } > "$docker_env_file"
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   if [ -n "$OUTPUT_PATH" ]; then
     docker_mounts+=(-v "$output_dir:/out")
   fi
@@ -57,8 +58,8 @@ Server = https://mirrors.kernel.org/archlinux/\$repo/os/\$arch
 Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch
 EOF_MIRRORS
     pacman -Sy --noconfirm --needed python arch-install-scripts dosfstools e2fsprogs util-linux grub efibootmgr sudo systemd multipath-tools >/dev/null
-    chmod +x build-arch-usb.sh configure-arch-usb.sh
-    exec ./build-arch-usb.sh
+    chmod +x backend/scripts/build-arch-usb.sh backend/scripts/configure-arch-usb.sh
+    exec backend/scripts/build-arch-usb.sh
   '
 fi
 
@@ -70,7 +71,7 @@ if [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" = "1" ]; then
 fi
 
 mkdir -p "$WORK_DIR" "$ROOT_DIR" "$MNT_DIR"
-ARCH_USB_PACKAGES_FILE=$PACKAGES_FILE ARCH_USB_CONFIG_FILE=$CONFIG_FILE ROOT_DIR=$ROOT_DIR ./configure-arch-usb.sh
+ARCH_USB_PACKAGES_FILE=$PACKAGES_FILE ARCH_USB_CONFIG_FILE=$CONFIG_FILE ROOT_DIR=$ROOT_DIR "$SCRIPT_DIR/configure-arch-usb.sh"
 
 rm -f "$OUTPUT_PATH"
 truncate -s "$IMAGE_SIZE" "$OUTPUT_PATH"

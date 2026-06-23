@@ -15,12 +15,13 @@ ROOTFS="$WORK_DIR/rootfs"
 MNT="$WORK_DIR/mnt"
 IMAGE="$WORK_DIR/image.raw"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
 if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || die "Docker is not running. Start Docker Desktop and try again."
-  mkdir -p "$SCRIPT_DIR/.work"
-  docker_env_file="$SCRIPT_DIR/.work/rhel-docker-env-$$"
+  mkdir -p "$PROJECT_ROOT/.work"
+  docker_env_file="$PROJECT_ROOT/.work/rhel-docker-env-$$"
   {
     printf '%s\n' \
       "RHEL_USB_BUILD_IN_DOCKER=1" \
@@ -36,11 +37,11 @@ if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; th
     fi
     for name in RHEL_USB_DISTRO RHEL_USB_PACKAGE_LIST RHEL_USB_PROFILE RHEL_USB_USER RHEL_USB_PASSWORD_FILE RHEL_USB_ROOT_PASSWORD_FILE RHEL_USB_HOSTNAME RHEL_USB_TIMEZONE RHEL_USB_LOCALE RHEL_USB_CONSOLE_KEYMAP RHEL_USB_XKB_LAYOUT RHEL_USB_XKB_VARIANT RHEL_USB_XKB_MODEL RHEL_USB_DESKTOP RHEL_USB_TILING_WMS RHEL_USB_DEFAULT_SESSION RHEL_USB_DISPLAY_MANAGER RHEL_USB_NETWORK RHEL_USB_WIFI RHEL_USB_BLUETOOTH RHEL_USB_AUDIO RHEL_USB_BROWSER RHEL_USB_FIRMWARE RHEL_USB_BOOTLOADER RHEL_USB_KERNEL_FLAVOR RHEL_USB_BOOT_TIMEOUT RHEL_USB_AUTO_RESIZE RHEL_USB_EXTRA_PACKAGES; do
       eval "value=\${$name:-}"
-      case "$name:$value" in *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;; esac
+      case "$name:$value" in *_FILE:$PROJECT_ROOT/*) value="/work/${value#"$PROJECT_ROOT"/}" ;; esac
       printf '%s=%s\n' "$name" "$value"
     done
   } > "$docker_env_file"
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   if [ -n "$OUTPUT_PATH" ]; then
     docker_mounts+=(-v "$output_dir:/out")
   fi
@@ -51,8 +52,8 @@ if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; th
   fi
   exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work rockylinux:9 bash -ceu '
     dnf -y install dnf-plugins-core parted dosfstools xfsprogs util-linux kpartx grub2-tools grub2-efi-x64 grub2-efi-x64-modules shim-x64 efibootmgr passwd systemd >/dev/null
-    chmod +x build-rhel-usb.sh configure-rhel-usb.sh
-    exec ./build-rhel-usb.sh
+    chmod +x backend/scripts/build-rhel-usb.sh backend/scripts/configure-rhel-usb.sh
+    exec backend/scripts/build-rhel-usb.sh
   '
 fi
 
@@ -97,7 +98,7 @@ mkdir -p "$MNT/boot/efi"
 mount "$EFI_PART" "$MNT/boot/efi"
 
 dnf -y --releasever="$RELEASE" --installroot="$MNT" --setopt=install_weak_deps=False install $PACKAGE_LIST
-./configure-rhel-usb.sh "$MNT"
+"$SCRIPT_DIR/configure-rhel-usb.sh" "$MNT"
 chroot "$MNT" /bin/sh -c "useradd -m -G wheel \"${RHEL_USB_USER:-linux}\" || true"
 if [ -n "${RHEL_USB_PASSWORD_FILE:-}" ]; then PASS=$(cat "$RHEL_USB_PASSWORD_FILE"); else PASS="${RHEL_USB_PASSWORD:-linux}"; fi
 if [ -n "${RHEL_USB_ROOT_PASSWORD_FILE:-}" ]; then ROOTPASS=$(cat "$RHEL_USB_ROOT_PASSWORD_FILE"); else ROOTPASS="${RHEL_USB_ROOT_PASSWORD:-$PASS}"; fi

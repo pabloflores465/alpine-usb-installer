@@ -52,18 +52,19 @@ read_secret() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-ledit-gentoo.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ARCH_VALUE="${ARCH:-x86_64}"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 STAGE3_CACHE_DIR="${GENTOO_STAGE3_CACHE_DIR:-$WORK_DIR/gentoo-stage3}"
 PORTAGE_REPO_CACHE_DIR="${GENTOO_PORTAGE_REPO_CACHE_DIR:-$WORK_DIR/gentoo-portage-repo/gentoo}"
 BUILD_DIR="${GENTOO_BUILD_DIR:-/var/tmp/gentoo-usb-build-$$}"
 BUILDER_BASE_IMAGE="alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601"
 DOCKER_IMAGE="${GENTOO_USB_DOCKER_IMAGE:-$BUILDER_BASE_IMAGE}"
 BUILDER_IMAGE="${GENTOO_USB_BUILDER_IMAGE:-ledit-gentoo-builder:3.22-amd64}"
-BUILDER_DOCKERFILE="${GENTOO_USB_BUILDER_DOCKERFILE:-$SCRIPT_DIR/scripts/Dockerfile.gentoo-builder}"
+BUILDER_DOCKERFILE="${GENTOO_USB_BUILDER_DOCKERFILE:-$PROJECT_ROOT/backend/docker/Dockerfile.gentoo-builder}"
 BOOTLOADER="$(lower "${LEDIT_USB_BOOTLOADER:-${BOOTLOADER:-grub}}")"
 [ "$BOOTLOADER" = "systemdboot" ] && BOOTLOADER="systemd-boot"
 
@@ -111,7 +112,7 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${GENTOO_USB_FORCE_DOCKER:-0}";
     GENTOO_BUILD_JOBS GENTOO_ACCEPT_LICENSE GENTOO_USE_FLAGS GENTOO_FEATURES GENTOO_CLEAN_BUILD_CACHE
   )
   docker_env=(-e GENTOO_USB_BUILD_IN_DOCKER=1)
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   docker_name_args=()
   if [ -n "${GENTOO_USB_DOCKER_NAME:-}" ]; then
     docker_name_args=(--name "$GENTOO_USB_DOCKER_NAME")
@@ -126,11 +127,11 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${GENTOO_USB_FORCE_DOCKER:-0}";
       docker_env+=(-e "OUTPUT_PATH=/out/$output_base")
       continue
     fi
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
-      value="/work/${value#"$SCRIPT_DIR"/}"
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then
+      value="/work/${value#"$PROJECT_ROOT"/}"
     fi
-    if { [ "$name" = "GENTOO_STAGE3_CACHE_DIR" ] || [ "$name" = "GENTOO_PORTAGE_REPO_CACHE_DIR" ]; } && [ -n "$value" ] && [[ "$value" == "$SCRIPT_DIR/"* ]]; then
-      value="/work/${value#"$SCRIPT_DIR"/}"
+    if { [ "$name" = "GENTOO_STAGE3_CACHE_DIR" ] || [ "$name" = "GENTOO_PORTAGE_REPO_CACHE_DIR" ]; } && [ -n "$value" ] && [[ "$value" == "$PROJECT_ROOT/"* ]]; then
+      value="/work/${value#"$PROJECT_ROOT"/}"
     fi
     docker_env+=(-e "$name=$value")
   done
@@ -146,7 +147,7 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${GENTOO_USB_FORCE_DOCKER:-0}";
       "${docker_mounts[@]}" \
       -w /work \
       "$BUILDER_IMAGE" \
-      bash -ceu 'chmod +x build-gentoo-usb.sh configure-gentoo-usb.sh; exec ./build-gentoo-usb.sh'
+      bash -ceu 'chmod +x backend/scripts/build-gentoo-usb.sh backend/scripts/configure-gentoo-usb.sh; exec backend/scripts/build-gentoo-usb.sh'
   fi
 
   log "Starting fresh Docker build container with Gentoo USB build tools ($DOCKER_IMAGE)"
@@ -159,8 +160,8 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${GENTOO_USB_FORCE_DOCKER:-0}";
       apk add --no-cache bash curl ca-certificates coreutils util-linux parted dosfstools \
         e2fsprogs mtools grub grub-efi xz tar zstd rsync findutils grep gawk sed shadow \
         gzip bzip2 kmod >/dev/null
-      chmod +x build-gentoo-usb.sh configure-gentoo-usb.sh
-      exec ./build-gentoo-usb.sh
+      chmod +x backend/scripts/build-gentoo-usb.sh backend/scripts/configure-gentoo-usb.sh
+      exec backend/scripts/build-gentoo-usb.sh
     '
 fi
 
@@ -184,7 +185,7 @@ if [ "$(id -u)" != "0" ]; then
   fail "Gentoo installed image build needs root for chroot mounts. On macOS this happens through Docker; on Linux run as root or set GENTOO_USB_FORCE_DOCKER=1."
 fi
 
-OUTPUT=${OUTPUT_PATH:-$SCRIPT_DIR/$IMAGE_NAME}
+OUTPUT=${OUTPUT_PATH:-$PROJECT_ROOT/$IMAGE_NAME}
 mkdir -p "$WORK_DIR" "$STAGE3_CACHE_DIR" "$(dirname "$PORTAGE_REPO_CACHE_DIR")" "$(dirname "$OUTPUT")"
 chmod 700 "$WORK_DIR" 2>/dev/null || true
 

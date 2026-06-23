@@ -8,9 +8,10 @@ IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 DEBIAN_RELEASE="${DEBIAN_RELEASE:-stable}"
 ARCH="${ARCH:-amd64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 ROOTFS="$WORK_DIR/debian-rootfs"
-IMAGE_PATH="$SCRIPT_DIR/$IMAGE_NAME"
+IMAGE_PATH="$PROJECT_ROOT/$IMAGE_NAME"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
 DOCKER_IMAGE="${DEBIAN_USB_DOCKER_IMAGE:-debian:stable-slim}"
 
@@ -94,14 +95,14 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${DEBIAN_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   docker info >/dev/null 2>&1 || { echo "Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
   pass_env=(IMAGE_NAME OUTPUT_PATH IMAGE_SIZE DEBIAN_RELEASE ARCH DEBIAN_MIRROR DEBIAN_USB_USER DEBIAN_USB_PASSWORD_FILE DEBIAN_USB_ROOT_PASSWORD_FILE DEBIAN_USB_HOSTNAME DEBIAN_USB_TIMEZONE DEBIAN_USB_LOCALE DEBIAN_USB_LANGUAGE DEBIAN_USB_CONSOLE_KEYMAP DEBIAN_USB_XKB_LAYOUT DEBIAN_USB_XKB_VARIANT DEBIAN_USB_XKB_MODEL DEBIAN_USB_DESKTOP DEBIAN_USB_TILING_WMS DEBIAN_USB_DEFAULT_SESSION DEBIAN_USB_DISPLAY_MANAGER DEBIAN_USB_NETWORK DEBIAN_USB_WIFI DEBIAN_USB_BLUETOOTH DEBIAN_USB_AUDIO DEBIAN_USB_BROWSER DEBIAN_USB_FIRMWARE DEBIAN_USB_LEGACY_X11_DRIVERS DEBIAN_USB_BOOTLOADER DEBIAN_USB_KERNEL_FLAVOR DEBIAN_USB_BOOT_TIMEOUT DEBIAN_USB_AUTO_RESIZE DEBIAN_USB_EXTRA_PACKAGES DEBIAN_USB_PROFILE LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE)
   docker_env=(-e DEBIAN_USB_BUILD_IN_DOCKER=1)
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   for name in "${pass_env[@]}"; do
     value="${!name-}"
     if [ "$name" = "OUTPUT_PATH" ] && [ -n "$value" ]; then
       mkdir -p "$(dirname "$value")"; output_dir="$(cd "$(dirname "$value")" && pwd -P)"; output_base="$(basename "$value")"
       docker_mounts+=( -v "$output_dir:/out" ); docker_env+=( -e "OUTPUT_PATH=/out/$output_base" ); continue
     fi
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then value="/work/${value#"$SCRIPT_DIR"/}"; fi
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then value="/work/${value#"$PROJECT_ROOT"/}"; fi
     docker_env+=( -e "$name=$value" )
   done
   docker_name_args=()
@@ -113,8 +114,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${DEBIAN_USB_BUILD_IN_DOCKER:-0}" != "1" ]
     export DEBIAN_FRONTEND=noninteractive
     apt-get update >/dev/null
     apt-get install -y --no-install-recommends bash ca-certificates debootstrap dosfstools e2fsprogs fdisk grub2-common grub-efi-amd64-bin kpartx mtools parted udev util-linux xz-utils >/dev/null
-    chmod +x build-debian-usb.sh configure-debian-usb.sh
-    exec ./build-debian-usb.sh
+    chmod +x backend/scripts/build-debian-usb.sh backend/scripts/configure-debian-usb.sh
+    exec backend/scripts/build-debian-usb.sh
   '
 fi
 
@@ -143,7 +144,7 @@ UUID=$EFI_UUID /boot/efi vfat umask=0077 0 1
 EOF
 run_sudo cp "$WORK_DIR/fstab" "$ROOTFS/etc/fstab"
 run_sudo cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf" 2>/dev/null || true
-run_sudo env DEBIAN_USB_ROOT_MOUNT="$ROOTFS" ./configure-debian-usb.sh
+run_sudo env DEBIAN_USB_ROOT_MOUNT="$ROOTFS" "$SCRIPT_DIR/configure-debian-usb.sh"
 run_sudo chroot "$ROOTFS" grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian-usb --removable --recheck
 run_sudo chroot "$ROOTFS" update-grub
 cleanup_mounts

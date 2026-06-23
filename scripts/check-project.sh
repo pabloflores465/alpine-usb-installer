@@ -8,8 +8,8 @@ ruff check .
 ruff format --check .
 pytest
 bash -n \
-  build-*-usb.sh \
-  configure-*-usb.sh \
+  backend/scripts/build-*-usb.sh \
+  backend/scripts/configure-*-usb.sh \
   scripts/build-macos-dmg.sh \
   scripts/package-release-assets.sh \
   scripts/check-apk-solver.sh \

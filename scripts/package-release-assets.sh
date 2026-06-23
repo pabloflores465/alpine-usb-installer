@@ -40,30 +40,30 @@ scripts/build-macos-dmg.sh
   --hidden-import "tui" \
   --hidden-import "apk_index" \
   --collect-submodules "ledit_core" \
-  --add-data "build-alpine-usb.sh:." \
-  --add-data "configure-alpine-usb.sh:." \
-  --add-data "build-arch-usb.sh:." \
-  --add-data "configure-arch-usb.sh:." \
-  --add-data "build-debian-usb.sh:." \
-  --add-data "configure-debian-usb.sh:." \
-  --add-data "build-fedora-usb.sh:." \
-  --add-data "build-gentoo-usb.sh:." \
-  --add-data "configure-gentoo-usb.sh:." \
-  --add-data "build-opensuse-usb.sh:." \
-  --add-data "configure-opensuse-usb.sh:." \
-  --add-data "build-rhel-usb.sh:." \
-  --add-data "configure-rhel-usb.sh:." \
-  --add-data "build-slackware-usb.sh:." \
-  --add-data "configure-slackware-usb.sh:." \
-  --add-data "build-ubuntu-usb.sh:." \
-  --add-data "configure-ubuntu-usb.sh:." \
-  --add-data "build-void-usb.sh:." \
-  --add-data "configure-void-usb.sh:." \
+  --add-data "backend/scripts/build-alpine-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-alpine-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-arch-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-arch-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-debian-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-debian-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-fedora-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-gentoo-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-gentoo-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-opensuse-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-opensuse-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-rhel-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-rhel-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-slackware-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-slackware-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-ubuntu-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-ubuntu-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-void-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-void-usb.sh:backend/scripts" \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
-  --add-data "scripts/Dockerfile.builder:scripts" \
-  --add-data "scripts/Dockerfile.gentoo-builder:scripts" \
+  --add-data "backend/docker/Dockerfile.builder:backend/docker" \
+  --add-data "backend/docker/Dockerfile.gentoo-builder:backend/docker" \
   ledit
 
 rm -rf "$assets_dir" "$terminal_pkg_dir"
@@ -98,14 +98,14 @@ files = [
     "docs",
     "repositories",
     ".dockerignore",
-    "scripts/Dockerfile.builder",
-    "scripts/Dockerfile.gentoo-builder",
+    "backend/docker/Dockerfile.builder",
+    "backend/docker/Dockerfile.gentoo-builder",
     "scripts/check-project.sh",
     "scripts/check-image-compile.sh",
     "scripts/validate-config-matrix.sh",
 ]
-files.extend(str(path) for path in sorted(root.glob("build-*-usb.sh")))
-files.extend(str(path) for path in sorted(root.glob("configure-*-usb.sh")))
+files.extend(str(path) for path in sorted(root.glob("backend/scripts/build-*-usb.sh")))
+files.extend(str(path) for path in sorted(root.glob("backend/scripts/configure-*-usb.sh")))
 
 
 def wanted(path: Path) -> bool:

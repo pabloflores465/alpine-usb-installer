@@ -95,8 +95,8 @@ def test_build_scripts_do_not_leak_spaced_env_into_docker_image() -> None:
     import re
 
     repo = Path(__file__).resolve().parents[1]
-    scripts = sorted(repo.glob("build-*-usb.sh"))
-    assert scripts, "expected at least one build-*-usb.sh script"
+    scripts = sorted((repo / "backend" / "scripts").glob("build-*-usb.sh"))
+    assert scripts, "expected at least one backend/scripts/build-*-usb.sh script"
     failures: list[str] = []
     for script in scripts:
         text = script.read_text()
@@ -118,7 +118,7 @@ def test_build_arch_usb_passes_extra_packages_via_env_file() -> None:
     """build-arch-usb.sh must pass LEDIT_USB_EXTRA_PACKAGES through --env-file
     (not unquoted ``-e NAME=value``) so multi-word values survive intact."""
     repo = Path(__file__).resolve().parents[1]
-    text = (repo / "build-arch-usb.sh").read_text()
+    text = (repo / "backend" / "scripts" / "build-arch-usb.sh").read_text()
     assert "--env-file" in text, "build-arch-usb.sh should use --env-file for env passthrough"
     assert 'docker_env="-e' not in text, "build-arch-usb.sh must not rebuild a flat -e string"
 
@@ -126,16 +126,19 @@ def test_build_arch_usb_passes_extra_packages_via_env_file() -> None:
 def test_prepare_terminal_runtime_copies_nested_builder_dockerfile(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh", "README.md", "LICENSE"]:
+    for name in ["README.md", "LICENSE"]:
         (source / name).write_text(name)
-    (source / "scripts").mkdir()
-    (source / "scripts" / "Dockerfile.builder").write_text("FROM alpine")
+    (source / "backend" / "scripts").mkdir(parents=True)
+    for name in ["build-alpine-usb.sh", "configure-alpine-usb.sh"]:
+        (source / "backend" / "scripts" / name).write_text(name)
+    (source / "backend" / "docker").mkdir()
+    (source / "backend" / "docker" / "Dockerfile.builder").write_text("FROM alpine")
     (source / "efi-fallback").mkdir()
     (source / "efi-fallback" / "BOOTX64.EFI").write_text("efi")
     monkeypatch.setattr(cli, "secure_runtime_dir", lambda name: tmp_path / "runtime")
 
     runtime = cli.prepare_terminal_runtime(source)
 
-    assert (runtime / "scripts" / "Dockerfile.builder").read_text() == "FROM alpine"
+    assert (runtime / "backend" / "docker" / "Dockerfile.builder").read_text() == "FROM alpine"
     assert (runtime / "efi-fallback" / "BOOTX64.EFI").read_text() == "efi"
-    assert (runtime / "build-alpine-usb.sh").exists()
+    assert (runtime / "backend" / "scripts" / "build-alpine-usb.sh").exists()

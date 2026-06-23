@@ -8,7 +8,8 @@ IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 UBUNTU_RELEASE="${UBUNTU_RELEASE:-24.04}"
 ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 
 case "$UBUNTU_RELEASE" in 24.04|noble) CODENAME="noble" ;; 22.04|jammy) CODENAME="jammy" ;; *) echo "Invalid Ubuntu release: $UBUNTU_RELEASE" >&2; exit 1 ;; esac
@@ -103,12 +104,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${UBUNTU_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   pass_env=(UBUNTU_USB_USER UBUNTU_USB_PASSWORD_FILE UBUNTU_USB_ROOT_PASSWORD_FILE UBUNTU_USB_HOSTNAME UBUNTU_USB_TIMEZONE UBUNTU_USB_LOCALE UBUNTU_USB_LANGUAGE UBUNTU_USB_CONSOLE_KEYMAP UBUNTU_USB_XKB_LAYOUT UBUNTU_USB_XKB_VARIANT UBUNTU_USB_XKB_MODEL UBUNTU_USB_DESKTOP UBUNTU_USB_TILING_WMS UBUNTU_USB_DEFAULT_SESSION UBUNTU_USB_DISPLAY_MANAGER UBUNTU_USB_NETWORK UBUNTU_USB_WIFI UBUNTU_USB_BLUETOOTH UBUNTU_USB_AUDIO UBUNTU_USB_BROWSER UBUNTU_USB_FIRMWARE UBUNTU_USB_LEGACY_X11_DRIVERS UBUNTU_USB_BOOTLOADER UBUNTU_USB_KERNEL_FLAVOR UBUNTU_USB_BOOT_TIMEOUT UBUNTU_USB_SYSTEMD_BOOT_CONSOLE_MODE UBUNTU_USB_AUTO_RESIZE UBUNTU_USB_EXTRA_PACKAGES UBUNTU_USB_PROFILE)
   for name in "${pass_env[@]}"; do
     value="${!name-}"
-    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then
-      value="/work/${value#"$SCRIPT_DIR"/}"
+    if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then
+      value="/work/${value#"$PROJECT_ROOT"/}"
     fi
     docker_env+=( -e "$name=$value" )
   done
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   if [ -n "$OUTPUT_PATH" ]; then mkdir -p "$(dirname "$OUTPUT_PATH")"; docker_mounts+=( -v "$(dirname "$OUTPUT_PATH"):/out" ); docker_env+=( -e "OUTPUT_PATH=/out/$(basename "$OUTPUT_PATH")" ); fi
   docker_name_args=()
   if [ -n "${UBUNTU_USB_DOCKER_NAME:-}" ]; then
@@ -118,8 +119,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${UBUNTU_USB_BUILD_IN_DOCKER:-0}" != "1" ]
   exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged "${docker_env[@]}" "${docker_mounts[@]}" -w /work ubuntu:24.04 bash -ceu '
     apt-get update >/dev/null
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash debootstrap gdisk parted dosfstools e2fsprogs util-linux grub2-common grub-efi-amd64-bin grub-pc-bin kpartx mtools rsync sudo udev >/dev/null
-    chmod +x build-ubuntu-usb.sh configure-ubuntu-usb.sh
-    exec ./build-ubuntu-usb.sh
+    chmod +x backend/scripts/build-ubuntu-usb.sh backend/scripts/configure-ubuntu-usb.sh
+    exec backend/scripts/build-ubuntu-usb.sh
   '
 fi
 
@@ -145,7 +146,7 @@ chmod +x "$SCRIPT_DIR/configure-ubuntu-usb.sh"
 # Validate and show the package set before destructive loop-device work.
 UBUNTU_USB_DRY_RUN=1 "$SCRIPT_DIR/configure-ubuntu-usb.sh" >/dev/null
 
-IMAGE_PATH="$SCRIPT_DIR/$IMAGE_NAME"
+IMAGE_PATH="$PROJECT_ROOT/$IMAGE_NAME"
 ROOT_DIR="$WORK_DIR/ubuntu-root-$CODENAME"
 MNT_DIR="$WORK_DIR/ubuntu-mnt-$CODENAME"
 rm -rf "$ROOT_DIR" "$MNT_DIR"

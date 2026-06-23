@@ -25,8 +25,8 @@ RUNTIME_RESOURCES = (
     "README.md",
     "LICENSE",
     "efi-fallback",
-    "scripts/Dockerfile.builder",
-    "scripts/Dockerfile.gentoo-builder",
+    "backend/docker/Dockerfile.builder",
+    "backend/docker/Dockerfile.gentoo-builder",
 )
 
 

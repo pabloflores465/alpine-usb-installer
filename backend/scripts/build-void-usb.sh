@@ -8,10 +8,11 @@ IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 VOID_REPOSITORY="${VOID_REPOSITORY:-current}"
 ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="${WORK_DIR:-$PROJECT_ROOT/.work}"
 ROOT_DIR="$WORK_DIR/void-rootfs"
 MOUNT_DIR="$WORK_DIR/void-mnt"
-IMAGE_PATH="$SCRIPT_DIR/$IMAGE_NAME"
+IMAGE_PATH="$PROJECT_ROOT/$IMAGE_NAME"
 
 case "$ARCH" in x86_64) ;; *) echo "Void backend currently supports glibc x86_64 only" >&2; exit 1 ;; esac
 case "$VOID_REPOSITORY" in current|glibc) REPO_URL="${VOID_REPOSITORY_URL:-https://repo-fastly.voidlinux.org/current}" ;; http://*|https://*|file://*) REPO_URL="${VOID_REPOSITORY%/}" ;; *) echo "Invalid Void repository: $VOID_REPOSITORY" >&2; exit 1 ;; esac
@@ -21,9 +22,9 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; };
 if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   need docker
   docker info >/dev/null 2>&1 || { echo "Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
-  mkdir -p "$SCRIPT_DIR/.work"
-  chmod 700 "$SCRIPT_DIR/.work" 2>/dev/null || true
-  docker_env_file="$SCRIPT_DIR/.work/void-docker-env-$$"
+  mkdir -p "$PROJECT_ROOT/.work"
+  chmod 700 "$PROJECT_ROOT/.work" 2>/dev/null || true
+  docker_env_file="$PROJECT_ROOT/.work/void-docker-env-$$"
   {
     printf '%s\n' \
       "VOID_USB_BUILD_IN_DOCKER=1" \
@@ -51,12 +52,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
           fi
           ;;
       esac
-      if [[ "$name" == *_FILE && -n "$value" && "$value" == "$SCRIPT_DIR/"* ]]; then value="/work/${value#"$SCRIPT_DIR"/}"; fi
+      if [[ "$name" == *_FILE && -n "$value" && "$value" == "$PROJECT_ROOT/"* ]]; then value="/work/${value#"$PROJECT_ROOT"/}"; fi
       printf '%s=%s\n' "$name" "$value"
     done
   } > "$docker_env_file"
   chmod 600 "$docker_env_file" 2>/dev/null || true
-  docker_mounts=(-v "$SCRIPT_DIR:/work")
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
   if [ -n "$OUTPUT_PATH" ]; then docker_mounts+=(-v "$output_dir:/out"); fi
   docker_name_args=()
   if [ -n "${VOID_USB_DOCKER_NAME:-}" ]; then
@@ -83,8 +84,8 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
     done
     echo "[void-build] Installing build tools from local mirror"
     xbps-install -y -R "$LR" $TOOLS 2>&1 | tail -3
-    chmod +x build-void-usb.sh configure-void-usb.sh
-    exec ./build-void-usb.sh
+    chmod +x backend/scripts/build-void-usb.sh backend/scripts/configure-void-usb.sh
+    exec backend/scripts/build-void-usb.sh
   '; then
     rm -f "$docker_env_file"
     exit 0

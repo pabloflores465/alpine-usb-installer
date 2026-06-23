@@ -25,13 +25,13 @@ def run_config_dry_run(env: dict[str, str], repo_root: Path) -> int:
             script = provider.configure_script_path(repo_root)
             assert script is not None
             script.chmod(0o755)
-            proc = subprocess.Popen([f"./{script.name}"], cwd=repo_root, env=dry_env)
+            proc = subprocess.Popen([str(script)], cwd=repo_root, env=dry_env)
         else:
             script = provider.build_script_path(repo_root)
             if script is None:
                 raise RuntimeError(f"No dry-run adapter configured for {provider.label}")
             script.chmod(0o755)
-            proc = subprocess.Popen([f"./{script.name}", "--dry-run"], cwd=repo_root, env=dry_env)
+            proc = subprocess.Popen([str(script), "--dry-run"], cwd=repo_root, env=dry_env)
         return proc.wait()
     finally:
         cleanup_secret_files(secret_files)

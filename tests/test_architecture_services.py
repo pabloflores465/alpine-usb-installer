@@ -116,9 +116,10 @@ def test_secret_materializer_covers_all_distro_prefixes_and_cleans_files(tmp_pat
 def test_runtime_workspace_copies_nested_assets_with_injected_workspace(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    (source / "build-alpine-usb.sh").write_text("#!/bin/sh\n")
-    (source / "scripts").mkdir()
-    (source / "scripts" / "Dockerfile.builder").write_text("FROM alpine")
+    (source / "backend" / "scripts").mkdir(parents=True)
+    (source / "backend" / "scripts" / "build-alpine-usb.sh").write_text("#!/bin/sh\n")
+    (source / "backend" / "docker").mkdir()
+    (source / "backend" / "docker" / "Dockerfile.builder").write_text("FROM alpine")
     (source / "efi-fallback").mkdir()
     (source / "efi-fallback" / "BOOTX64.EFI").write_text("efi")
     runtime = tmp_path / "runtime"
@@ -126,12 +127,12 @@ def test_runtime_workspace_copies_nested_assets_with_injected_workspace(tmp_path
     result = build_runtime.prepare_runtime(
         source,
         "ignored",
-        ("build-alpine-usb.sh", "scripts/Dockerfile.builder", "efi-fallback"),
+        ("backend/scripts/build-alpine-usb.sh", "backend/docker/Dockerfile.builder", "efi-fallback"),
         secure_dir=lambda _name: runtime,
     )
 
     assert result == runtime
-    assert (runtime / "build-alpine-usb.sh").exists()
-    assert (runtime / "scripts" / "Dockerfile.builder").read_text() == "FROM alpine"
+    assert (runtime / "backend" / "scripts" / "build-alpine-usb.sh").exists()
+    assert (runtime / "backend" / "docker" / "Dockerfile.builder").read_text() == "FROM alpine"
     assert (runtime / "efi-fallback" / "BOOTX64.EFI").read_text() == "efi"
     assert (runtime / ".work").is_dir()

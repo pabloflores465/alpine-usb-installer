@@ -40,30 +40,30 @@ mkdir -p "$STAGE_DIR"
   --windowed \
   --name "$APP_NAME" \
   --collect-submodules "ledit_core" \
-  --add-data "build-alpine-usb.sh:." \
-  --add-data "configure-alpine-usb.sh:." \
-  --add-data "build-arch-usb.sh:." \
-  --add-data "configure-arch-usb.sh:." \
-  --add-data "build-debian-usb.sh:." \
-  --add-data "configure-debian-usb.sh:." \
-  --add-data "build-fedora-usb.sh:." \
-  --add-data "build-gentoo-usb.sh:." \
-  --add-data "configure-gentoo-usb.sh:." \
-  --add-data "build-opensuse-usb.sh:." \
-  --add-data "configure-opensuse-usb.sh:." \
-  --add-data "build-rhel-usb.sh:." \
-  --add-data "configure-rhel-usb.sh:." \
-  --add-data "build-slackware-usb.sh:." \
-  --add-data "configure-slackware-usb.sh:." \
-  --add-data "build-ubuntu-usb.sh:." \
-  --add-data "configure-ubuntu-usb.sh:." \
-  --add-data "build-void-usb.sh:." \
-  --add-data "configure-void-usb.sh:." \
+  --add-data "backend/scripts/build-alpine-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-alpine-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-arch-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-arch-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-debian-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-debian-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-fedora-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-gentoo-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-gentoo-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-opensuse-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-opensuse-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-rhel-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-rhel-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-slackware-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-slackware-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-ubuntu-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-ubuntu-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/build-void-usb.sh:backend/scripts" \
+  --add-data "backend/scripts/configure-void-usb.sh:backend/scripts" \
   --add-data "README.md:." \
   --add-data "LICENSE:." \
   --add-data "efi-fallback:efi-fallback" \
-  --add-data "scripts/Dockerfile.builder:scripts" \
-  --add-data "scripts/Dockerfile.gentoo-builder:scripts" \
+  --add-data "backend/docker/Dockerfile.builder:backend/docker" \
+  --add-data "backend/docker/Dockerfile.gentoo-builder:backend/docker" \
   gui.py
 
 cp -R "$DIST_DIR/$APP_NAME.app" "$STAGE_DIR/"

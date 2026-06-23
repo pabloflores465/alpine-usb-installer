@@ -32,7 +32,7 @@ for item in "${profiles[@]}"; do
   envs="${item#*:}"
   packages=$(
     # shellcheck disable=SC2086 # envs is a controlled list of VAR=value assignments.
-    env LEDIT_USB_DRY_RUN=1 $envs ./configure-alpine-usb.sh \
+    env LEDIT_USB_DRY_RUN=1 $envs ./backend/scripts/configure-alpine-usb.sh \
       | awk -F'packages:' '/packages:/{print $2}'
   )
   [ -n "$packages" ] || { echo "No packages generated for $name" >&2; exit 1; }
