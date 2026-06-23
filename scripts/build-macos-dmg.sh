@@ -64,7 +64,7 @@ mkdir -p "$STAGE_DIR"
   --add-data "efi-fallback:efi-fallback" \
   --add-data "backend/docker/Dockerfile.builder:backend/docker" \
   --add-data "backend/docker/Dockerfile.gentoo-builder:backend/docker" \
-  gui.py
+  ledit_core/frontends/gui/app.py
 
 cp -R "$DIST_DIR/$APP_NAME.app" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
