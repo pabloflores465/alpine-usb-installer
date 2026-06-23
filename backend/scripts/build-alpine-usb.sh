@@ -348,10 +348,13 @@ validate_systemd_bootloader() {
   echo "Validated removable systemd-boot UEFI bootloader: /EFI/BOOT/$efi_name (root UUID $root_uuid)"
 }
 
-cat > "$REPOSITORIES_FILE" <<EOF
-https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/main
-https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/community
-EOF
+PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 - "$ALPINE_BRANCH" "$REPOSITORIES_FILE" <<'PY'
+import sys
+
+from ledit_core.apk_packages.index import write_repositories_file
+
+write_repositories_file(sys.argv[2], sys.argv[1])
+PY
 
 cd "$PROJECT_ROOT"
 
