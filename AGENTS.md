@@ -3,12 +3,19 @@
 - Keep release notes as real Markdown with actual newlines.
 - Do not pass escaped `\n` sequences to `gh release create --notes` or `gh release edit --notes`; GitHub renders them literally.
 - For GitHub releases, write notes to a temporary `.md` file or use a heredoc, then pass `--notes-file <file>`.
-- Do not commit generated release artifacts such as `build/`, `dist/`, `standalone-release/`, or `LEDIT Installer.spec`.
+- Do not commit generated release artifacts such as `build/`, `dist/`, `standalone-release/`, `.venv/`, `.qtvenv/`, `.work/`, or `LEDIT Installer.spec`.
 - Architecture: keep Python code in screaming-architecture packages under `ledit_core/`:
-  - `apk_packages/` for Alpine package index/search/cache rules.
+  - `apk_packages/` for Alpine package index/search/cache rules and official APK repository URL rendering.
   - `build_profiles/` for presets and build configuration defaults.
   - `usb_devices/` for target detection, safety checks, and device-path parsing.
-  - `interfaces/` for CLI/TUI/GUI adapters only; keep root `cli.py`, `tui.py`, `gui.py`, and `apk_index.py` as thin compatibility wrappers.
+  - `frontends/` for CLI/TUI/GUI implementations.
+  - `interfaces/` for stable import adapters used by entrypoints and tests.
+- Root entrypoints:
+  - `ledit` is the unified supported terminal entrypoint.
+  - `./ledit gui` launches the Qt GUI.
+  - `./ledit tui` launches the full-screen terminal UI.
+  - Do not reintroduce root compatibility wrappers such as `cli.py`, `tui.py`, `gui.py`, or `apk_index.py`.
+- Generated Alpine repository files belong under `.work/`; do not commit a root `repositories` file.
 - Lint rules / style:
   - Use Ruff as the canonical linter with rules from `pyproject.toml` (`E4,E7,E9,F,I,B,UP,C4,SIM,RUF`).
   - Keep imports sorted by Ruff; no unused imports, unsafe package names, broad generated artifacts, or dead compatibility code.
