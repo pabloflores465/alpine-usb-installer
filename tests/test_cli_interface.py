@@ -103,14 +103,14 @@ def test_build_scripts_do_not_leak_spaced_env_into_docker_image() -> None:
         if "docker run" not in text:
             continue  # script never shells out to docker
         safe = ("--env-file" in text) or ('"${docker_env[@]}"' in text)
-        # Bare $docker_env (not ${docker_env[@]} array, not $docker_env_file)
-        # word-splits spaced values into docker positionals.
-        leaks_unquoted = re.search(r"\$docker_env(?![A-Za-z0-9_@])", text) is not None
-        if not safe or leaks_unquoted:
+        # Bare $docker_env / $docker_mounts / $docker_name_args (not array,
+        # not $docker_env_file) word-split spaced values into docker positionals.
+        bare = re.search(r"\$(docker_env|docker_mounts|docker_name_args)(?![A-Za-z0-9_@])", text)
+        if not safe or bare is not None:
             failures.append(script.name)
     assert not failures, (
-        "build-*-usb.sh docker run must use --env-file or quoted "
-        '"${docker_env[@]}" array, never bare $docker_env: ' + ", ".join(failures)
+        "build-*-usb.sh docker run must use --env-file or quoted arrays, "
+        "never bare $docker_env/$docker_mounts/$docker_name_args: " + ", ".join(failures)
     )
 
 

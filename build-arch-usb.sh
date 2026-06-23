@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Build a bootable Arch Linux USB disk image with pacstrap. Requires Linux root
 # privileges and arch-install-scripts. macOS users should run this in an Arch
 # builder VM/container with loop device support.
@@ -40,17 +40,16 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
       printf '%s=%s\n' "$name" "$value"
     done
   } > "$docker_env_file"
-  docker_mounts="-v $SCRIPT_DIR:/work"
+  docker_mounts=(-v "$SCRIPT_DIR:/work")
   if [ -n "$OUTPUT_PATH" ]; then
-    docker_mounts="$docker_mounts -v $output_dir:/out"
+    docker_mounts+=(-v "$output_dir:/out")
   fi
-  docker_name_args=""
+  docker_name_args=()
   if [ -n "${ARCH_USB_DOCKER_NAME:-}" ]; then
     case "$ARCH_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") echo "ERROR: invalid Docker container name: $ARCH_USB_DOCKER_NAME" >&2; exit 1 ;; esac
-    docker_name_args="--name $ARCH_USB_DOCKER_NAME"
+    docker_name_args=(--name "$ARCH_USB_DOCKER_NAME")
   fi
-  # shellcheck disable=SC2086
-  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --security-opt seccomp=unconfined --env-file "$docker_env_file" $docker_mounts -w /work archlinux:latest bash -ceu '
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --security-opt seccomp=unconfined --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work archlinux:latest bash -ceu '
     grep -qxF DisableSandbox /etc/pacman.conf || printf "\nDisableSandbox\n" >> /etc/pacman.conf
     cat >/etc/pacman.d/mirrorlist <<EOF_MIRRORS
 Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch

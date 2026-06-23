@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Build a RHEL-family raw USB image using dnf --installroot. Linux host required.
 set -eu
 
@@ -40,17 +40,16 @@ if [ "$(uname -s)" = Darwin ] && [ "${RHEL_USB_BUILD_IN_DOCKER:-0}" != "1" ]; th
       printf '%s=%s\n' "$name" "$value"
     done
   } > "$docker_env_file"
-  docker_mounts="-v $SCRIPT_DIR:/work"
+  docker_mounts=(-v "$SCRIPT_DIR:/work")
   if [ -n "$OUTPUT_PATH" ]; then
-    docker_mounts="$docker_mounts -v $output_dir:/out"
+    docker_mounts+=(-v "$output_dir:/out")
   fi
-  docker_name_args=""
+  docker_name_args=()
   if [ -n "${RHEL_USB_DOCKER_NAME:-}" ]; then
     case "$RHEL_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") die "Invalid Docker container name: $RHEL_USB_DOCKER_NAME" ;; esac
-    docker_name_args="--name $RHEL_USB_DOCKER_NAME"
+    docker_name_args=(--name "$RHEL_USB_DOCKER_NAME")
   fi
-  # shellcheck disable=SC2086
-  exec docker run --rm $docker_name_args --platform linux/amd64 --privileged --env-file "$docker_env_file" $docker_mounts -w /work rockylinux:9 bash -ceu '
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work rockylinux:9 bash -ceu '
     dnf -y install dnf-plugins-core parted dosfstools xfsprogs util-linux kpartx grub2-tools grub2-efi-x64 grub2-efi-x64-modules shim-x64 efibootmgr passwd systemd >/dev/null
     chmod +x build-rhel-usb.sh configure-rhel-usb.sh
     exec ./build-rhel-usb.sh
