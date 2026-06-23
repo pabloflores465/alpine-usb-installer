@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import cli
+from ledit_core.interfaces.cli import main
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli.main())
+    raise SystemExit(main())
