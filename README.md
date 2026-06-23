@@ -24,7 +24,7 @@ This README is the product entry point: what LEDIT does, how to install it, how 
 | Distro-specific behavior | [Per-distro docs](docs/distros/README.md) |
 | License | [`LICENSE`](LICENSE) |
 
-The documentation follows a simple pattern inspired by task-oriented documentation frameworks: quick start first, how-to recipes next, reference tables after that, and explanations/troubleshooting at the end.
+The documentation follows a simple pattern: quick start first, how-to recipes next, reference tables after that, and explanations/troubleshooting at the end.
 
 ## What LEDIT can build
 
@@ -96,7 +96,7 @@ cd ledit
 Open the GUI:
 
 ```sh
-python gui.py
+./ledit gui
 ```
 
 Open the terminal UI:
@@ -155,15 +155,15 @@ Example:
 Start the GUI:
 
 ```sh
-python gui.py
+./ledit gui
 ```
 
 What happens on first run:
 
-1. `gui.py` checks whether it is already running inside `.qtvenv`.
+1. `./ledit gui` checks whether it is already running inside `.qtvenv`.
 2. If not, it creates `.qtvenv`.
 3. It installs `requirements.txt`.
-4. It re-executes itself through `.qtvenv/bin/python`.
+4. It re-executes through `.qtvenv/bin/python`.
 5. Only then does it import the Qt GUI modules.
 
 This avoids `ModuleNotFoundError: No module named 'PySide6'` when your project virtualenv does not include Qt.
@@ -192,6 +192,22 @@ The TUI is useful when you want the same guided flow as the GUI but are working 
 Running `./ledit` without a subcommand opens the TUI by default.
 
 ## CLI reference
+
+### `gui`
+
+Open the Qt graphical interface:
+
+```sh
+./ledit gui
+```
+
+### `tui`
+
+Open the full-screen terminal UI:
+
+```sh
+./ledit tui
+```
 
 ### `build`
 
@@ -369,7 +385,7 @@ On macOS, LEDIT writes through the raw disk path (`/dev/rdiskX`) after unmountin
 
 | Problem | Likely cause | Fix |
 | --- | --- | --- |
-| `ModuleNotFoundError: No module named 'PySide6'` | GUI dependencies are missing from the current venv or `.qtvenv` was created before dependency pins changed. | Pull latest, remove `.qtvenv`, then run `python gui.py`. |
+| `ModuleNotFoundError: No module named 'PySide6'` | GUI dependencies are missing from the current venv or `.qtvenv` was created before dependency pins changed. | Pull latest, remove `.qtvenv`, then run `./ledit gui`. |
 | Docker error on macOS | Docker Desktop is not running or cannot access the repo/output path. | Start Docker Desktop and retry from a normal terminal. |
 | Package not found | Package name differs between distros or branch metadata. | Run `./ledit search <name> --distro <id> --branch <branch>`. |
 | Unsupported bootloader | Not every backend supports every bootloader. | Use `--bootloader grub` unless a distro page says otherwise. |
