@@ -1,53 +1,126 @@
-# LEDIT per-distribution backends
+# Per-distro documentation
 
-LEDIT builds preinstalled Linux USB images using a distro-specific **backend** for each supported distribution. Every backend lives in [`backend/scripts/`](../../backend/scripts/) and is driven by the provider registry in [`ledit_core/linux_distros/providers.py`](../../ledit_core/linux_distros/providers.py).
+LEDIT supports multiple Linux distributions through distro-specific providers. Each provider defines:
 
-This section documents each backend in a Distrobox-style page: supported branches, required host tools, environment variables consumed by the build/configure scripts, CLI/TUI/GUI usage, dry-run validation, and macOS/Linux/Windows notes.
+- a stable CLI id,
+- branch/release/channel choices,
+- default architecture, user, hostname, and image name,
+- package-search behavior,
+- backend script or Python build path,
+- environment prefix,
+- bootloader constraints.
 
-Select a distro:
+Use this index to choose the right backend before running a build.
 
-- [Alpine Linux](alpine.md)
-- [Arch Linux](arch.md)
-- [Debian](debian.md)
-- [Fedora](fedora.md)
-- [Gentoo](gentoo.md)
-- [NixOS](nixos.md)
-- [openSUSE](opensuse.md)
-- [RHEL family](rhel.md)
-- [Slackware](slackware.md)
-- [Ubuntu](ubuntu.md)
-- [Void Linux (glibc)](void.md)
+## Supported distro pages
 
-> Doc style inspired by the [Distrobox documentation](https://github.com/89luca89/distrobox): one concise, actionable page per supported distro with commands, variables, and notes grouped by section.
+| Distro | CLI id / aliases | Package manager | Best use case |
+| --- | --- | --- | --- |
+| [Alpine Linux](alpine.md) | `alpine` | APK | Small OpenRC-based portable systems. |
+| [Arch Linux](arch.md) | `arch` | Pacman | Rolling-release desktop or WM images. |
+| [Debian](debian.md) | `debian` | APT | Conservative APT-based images. |
+| [Fedora](fedora.md) | `fedora` | DNF | Modern DNF-based desktops and package groups. |
+| [Gentoo](gentoo.md) | `gentoo` | Portage | Stage3-based images and Portage workflows. |
+| [NixOS](nixos.md) | `nixos` | nixpkgs | Declarative image generation from Nix config. |
+| [openSUSE](opensuse.md) | `opensuse`, `suse`, `opensuse-tumbleweed` | Zypper | Tumbleweed/Leap testing with Zypper metadata. |
+| [RHEL family](rhel.md) | `rhel`, `rocky`, `rockylinux`, `alma`, `almalinux`, `centos`, `centos-stream` | DNF | Rocky/Alma/CentOS Stream compatible images. |
+| [Slackware](slackware.md) | `slackware` | pkgtools | Classic Slackware package-series images. |
+| [Ubuntu](ubuntu.md) | `ubuntu` | APT | Familiar LTS desktop/server-like USB images. |
+| [Void Linux](void.md) | `void` | XBPS | Compact rolling glibc/runit images. |
 
-## Common concepts
+## Common workflow for every distro
+
+```sh
+# 1. Confirm host tools.
+./ledit doctor
+
+# 2. List supported distros and branches.
+./ledit distros
+
+# 3. Search for packages using the selected distro backend.
+./ledit search firefox --distro alpine --branch latest-stable
+
+# 4. Validate the build profile without creating an image.
+./ledit build --distro alpine --branch latest-stable --dry-run --ask-password -y
+
+# 5. Build.
+./ledit build --distro alpine --branch latest-stable --ask-password -y
+
+# 6. Flash after confirming the target device.
+./ledit devices
+./ledit flash /tmp/ledit/ledit.img /dev/diskX
+```
+
+## Shared concepts
 
 ### Distro id
 
-Every backend is selected by a stable `--distro` id (for example `alpine`, `arch`, `ubuntu`). Aliases like `rocky`/`alma`/`centos` resolve to a canonical id (`rhel`).
+Every backend is selected by a stable `--distro` id. Some aliases resolve to a canonical provider. For example, `rocky`, `alma`, and `centos-stream` resolve to the RHEL-family backend.
 
-### Branch / release
+### Branch / release / channel
 
-Each backend exposes its own branch/release/channel choices (Alpine `latest-stable`/`edge`, Arch `rolling`, Debian `stable`/`testing`/`sid`, NixOS channels, etc.). The GUI and TUI refresh the list automatically when the distro changes.
+The meaning of `--branch` depends on the distro:
+
+| Distro | Meaning |
+| --- | --- |
+| Alpine | APK branch such as `latest-stable` or `edge`. |
+| Arch | Rolling branch; `stable` is accepted as an alias. |
+| Debian | Debian suite/codename such as `stable`, `testing`, `sid`, `trixie`, `bookworm`, or `forky`. |
+| Fedora | Fedora release selector such as `stable`, `latest`, `rawhide`, `42`, or `41`. |
+| Gentoo | Stage3 branch: `stable` or `testing`. |
+| NixOS | NixOS channel such as `nixos-25.05`. |
+| openSUSE | `tumbleweed` or Leap release. |
+| RHEL family | Major release such as `9` or `10`. |
+| Slackware | `stable`, `current`, or `15.0`. |
+| Ubuntu | Ubuntu version/codename such as `24.04`, `noble`, `22.04`, or `jammy`. |
+| Void | Repository selector such as `current` or `glibc`. |
 
 ### Package search
 
-Package search is distro-native (APK, Pacman API, APT, DNF, Zypper, XBPS, nixpkgs, Portage, Slackware `PACKAGES.TXT`). When you switch distro with packages already selected, LEDIT re-searches those names in the new distro and reports any that are missing.
+Package search is distro-native. That means names are not guaranteed to match across distributions. Search before adding extra packages:
 
-### Shared LEDIT environment
-
-All backends read shared `LEDIT_USB_*` variables for the common profile (user, hostname, timezone, locale, keyboard, desktop, session, display manager, network, Wi-Fi, Bluetooth, audio, browser, firmware, bootloader, kernel, boot timeout, auto-resize, extra packages, profile). Distro-specific prefixes (`ALPINE_USB`, `ARCH_USB`, `DEBIAN_USB`, ...) are written alongside the shared prefix so each backend can read whichever it expects.
+```sh
+./ledit search neovim --distro arch
+./ledit search neovim --distro debian
+./ledit search neovim --distro void
+```
 
 ### Dry-run
 
-Every backend supports `./ledit build --distro <id> --dry-run` without creating an image. Dry-run validates the generated configuration and package list on any host (including macOS).
+Dry-run is the safest way to check a profile:
 
-### Build host requirements
+```sh
+./ledit build --distro ubuntu --branch 24.04 --dry-run --ask-password -y
+```
 
-- **Native Linux**: distro build tools (`debootstrap`, `pacstrap`, `dnf`, `zypper`, `xbps-install`, `nixos-generate`, GRUB/EFI tools, `parted`, filesystem tools, etc.).
-- **macOS**: Docker Desktop for backends that need loop/mount/chroot support.
-- **Windows**: not supported for builds; use the generated image with Rufus or balenaEtcher.
+Dry-run catches invalid branches, unsupported bootloaders, invalid package names, missing package mappings, and generated package-plan warnings before image creation starts.
 
-### Flashing
+### macOS vs Linux
 
-Flashing is distro-neutral and handled by `./ledit flash <image> <device>` with whole-disk safety checks and image validation.
+- On **macOS**, most full builds depend on Docker Desktop.
+- On **Linux**, native builds need distro-specific installroot/chroot/bootloader tools.
+- On **Windows**, LEDIT does not implement builds or native flashing. Use an already generated image with a separate flashing tool.
+
+## Shared environment model
+
+All frontends normalize settings into environment variables. The most important shared families are:
+
+| Variable family | Purpose |
+| --- | --- |
+| `*_PROFILE` | `compatibility` or `minimal`. |
+| `*_USER`, `*_HOSTNAME` | Initial identity. |
+| `*_PASSWORD_FILE`, `*_ROOT_PASSWORD_FILE` | Secret files generated before shell backends run. |
+| `*_DESKTOP`, `*_DISPLAY_MANAGER`, `*_DEFAULT_SESSION`, `*_TILING_WMS` | Graphical session profile. |
+| `*_NETWORK`, `*_WIFI`, `*_BLUETOOTH`, `*_AUDIO`, `*_BROWSER` | Services and desktop integration. |
+| `*_FIRMWARE`, `*_LEGACY_X11_DRIVERS`, `*_KERNEL_FLAVOR` | Hardware compatibility. |
+| `*_BOOTLOADER`, `*_BOOT_TIMEOUT`, `*_SYSTEMD_BOOT_CONSOLE_MODE` | Boot configuration. |
+| `*_AUTO_RESIZE` | First-boot expansion where supported. |
+| `*_EXTRA_PACKAGES` | Distro-native extra package list. |
+
+The selected distro page lists its exact prefix and branch variable.
+
+## See also
+
+- [Project README](../../README.md)
+- [Configuration reference](../configuration.md)
+- [Troubleshooting](../troubleshooting.md)
