@@ -1,6 +1,14 @@
 # Gentoo
 
-> Distro id: `gentoo` · Package manager: Portage · Search repos: Portage catalogue / local eix/pkgcore (`gentoo`, `local-portage`)
+> Distro id: `gentoo` · Package manager: Portage · Package search: Portage catalogue / local eix or pkgcore data.
+
+## What this page covers
+
+This page documents the `gentoo` backend: supported stage3 branch choices, backend scripts, Docker/native requirements, common commands, generated variables, and Gentoo-specific caveats.
+
+## When to choose it
+
+Choose Gentoo when you want a stage3-based image and are comfortable with longer build times.
 
 ## Supported branches / releases
 
@@ -9,53 +17,103 @@
 | `stable` |
 | `testing` |
 
-- Default branch: `stable`
-- Default arch: `x86_64` (choices: `x86_64`, `amd64`)
-- Default user: `gentoo` · Default hostname: `ledit-gentoo` · Default image: `ledit-gentoo.img`
+Defaults:
 
-## Backend scripts
+- Branch/release: `stable`
+- Architecture: `x86_64`; choices: `x86_64`, `amd64`
+- User: `gentoo`
+- Hostname: `ledit-gentoo`
+- Output image name: `ledit-gentoo.img`
 
-| Script | Path |
+## Backend implementation
+
+| Role | Path |
 | --- | --- |
-| Build | `backend/scripts/build-gentoo-usb.sh` |
-| Configure | `backend/scripts/configure-gentoo-usb.sh` |
+| Build backend | `backend/scripts/build-gentoo-usb.sh` |
+| Configure backend | `backend/scripts/configure-gentoo-usb.sh` |
+| Branch environment variable | `GENTOO_STAGE3_BRANCH` |
+| Distro environment prefix | `GENTOO_USB` |
+| Shared profile prefix | `LEDIT_USB` |
+
+LEDIT first normalizes options into environment variables. The Gentoo backend consumes those variables while preparing a stage3 root, package profile, boot files, and first-boot behavior.
 
 ## Host requirements
 
-Linux: `chroot`, stage3 tarball, `portage`, `genkernel`/initramfs, GRUB, `parted`. macOS: Docker with builder image built from `backend/docker/Dockerfile.gentoo-builder`.
+Docker Desktop on macOS using the Gentoo builder image from `backend/docker/Dockerfile.gentoo-builder`. Native Linux requires chroot-capable tooling, a stage3 tarball path, Portage, initramfs/kernel tooling, GRUB, and partition/filesystem tools.
 
-## Environment variables
-
-The provider writes both the distro-specific prefix and the shared `LEDIT_USB` prefix (when they differ). Secrets are written to `*_PASSWORD_FILE`/`*_ROOT_PASSWORD_FILE` instead of passing plain values to the shell.
-
-- Branch/release env: `GENTOO_STAGE3_BRANCH`
-- Distro prefix: `GENTOO_USB (shared: LEDIT_USB)`
-- Shared profile prefix: `LEDIT_USB_*` (user, hostname, timezone, locale, keyboard, desktop, session, display manager, network, Wi-Fi, Bluetooth, audio, browser, firmware, bootloader, kernel, boot timeout, auto-resize, extra packages, profile)
-- Dry-run flag: `{distro_prefix}_DRY_RUN=1` (and `LEDIT_USB_DRY_RUN=1` when distro prefix differs)
-
-## Usage
+## Quick commands
 
 ```sh
-# Dry-run (no image created; works on macOS too)
-./ledit build --distro gentoo --dry-run --ask-password -y
-
-# Search packages
-./ledit search firefox --distro gentoo --limit 5
-
-# Full build (native Linux or Docker on macOS)
-./ledit build --distro gentoo --ask-password -y
-
-# Optional: pin a branch/release
+./ledit distros
+./ledit search app-editors/vim --distro gentoo --branch stable --limit 5
+./ledit build --distro gentoo --branch stable --dry-run --ask-password -y
 ./ledit build --distro gentoo --branch stable --ask-password -y
+
+./ledit build --distro gentoo \
+  --branch stable \
+  --image-size 32G \
+  --output "$HOME/Downloads/ledit-gentoo.img" \
+  --ask-password \
+  --extra-packages "app-editors/vim app-misc/tmux" \
+  -y
 ```
 
-Bootloader support: systemd-boot = **no** · extlinux = **no**.
+## GUI and TUI notes
 
-## Notes
+In the GUI, select **Gentoo**. Package search expects Gentoo-style package atoms where appropriate, for example `app-editors/vim`.
 
-Stage3 bootstrap builder. Builder Docker image is `gentoo builder image` (built from `backend/docker/Dockerfile.gentoo-builder`). Configure runs inside the chroot; secrets injected via `gentoo-build.env`.
+In the TUI, run `./ledit tui` and select `gentoo`.
+
+## Build profiles
+
+| Profile | Use it when |
+| --- | --- |
+| `compatibility` | You want a more complete desktop/hardware baseline. |
+| `minimal` | You want to keep the image smaller and explicitly add packages. |
+
+## Bootloader support
+
+GRUB is supported. systemd-boot and extlinux are not exposed for this backend.
+
+## Environment variable reference
+
+The real prefix for this backend is `GENTOO_USB`. The backend also receives the shared `LEDIT_USB_*` variables.
+
+| Variable family | Meaning |
+| --- | --- |
+| `GENTOO_STAGE3_BRANCH` | `stable` or `testing`. |
+| `*_PROFILE` | `compatibility` or `minimal` build preset. |
+| `*_USER`, `*_HOSTNAME` | Initial identity. |
+| `*_PASSWORD_FILE`, `*_ROOT_PASSWORD_FILE` | Temporary secret files. |
+| `*_DESKTOP`, `*_DISPLAY_MANAGER`, `*_DEFAULT_SESSION`, `*_TILING_WMS` | Desktop/session choices. |
+| `*_NETWORK`, `*_WIFI`, `*_BLUETOOTH`, `*_AUDIO`, `*_BROWSER` | Services and desktop integration. |
+| `*_BOOTLOADER`, `*_KERNEL_FLAVOR`, `*_FIRMWARE`, `*_AUTO_RESIZE` | Boot and hardware settings. |
+| `*_EXTRA_PACKAGES` | Extra Portage atoms/package names. |
+
+```txt
+GENTOO_STAGE3_BRANCH=stable
+GENTOO_USB_DRY_RUN=1
+LEDIT_USB_DRY_RUN=1
+```
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Package search returns nothing | Try the full category/package atom. |
+| Build is slow | Gentoo builds are expected to take longer than binary-package distros. |
+| Docker build fails | Rebuild or pull the Gentoo builder image and confirm Docker has enough disk space. |
+| Bootloader validation fails | Use `--bootloader grub`. |
+
+## Backend notes
+
+- This is a stage3 bootstrap backend.
+- The Docker builder image exists because Gentoo builds require a more controlled host environment.
+- Expect longer build times than binary-package distributions.
 
 ## See also
 
-- [Per-distro backends index](README.md)
+- [Per-distro documentation index](README.md)
 - [Project README](../../README.md)
+- [General troubleshooting](../troubleshooting.md)
+- [Configuration reference](../configuration.md)
