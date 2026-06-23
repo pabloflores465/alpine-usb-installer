@@ -33,11 +33,15 @@ Defaults:
 | --- | --- |
 | Build backend | `backend/scripts/build-alpine-usb.sh` |
 | Configure backend | `backend/scripts/configure-alpine-usb.sh` |
+| APK repository metadata | `ledit_core/apk_packages/index.py` |
+| Generated repositories file | `.work/repositories` |
 | Branch environment variable | `ALPINE_BRANCH` |
 | Distro environment prefix | `LEDIT_USB` |
 | Shared profile prefix | `LEDIT_USB` |
 
 LEDIT first normalizes CLI/GUI/TUI options into environment variables. The backend then consumes those variables to build and configure the image. Passwords are converted to temporary `*_PASSWORD_FILE` and `*_ROOT_PASSWORD_FILE` values before shell scripts run, so plain password values do not need to be passed as command-line arguments.
+
+The official Alpine repository URLs are owned by `ledit_core/apk_packages/index.py`. During a build, `backend/scripts/build-alpine-usb.sh` renders those URLs into `.work/repositories` because `alpine-make-vm-image` requires a physical `--repositories-file`. The root of the repository should not contain a committed `repositories` file.
 
 ## Host requirements
 
@@ -109,7 +113,6 @@ Common options:
 
 - `--bootloader grub`
 - `--bootloader systemd-boot`
-- `--bootloader extlinux`
 
 If the backend does not support the requested bootloader, LEDIT fails during profile validation before running the build script.
 
@@ -141,7 +144,6 @@ Dry-run convention:
 
 ```txt
 LEDIT_USB_DRY_RUN=1
-LEDIT_USB_DRY_RUN=1
 ```
 
 ## Troubleshooting
@@ -157,6 +159,8 @@ LEDIT_USB_DRY_RUN=1
 ## Backend notes
 
 - Mature backend that reuses Alpine tooling instead of trying to hand-roll the entire root filesystem.
+- APK mirror and repository list generation live in `ledit_core/apk_packages/index.py`.
+- The build script writes the generated repository file to `.work/repositories` only because `alpine-make-vm-image` requires a physical repositories file.
 - The configure step runs inside the image and writes OpenRC services for first boot setup.
 - Auto-resize is implemented through an OpenRC first-boot service.
 
