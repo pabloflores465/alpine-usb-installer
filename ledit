@@ -6,6 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+if len(sys.argv) > 1 and sys.argv[1] == "gui":
+    sys.argv = [sys.argv[0], *sys.argv[2:]]
+    from ledit_core.interfaces.gui import main as gui_main
+
+    raise SystemExit(gui_main())
+
 from ledit_core.interfaces.cli import main
 
 
