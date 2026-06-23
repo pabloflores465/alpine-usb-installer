@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LEDIT — Linux External Drive Installer Tool</title>
+    <meta
+      name="description"
+      content="LEDIT builds configurable, preinstalled Linux systems for USB drives and external disks through a GUI, TUI, and CLI."
+    />
+    <meta name="theme-color" content="#0b1020" />
+    <meta property="og:title" content="LEDIT — Portable Linux, fully installed" />
+    <meta
+      property="og:description"
+      content="Create configurable Linux installations for external drives. Not a live ISO — a real installed portable system."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header glass-panel">
+        <a class="brand" href="#top" aria-label="LEDIT home">
+          <span class="brand-mark" aria-hidden="true">L</span>
+          <span>LEDIT</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="#features">Features</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#distros">Distros</a>
+          <a href="#start">Start</a>
+        </nav>
+        <a class="header-cta" href="https://github.com/pabloflores465/ledit">GitHub</a>
+      </header>
+
+      <main id="top">
+        <section class="hero section-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Linux External Drive Installer Tool</p>
+            <h1>Build portable Linux systems that are actually installed.</h1>
+            <p class="hero-text">
+              LEDIT helps you create configurable Linux images for USB drives and external disks,
+              with guided GUI, full-screen TUI, and repeatable CLI workflows over the same build system.
+            </p>
+            <div class="hero-actions">
+              <a class="primary-button" href="https://github.com/pabloflores465/ledit#quick-start">Quick start</a>
+              <a class="secondary-button" href="https://github.com/pabloflores465/ledit">View repository</a>
+            </div>
+            <dl class="hero-stats" aria-label="LEDIT highlights">
+              <div>
+                <dt>3</dt>
+                <dd>interfaces</dd>
+              </div>
+              <div>
+                <dt>12+</dt>
+                <dd>distro targets</dd>
+              </div>
+              <div>
+                <dt>0</dt>
+                <dd>live ISO lock-in</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="hero-card glass-panel" aria-label="LEDIT command preview">
+            <div class="terminal-bar">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <pre><code>$ ./ledit doctor
+✓ host checks ready
+
+$ ./ledit build --distro ubuntu \
+  --branch 24.04 \
+  --ask-password -y
+
+→ configurable installed image
+→ ready for external drive flashing</code></pre>
+            <div class="orbit-card small-card top-card">
+              <strong>Dry-run first</strong>
+              <span>Validate before building.</span>
+            </div>
+            <div class="orbit-card small-card bottom-card">
+              <strong>Flash safely</strong>
+              <span>Whole-disk checks included.</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="features" class="section-block">
+          <div class="section-heading">
+            <p class="eyebrow">Why LEDIT</p>
+            <h2>Designed for real portable installs.</h2>
+            <p>
+              Skip fragile live sessions. LEDIT focuses on creating installed Linux systems that can boot
+              from external storage with your selected distro, desktop, packages, firmware, and bootloader.
+            </p>
+          </div>
+          <div class="feature-grid">
+            <article class="glass-panel feature-card">
+              <span class="card-icon">◎</span>
+              <h3>One build model</h3>
+              <p>GUI, TUI, and CLI normalize into the same configuration flow, so visual and terminal workflows stay consistent.</p>
+            </article>
+            <article class="glass-panel feature-card">
+              <span class="card-icon">◈</span>
+              <h3>Distro-native choices</h3>
+              <p>Search official package repositories and choose release branches before adding packages to your image.</p>
+            </article>
+            <article class="glass-panel feature-card">
+              <span class="card-icon">✦</span>
+              <h3>Safer flashing</h3>
+              <p>List removable drives, validate generated images, and flash only after confirming the target disk.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="workflow" class="section-block workflow glass-panel">
+          <div>
+            <p class="eyebrow">Workflow</p>
+            <h2>From profile to bootable external system.</h2>
+            <p>
+              Run host checks, pick a distro, validate with dry-run, build the image, then flash it to a removable drive.
+            </p>
+          </div>
+          <ol class="steps">
+            <li><span>01</span><strong>Check host tools</strong><p>Run <code>./ledit doctor</code> before building.</p></li>
+            <li><span>02</span><strong>Choose your target</strong><p>Select distro, release, packages, desktop, network, and firmware options.</p></li>
+            <li><span>03</span><strong>Dry-run and build</strong><p>Validate the plan first, then create the raw image.</p></li>
+            <li><span>04</span><strong>Flash carefully</strong><p>List devices and write the image only to the correct external drive.</p></li>
+          </ol>
+        </section>
+
+        <section id="distros" class="section-block">
+          <div class="section-heading compact">
+            <p class="eyebrow">Distro coverage</p>
+            <h2>Bring your preferred Linux family.</h2>
+          </div>
+          <div class="distro-cloud" aria-label="Supported distro families">
+            <span>Alpine</span><span>Arch</span><span>Debian</span><span>Fedora</span><span>Gentoo</span><span>NixOS</span>
+            <span>openSUSE</span><span>Rocky</span><span>AlmaLinux</span><span>CentOS Stream</span><span>Slackware</span><span>Ubuntu</span><span>Void</span>
+          </div>
+        </section>
+
+        <section id="start" class="section-block cta-section glass-panel">
+          <p class="eyebrow">Get started</p>
+          <h2>Clone LEDIT and build your first external Linux install.</h2>
+          <div class="code-line"><code>git clone https://github.com/pabloflores465/ledit.git && cd ledit</code></div>
+          <div class="hero-actions centered">
+            <a class="primary-button" href="https://github.com/pabloflores465/ledit#quick-start">Read quick start</a>
+            <a class="secondary-button" href="https://github.com/pabloflores465/ledit/issues">Request a feature</a>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <span>LEDIT — Linux External Drive Installer Tool</span>
+        <a href="https://github.com/pabloflores465/ledit/blob/main/LICENSE">GPL-2.0-only</a>
+      </footer>
+    </div>
+    <script src="./script.js"></script>
+  </body>
+</html>
