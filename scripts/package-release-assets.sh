@@ -36,9 +36,6 @@ scripts/build-macos-dmg.sh
   --onefile \
   --console \
   --name "ledit" \
-  --hidden-import "cli" \
-  --hidden-import "tui" \
-  --hidden-import "apk_index" \
   --collect-submodules "ledit_core" \
   --add-data "backend/scripts/build-alpine-usb.sh:backend/scripts" \
   --add-data "backend/scripts/configure-alpine-usb.sh:backend/scripts" \
@@ -86,9 +83,7 @@ out = root / "dist" / "release-assets"
 base = f"ledit-{version}-terminal-source"
 files = [
     "ledit",
-    "cli.py",
-    "tui.py",
-    "apk_index.py",
+    "gui.py",
     "ledit_core",
     "README.md",
     "LICENSE",
