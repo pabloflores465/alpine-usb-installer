@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile ledit cli.py tui.py gui.py apk_index.py $(find ledit_core -name '*.py' -type f | sort)
+python3 -m py_compile ledit gui.py $(find ledit_core -name '*.py' -type f | sort)
 ./ledit tui --self-test >/dev/null
 if [ "${SKIP_TUI_PTY_TESTS:-0}" != "1" ]; then
   python3 - <<'PY'
