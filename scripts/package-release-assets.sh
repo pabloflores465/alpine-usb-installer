@@ -90,7 +90,6 @@ files = [
     "pyproject.toml",
     "tests",
     "docs",
-    "repositories",
     ".dockerignore",
     "backend/docker/Dockerfile.builder",
     "backend/docker/Dockerfile.gentoo-builder",
