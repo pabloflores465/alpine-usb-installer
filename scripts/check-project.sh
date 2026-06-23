@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile ledit gui.py $(find ledit_core -name '*.py' -type f | sort)
+python3 -m py_compile ledit $(find ledit_core -name '*.py' -type f | sort)
 ruff check .
 ruff format --check .
 pytest
