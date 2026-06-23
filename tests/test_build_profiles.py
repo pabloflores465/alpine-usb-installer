@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from alpine_usb.build_profiles import presets
+from ledit_core.build_profiles import presets
 
 
 def build_args(**overrides) -> argparse.Namespace:

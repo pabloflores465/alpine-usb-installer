@@ -12,12 +12,12 @@ fi
 
 profiles=(
   "default:"
-  "gnome:ALPINE_USB_DESKTOP=gnome"
-  "plasma-systemd-stable:ALPINE_USB_DESKTOP=plasma ALPINE_USB_BOOTLOADER=systemd-boot ALPINE_USB_KERNEL_FLAVOR=stable"
-  "mate:ALPINE_USB_DESKTOP=mate"
-  "lxqt:ALPINE_USB_DESKTOP=lxqt"
-  "wm-greetd:ALPINE_USB_DESKTOP=none ALPINE_USB_TILING_WMS=i3,sway ALPINE_USB_DISPLAY_MANAGER=greetd"
-  "minimal:ALPINE_USB_DESKTOP=none ALPINE_USB_DISPLAY_MANAGER=none ALPINE_USB_WIFI=0 ALPINE_USB_BLUETOOTH=0 ALPINE_USB_AUDIO=none ALPINE_USB_BROWSER=none ALPINE_USB_FIRMWARE=none ALPINE_USB_LEGACY_X11_DRIVERS=0"
+  "gnome:LEDIT_USB_DESKTOP=gnome"
+  "plasma-systemd-stable:LEDIT_USB_DESKTOP=plasma LEDIT_USB_BOOTLOADER=systemd-boot LEDIT_USB_KERNEL_FLAVOR=stable"
+  "mate:LEDIT_USB_DESKTOP=mate"
+  "lxqt:LEDIT_USB_DESKTOP=lxqt"
+  "wm-greetd:LEDIT_USB_DESKTOP=none LEDIT_USB_TILING_WMS=i3,sway LEDIT_USB_DISPLAY_MANAGER=greetd"
+  "minimal:LEDIT_USB_DESKTOP=none LEDIT_USB_DISPLAY_MANAGER=none LEDIT_USB_WIFI=0 LEDIT_USB_BLUETOOTH=0 LEDIT_USB_AUDIO=none LEDIT_USB_BROWSER=none LEDIT_USB_FIRMWARE=none LEDIT_USB_LEGACY_X11_DRIVERS=0"
 )
 
 tmpdir="$PWD/.work/apk-solver-$$"
@@ -32,7 +32,7 @@ for item in "${profiles[@]}"; do
   envs="${item#*:}"
   packages=$(
     # shellcheck disable=SC2086 # envs is a controlled list of VAR=value assignments.
-    env ALPINE_USB_DRY_RUN=1 $envs ./configure-alpine-usb.sh \
+    env LEDIT_USB_DRY_RUN=1 $envs ./configure-alpine-usb.sh \
       | awk -F'packages:' '/packages:/{print $2}'
   )
   [ -n "$packages" ] || { echo "No packages generated for $name" >&2; exit 1; }

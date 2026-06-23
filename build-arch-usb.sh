@@ -4,7 +4,7 @@
 # builder VM/container with loop device support.
 set -eu
 
-IMAGE_NAME=${IMAGE_NAME:-arch-usb.img}
+IMAGE_NAME=${IMAGE_NAME:-ledit-arch.img}
 OUTPUT_PATH=${OUTPUT_PATH:-$IMAGE_NAME}
 IMAGE_SIZE=${IMAGE_SIZE:-16G}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -32,7 +32,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
       output_base=$(basename "$OUTPUT_PATH")
       printf '%s\n' "OUTPUT_PATH=/out/$output_base"
     fi
-    for name in ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE ARCH_USB_BRANCH; do
+    for name in LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE LEDIT_USB_CONSOLE_KEYMAP LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE ARCH_USB_BRANCH; do
       eval "value=\${$name:-}"
       case "$name:$value" in
         *_FILE:$SCRIPT_DIR/*) value="/work/${value#"$SCRIPT_DIR"/}" ;;
@@ -118,21 +118,21 @@ mount --rbind /run "$MNT_DIR/run" || true
 
 chroot "$MNT_DIR" /bin/bash -eu <<'CHROOT'
 source /root/arch-usb-config.env || true
-ln -sf "/usr/share/zoneinfo/${ALPINE_USB_TIMEZONE:-UTC}" /etc/localtime || true
+ln -sf "/usr/share/zoneinfo/${LEDIT_USB_TIMEZONE:-UTC}" /etc/localtime || true
 hwclock --systohc || true
-echo "${ALPINE_USB_HOSTNAME:-arch-usb}" > /etc/hostname
-sed -i "s/^#\(${ALPINE_USB_LOCALE:-en_US.UTF-8} UTF-8\)/\1/" /etc/locale.gen || true
+echo "${LEDIT_USB_HOSTNAME:-ledit-arch}" > /etc/hostname
+sed -i "s/^#\(${LEDIT_USB_LOCALE:-en_US.UTF-8} UTF-8\)/\1/" /etc/locale.gen || true
 locale-gen || true
-echo "LANG=${ALPINE_USB_LOCALE:-en_US.UTF-8}" > /etc/locale.conf
-echo "KEYMAP=${ALPINE_USB_CONSOLE_KEYMAP:-us}" > /etc/vconsole.conf
-useradd -m -G wheel -s /bin/bash "${ALPINE_USB_USER:-arch}" || true
+echo "LANG=${LEDIT_USB_LOCALE:-en_US.UTF-8}" > /etc/locale.conf
+echo "KEYMAP=${LEDIT_USB_CONSOLE_KEYMAP:-us}" > /etc/vconsole.conf
+useradd -m -G wheel -s /bin/bash "${LEDIT_USB_USER:-arch}" || true
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
 chmod 0440 /etc/sudoers.d/10-wheel
 systemctl enable NetworkManager 2>/dev/null || true
-case "${ALPINE_USB_DISPLAY_MANAGER:-auto}" in
-  lightdm|sddm|gdm|lxdm) systemctl enable "${ALPINE_USB_DISPLAY_MANAGER}" 2>/dev/null || true ;;
+case "${LEDIT_USB_DISPLAY_MANAGER:-auto}" in
+  lightdm|sddm|gdm|lxdm) systemctl enable "${LEDIT_USB_DISPLAY_MANAGER}" 2>/dev/null || true ;;
 esac
-if [ "${ALPINE_USB_BOOTLOADER:-grub}" = grub ]; then
+if [ "${LEDIT_USB_BOOTLOADER:-grub}" = grub ]; then
   grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=ARCHUSB --removable
   grub-mkconfig -o /boot/grub/grub.cfg
 else

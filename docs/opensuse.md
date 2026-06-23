@@ -13,4 +13,4 @@ Known gap:
 
 - the openSUSE image builder currently populates a root filesystem but bootable partition/fstab/initrd/grub finalization is experimental. Use dry-run and package search confidently; validate any produced openSUSE image manually before flashing.
 
-Alpine build/flash behavior is unchanged.
+Build/flash behavior for the other distro backends is unchanged.

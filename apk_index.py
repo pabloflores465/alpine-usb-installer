@@ -1,3 +1,3 @@
 from __future__ import annotations
 
-from alpine_usb.apk_packages.index import *  # noqa: F403
+from ledit_core.apk_packages.index import *  # noqa: F403

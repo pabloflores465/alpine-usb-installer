@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs inside target Alpine image/chroot via alpine-make-vm-image.
-# The script is intentionally configurable through ALPINE_USB_* variables so
+# The script is intentionally configurable through LEDIT_USB_* variables so
 # the Qt installer can build more than the original fixed XFCE profile.
 set -eu
 
@@ -80,39 +80,39 @@ read_secret_value() {
 }
 
 # ---- Input configuration -------------------------------------------------
-USER_NAME="${ALPINE_USB_USER:-alpine}"
-USER_PASSWORD="$(read_secret_value ALPINE_USB_PASSWORD_FILE ALPINE_USB_PASSWORD alpine)"
-ROOT_PASSWORD="$(read_secret_value ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD "$USER_PASSWORD")"
-HOSTNAME="${ALPINE_USB_HOSTNAME:-alpine-usb}"
-TIMEZONE="${ALPINE_USB_TIMEZONE:-UTC}"
-LOCALE="${ALPINE_USB_LOCALE:-en_US.UTF-8}"
-LANGUAGE_VALUE="${ALPINE_USB_LANGUAGE:-${LOCALE%%.*}:en}"
-CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-us}"
-XKB_LAYOUT="${ALPINE_USB_XKB_LAYOUT:-us}"
-XKB_VARIANT="${ALPINE_USB_XKB_VARIANT:-}"
-XKB_MODEL="${ALPINE_USB_XKB_MODEL:-pc105}"
+USER_NAME="${LEDIT_USB_USER:-alpine}"
+USER_PASSWORD="$(read_secret_value LEDIT_USB_PASSWORD_FILE LEDIT_USB_PASSWORD alpine)"
+ROOT_PASSWORD="$(read_secret_value LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD "$USER_PASSWORD")"
+HOSTNAME="${LEDIT_USB_HOSTNAME:-ledit-linux}"
+TIMEZONE="${LEDIT_USB_TIMEZONE:-UTC}"
+LOCALE="${LEDIT_USB_LOCALE:-en_US.UTF-8}"
+LANGUAGE_VALUE="${LEDIT_USB_LANGUAGE:-${LOCALE%%.*}:en}"
+CONSOLE_KEYMAP="${LEDIT_USB_CONSOLE_KEYMAP:-us}"
+XKB_LAYOUT="${LEDIT_USB_XKB_LAYOUT:-us}"
+XKB_VARIANT="${LEDIT_USB_XKB_VARIANT:-}"
+XKB_MODEL="${LEDIT_USB_XKB_MODEL:-pc105}"
 
-DESKTOP="$(lower "${ALPINE_USB_DESKTOP:-xfce}")"
-TILING_WMS="$(normalize_words "${ALPINE_USB_TILING_WMS:-}")"
-DEFAULT_SESSION="$(lower "${ALPINE_USB_DEFAULT_SESSION:-auto}")"
-DISPLAY_MANAGER="$(lower "${ALPINE_USB_DISPLAY_MANAGER:-auto}")"
-NETWORK_BACKEND="$(lower "${ALPINE_USB_NETWORK:-networkmanager}")"
-WIFI="${ALPINE_USB_WIFI:-1}"
-BLUETOOTH="${ALPINE_USB_BLUETOOTH:-1}"
-AUDIO="$(lower "${ALPINE_USB_AUDIO:-pipewire}")"
-BROWSER="$(lower "${ALPINE_USB_BROWSER:-firefox}")"
-FIRMWARE="$(lower "${ALPINE_USB_FIRMWARE:-full}")"
-LEGACY_X11_DRIVERS="${ALPINE_USB_LEGACY_X11_DRIVERS:-1}"
-PROFILE="${ALPINE_USB_PROFILE:-compatibility}"
-BOOTLOADER="$(lower "${ALPINE_USB_BOOTLOADER:-grub}")"
-KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-lts}")"
-ROOTFS="$(lower "${ALPINE_USB_ROOTFS:-ext4}")"
-BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
-INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
-SYSTEMD_BOOT_CONSOLE_MODE="${ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE:-max}"
-AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-1}"
-EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}"
-DRY_RUN="${ALPINE_USB_DRY_RUN:-0}"
+DESKTOP="$(lower "${LEDIT_USB_DESKTOP:-xfce}")"
+TILING_WMS="$(normalize_words "${LEDIT_USB_TILING_WMS:-}")"
+DEFAULT_SESSION="$(lower "${LEDIT_USB_DEFAULT_SESSION:-auto}")"
+DISPLAY_MANAGER="$(lower "${LEDIT_USB_DISPLAY_MANAGER:-auto}")"
+NETWORK_BACKEND="$(lower "${LEDIT_USB_NETWORK:-networkmanager}")"
+WIFI="${LEDIT_USB_WIFI:-1}"
+BLUETOOTH="${LEDIT_USB_BLUETOOTH:-1}"
+AUDIO="$(lower "${LEDIT_USB_AUDIO:-pipewire}")"
+BROWSER="$(lower "${LEDIT_USB_BROWSER:-firefox}")"
+FIRMWARE="$(lower "${LEDIT_USB_FIRMWARE:-full}")"
+LEGACY_X11_DRIVERS="${LEDIT_USB_LEGACY_X11_DRIVERS:-1}"
+PROFILE="${LEDIT_USB_PROFILE:-compatibility}"
+BOOTLOADER="$(lower "${LEDIT_USB_BOOTLOADER:-grub}")"
+KERNEL_FLAVOR="$(lower "${LEDIT_USB_KERNEL_FLAVOR:-lts}")"
+ROOTFS="$(lower "${LEDIT_USB_ROOTFS:-ext4}")"
+BOOT_TIMEOUT="${LEDIT_USB_BOOT_TIMEOUT:-3}"
+INITFS_FEATURES="${LEDIT_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+SYSTEMD_BOOT_CONSOLE_MODE="${LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE:-max}"
+AUTO_RESIZE="${LEDIT_USB_AUTO_RESIZE:-1}"
+EXTRA_PACKAGES="${LEDIT_USB_EXTRA_PACKAGES:-}"
+DRY_RUN="${LEDIT_USB_DRY_RUN:-0}"
 
 # ---- Validation and auto resolution --------------------------------------
 case "$USER_NAME" in [a-z_]*) ;; *) die "Username must start with a lowercase letter or underscore" ;; esac
@@ -380,7 +380,7 @@ EOF
 
 q_layout=$(shell_quote "$XKB_LAYOUT")
 q_variant=$(shell_quote "$XKB_VARIANT")
-cat > /usr/local/bin/alpine-usb-setxkbmap <<EOF
+cat > /usr/local/bin/ledit-setxkbmap <<EOF
 #!/bin/sh
 layout=$q_layout
 variant=$q_variant
@@ -390,16 +390,16 @@ else
   /usr/bin/setxkbmap "\$layout" 2>/dev/null || true
 fi
 EOF
-chmod +x /usr/local/bin/alpine-usb-setxkbmap
+chmod +x /usr/local/bin/ledit-setxkbmap
 
 # ---- Session launcher and display managers -------------------------------
-cat > /usr/local/bin/alpine-usb-session <<EOF
+cat > /usr/local/bin/ledit-session <<EOF
 #!/bin/sh
 session="\${1:-$DEFAULT_SESSION}"
 export LANG=${LOCALE}
 export LANGUAGE=${LANGUAGE_VALUE}
 export LC_MESSAGES=${LOCALE}
-/usr/local/bin/alpine-usb-setxkbmap 2>/dev/null || true
+/usr/local/bin/ledit-setxkbmap 2>/dev/null || true
 run_dbus() {
   if command -v dbus-run-session >/dev/null 2>&1; then
     exec dbus-run-session -- "\$@"
@@ -408,7 +408,7 @@ run_dbus() {
 }
 start_x_if_needed() {
   if [ -z "\${DISPLAY:-}" ] && [ -z "\${WAYLAND_DISPLAY:-}" ] && command -v startx >/dev/null 2>&1; then
-    exec startx /usr/local/bin/alpine-usb-session "\$session" --
+    exec startx /usr/local/bin/ledit-session "\$session" --
   fi
 }
 case "\$session" in
@@ -430,23 +430,23 @@ case "\$session" in
   *) exec /bin/sh -l ;;
 esac
 EOF
-chmod +x /usr/local/bin/alpine-usb-session
+chmod +x /usr/local/bin/ledit-session
 
 if [ "$GRAPHICAL" = "1" ]; then
   mkdir -p /usr/share/xsessions /usr/share/wayland-sessions
-  cat > /usr/share/xsessions/alpine-usb.desktop <<EOF
+  cat > /usr/share/xsessions/ledit.desktop <<EOF
 [Desktop Entry]
-Name=Alpine USB Default ($DEFAULT_SESSION)
+Name=LEDIT Default ($DEFAULT_SESSION)
 Comment=Default session selected by LEDIT
-Exec=/usr/local/bin/alpine-usb-session
+Exec=/usr/local/bin/ledit-session
 Type=Application
 DesktopNames=AlpineUSB
 EOF
-  cat > /usr/share/wayland-sessions/alpine-usb.desktop <<EOF
+  cat > /usr/share/wayland-sessions/ledit.desktop <<EOF
 [Desktop Entry]
-Name=Alpine USB Default ($DEFAULT_SESSION)
+Name=LEDIT Default ($DEFAULT_SESSION)
 Comment=Default session selected by LEDIT
-Exec=/usr/local/bin/alpine-usb-session
+Exec=/usr/local/bin/ledit-session
 Type=Application
 DesktopNames=AlpineUSB
 EOF
@@ -455,13 +455,13 @@ fi
 case "$DISPLAY_MANAGER" in
   lightdm)
     mkdir -p /etc/lightdm/lightdm.conf.d
-    cat > /etc/lightdm/lightdm.conf.d/50-alpine-usb.conf <<EOF
+    cat > /etc/lightdm/lightdm.conf.d/50-ledit.conf <<EOF
 [Seat:*]
 greeter-session=lightdm-gtk-greeter
-user-session=alpine-usb
+user-session=ledit
 allow-guest=false
-display-setup-script=/usr/local/bin/alpine-usb-setxkbmap
-greeter-setup-script=/usr/local/bin/alpine-usb-setxkbmap
+display-setup-script=/usr/local/bin/ledit-setxkbmap
+greeter-setup-script=/usr/local/bin/ledit-setxkbmap
 EOF
     cat > /etc/lightdm/lightdm-gtk-greeter.conf <<'EOF'
 [greeter]
@@ -471,7 +471,7 @@ EOF
     ;;
   sddm)
     mkdir -p /etc/sddm.conf.d
-    cat > /etc/sddm.conf.d/10-alpine-usb.conf <<'EOF'
+    cat > /etc/sddm.conf.d/10-ledit.conf <<'EOF'
 [General]
 HaltCommand=/sbin/poweroff
 RebootCommand=/sbin/reboot
@@ -484,7 +484,7 @@ EOF
     ;;
   lxdm)
     if [ -f /etc/lxdm/lxdm.conf ]; then
-      sed -i 's|^session=.*|session=/usr/local/bin/alpine-usb-session|' /etc/lxdm/lxdm.conf || true
+      sed -i 's|^session=.*|session=/usr/local/bin/ledit-session|' /etc/lxdm/lxdm.conf || true
     fi
     ;;
   greetd)
@@ -494,7 +494,7 @@ EOF
 vt = 7
 
 [default_session]
-command = "tuigreet --time --remember --asterisks --cmd /usr/local/bin/alpine-usb-session"
+command = "tuigreet --time --remember --asterisks --cmd /usr/local/bin/ledit-session"
 user = "greetd"
 EOF
     ;;
@@ -531,19 +531,19 @@ EOF
 
 cat > "/home/$USER_NAME/.dmrc" <<EOF
 [Desktop]
-Session=alpine-usb
+Session=ledit
 Language=$LOCALE
 EOF
 cat > "/home/$USER_NAME/.xinitrc" <<'EOF'
 #!/bin/sh
-exec /usr/local/bin/alpine-usb-session
+exec /usr/local/bin/ledit-session
 EOF
 chmod +x "/home/$USER_NAME/.xinitrc"
 chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.dmrc" "/home/$USER_NAME/.xinitrc"
 
 # ---- Desktop applets and polkit agent ------------------------------------
 mkdir -p /usr/local/bin /etc/xdg/autostart
-cat > /usr/local/bin/alpine-usb-polkit-agent <<'EOF'
+cat > /usr/local/bin/ledit-polkit-agent <<'EOF'
 #!/bin/sh
 # Avoid duplicate polkit agents when a DE autostarts its own agent.
 if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -f 'polkit.*authentication|xfce-polkit|lxqt-policykit|mate-polkit' >/dev/null 2>&1; then
@@ -567,36 +567,36 @@ command -v lxqt-policykit-agent >/dev/null 2>&1 && exec lxqt-policykit-agent
 command -v polkit-gnome-authentication-agent-1 >/dev/null 2>&1 && exec polkit-gnome-authentication-agent-1
 exit 0
 EOF
-chmod +x /usr/local/bin/alpine-usb-polkit-agent
-cat > /etc/xdg/autostart/alpine-usb-polkit-agent.desktop <<'EOF'
+chmod +x /usr/local/bin/ledit-polkit-agent
+cat > /etc/xdg/autostart/ledit-polkit-agent.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=PolicyKit Authentication Agent
-Exec=/usr/local/bin/alpine-usb-polkit-agent
+Exec=/usr/local/bin/ledit-polkit-agent
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
 
 if [ "$NETWORK_BACKEND" = "networkmanager" ] && [ "$GRAPHICAL" = "1" ]; then
-  cat > /usr/local/bin/alpine-usb-nm-applet <<'EOF'
+  cat > /usr/local/bin/ledit-nm-applet <<'EOF'
 #!/bin/sh
 command -v nm-applet >/dev/null 2>&1 || exit 0
 if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -x nm-applet >/dev/null 2>&1; then exit 0; fi
 exec nm-applet
 EOF
-  chmod +x /usr/local/bin/alpine-usb-nm-applet
-  cat > /etc/xdg/autostart/alpine-usb-nm-applet.desktop <<'EOF'
+  chmod +x /usr/local/bin/ledit-nm-applet
+  cat > /etc/xdg/autostart/ledit-nm-applet.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Network Manager Applet
-Exec=/usr/local/bin/alpine-usb-nm-applet
+Exec=/usr/local/bin/ledit-nm-applet
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
 fi
 
 if [ "$AUDIO" = "pipewire" ] && [ "$GRAPHICAL" = "1" ]; then
-  cat > /usr/local/bin/alpine-usb-pipewire-session <<'EOF'
+  cat > /usr/local/bin/ledit-pipewire-session <<'EOF'
 #!/bin/sh
 # Start the desktop audio session explicitly. On Alpine/OpenRC there is no
 # systemd --user manager, so do not rely on systemd user units for PipeWire.
@@ -610,37 +610,37 @@ start_once() {
     return 0
   fi
   command -v "$name" >/dev/null 2>&1 || return 0
-  "$@" >/tmp/alpine-usb-"$name".log 2>&1 &
+  "$@" >/tmp/ledit-"$name".log 2>&1 &
 }
 
 start_once pipewire pipewire
 start_once wireplumber wireplumber
 start_once pipewire-pulse pipewire-pulse
 EOF
-  chmod +x /usr/local/bin/alpine-usb-pipewire-session
-  cat > /etc/xdg/autostart/alpine-usb-pipewire-session.desktop <<'EOF'
+  chmod +x /usr/local/bin/ledit-pipewire-session
+  cat > /etc/xdg/autostart/ledit-pipewire-session.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=PipeWire audio session
-Exec=/usr/local/bin/alpine-usb-pipewire-session
+Exec=/usr/local/bin/ledit-pipewire-session
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
 fi
 
 if is_enabled "$BLUETOOTH" && [ "$GRAPHICAL" = "1" ]; then
-  cat > /usr/local/bin/alpine-usb-blueman-applet <<'EOF'
+  cat > /usr/local/bin/ledit-blueman-applet <<'EOF'
 #!/bin/sh
 command -v blueman-applet >/dev/null 2>&1 || exit 0
 if command -v pgrep >/dev/null 2>&1 && pgrep -u "$(id -u)" -x blueman-applet >/dev/null 2>&1; then exit 0; fi
 exec blueman-applet
 EOF
-  chmod +x /usr/local/bin/alpine-usb-blueman-applet
-  cat > /etc/xdg/autostart/alpine-usb-blueman-applet.desktop <<'EOF'
+  chmod +x /usr/local/bin/ledit-blueman-applet
+  cat > /etc/xdg/autostart/ledit-blueman-applet.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Bluetooth Applet
-Exec=/usr/local/bin/alpine-usb-blueman-applet
+Exec=/usr/local/bin/ledit-blueman-applet
 X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
@@ -648,7 +648,7 @@ fi
 
 # ---- PolicyKit rules ------------------------------------------------------
 mkdir -p /etc/polkit-1/rules.d
-cat > /etc/polkit-1/rules.d/49-alpine-usb-desktop.rules <<'EOF'
+cat > /etc/polkit-1/rules.d/49-ledit-desktop.rules <<'EOF'
 polkit.addRule(function(action, subject) {
     var powerActions = [
         "org.freedesktop.login1.power-off",
@@ -673,7 +673,7 @@ polkit.addRule(function(action, subject) {
 EOF
 
 mkdir -p /etc/elogind/logind.conf.d
-cat > /etc/elogind/logind.conf.d/10-alpine-usb.conf <<'EOF'
+cat > /etc/elogind/logind.conf.d/10-ledit.conf <<'EOF'
 [Login]
 HandlePowerKey=poweroff
 HandleRebootKey=reboot
@@ -687,11 +687,11 @@ EOF
 # ---- Expand root filesystem to target USB size ---------------------------
 if is_enabled "$AUTO_RESIZE"; then
   mkdir -p /usr/local/sbin /etc/init.d /var/lib
-  cat > /usr/local/sbin/alpine-usb-grow-root <<'EOF'
+  cat > /usr/local/sbin/ledit-grow-root <<'EOF'
 #!/bin/sh
 set -eu
 
-marker=/var/lib/alpine-usb-grow-root.done
+marker=/var/lib/ledit-grow-root.done
 [ -e "$marker" ] && exit 0
 
 resolve_root_device() {
@@ -764,11 +764,11 @@ resize2fs "$rootdev"
 touch "$marker"
 echo "Root filesystem expansion complete."
 EOF
-  chmod +x /usr/local/sbin/alpine-usb-grow-root
+  chmod +x /usr/local/sbin/ledit-grow-root
 
-  cat > /etc/init.d/alpine-usb-grow-root <<'EOF'
+  cat > /etc/init.d/ledit-grow-root <<'EOF'
 #!/sbin/openrc-run
-description="Grow Alpine USB root partition/filesystem to fill the target USB drive"
+description="Grow LEDIT root partition/filesystem to fill the target USB drive"
 
 depend() {
   need localmount
@@ -777,17 +777,17 @@ depend() {
 }
 
 start() {
-  if [ -e /var/lib/alpine-usb-grow-root.done ]; then
-    ebegin "Alpine USB root filesystem already expanded"
+  if [ -e /var/lib/ledit-grow-root.done ]; then
+    ebegin "LEDIT root filesystem already expanded"
     eend 0
     return 0
   fi
-  ebegin "Expanding Alpine USB root filesystem"
-  /usr/local/sbin/alpine-usb-grow-root
+  ebegin "Expanding LEDIT root filesystem"
+  /usr/local/sbin/ledit-grow-root
   eend $?
 }
 EOF
-  chmod +x /etc/init.d/alpine-usb-grow-root
+  chmod +x /etc/init.d/ledit-grow-root
 fi
 
 # ---- Services -------------------------------------------------------------
@@ -804,7 +804,7 @@ rc-update add hostname boot || true
 rc-update add bootmisc boot || true
 rc-update add syslog boot || true
 if is_enabled "$AUTO_RESIZE"; then
-  rc-update add alpine-usb-grow-root boot || true
+  rc-update add ledit-grow-root boot || true
 fi
 rc-update add networking boot || true
 rc-update add chronyd default || true
@@ -873,7 +873,7 @@ fi
 mkdir -p /etc/skel/Desktop /etc/skel/.config
 cat > /etc/skel/.xinitrc <<'EOF'
 #!/bin/sh
-exec /usr/local/bin/alpine-usb-session
+exec /usr/local/bin/ledit-session
 EOF
 chmod +x /etc/skel/.xinitrc
 
@@ -896,9 +896,9 @@ if has_word i3 "$TILING_WMS"; then
   cat > /etc/skel/.config/i3/config <<'EOF'
 set $mod Mod4
 font pango:Noto Sans 10
-exec --no-startup-id /usr/local/bin/alpine-usb-polkit-agent
-exec --no-startup-id /usr/local/bin/alpine-usb-nm-applet
-exec --no-startup-id /usr/local/bin/alpine-usb-blueman-applet
+exec --no-startup-id /usr/local/bin/ledit-polkit-agent
+exec --no-startup-id /usr/local/bin/ledit-nm-applet
+exec --no-startup-id /usr/local/bin/ledit-blueman-applet
 bindsym $mod+Return exec xterm
 bindsym $mod+d exec dmenu_run
 bindsym $mod+Shift+q kill
@@ -916,9 +916,9 @@ input * {
     xkb_layout "$XKB_LAYOUT"
     xkb_variant "$XKB_VARIANT"
 }
-exec /usr/local/bin/alpine-usb-polkit-agent
-exec /usr/local/bin/alpine-usb-nm-applet
-exec /usr/local/bin/alpine-usb-blueman-applet
+exec /usr/local/bin/ledit-polkit-agent
+exec /usr/local/bin/ledit-nm-applet
+exec /usr/local/bin/ledit-blueman-applet
 include /etc/sway/config
 EOF
 fi
@@ -927,9 +927,9 @@ if has_word bspwm "$TILING_WMS"; then
   mkdir -p /etc/skel/.config/bspwm /etc/skel/.config/sxhkd
   cat > /etc/skel/.config/bspwm/bspwmrc <<'EOF'
 #!/bin/sh
-/usr/local/bin/alpine-usb-polkit-agent &
-/usr/local/bin/alpine-usb-nm-applet &
-/usr/local/bin/alpine-usb-blueman-applet &
+/usr/local/bin/ledit-polkit-agent &
+/usr/local/bin/ledit-nm-applet &
+/usr/local/bin/ledit-blueman-applet &
 pgrep -x sxhkd >/dev/null 2>&1 || sxhkd &
 bspc config border_width 2
 bspc config window_gap 8
@@ -954,7 +954,7 @@ if [ -d /etc/skel/.config ]; then
 fi
 
 cat > /etc/motd <<EOF
-Alpine USB ready.
+LEDIT ready.
 User: $USER_NAME
 Initial password: configured at build time
 Desktop: $DESKTOP
@@ -1013,4 +1013,4 @@ fi
 
 echo "$HOSTNAME" > /etc/hostname
 
-echo "Alpine USB configuration complete: desktop=$DESKTOP dm=$DISPLAY_MANAGER bootloader=$BOOTLOADER kernel=linux-$KERNEL_FLAVOR"
+echo "LEDIT configuration complete: desktop=$DESKTOP dm=$DISPLAY_MANAGER bootloader=$BOOTLOADER kernel=linux-$KERNEL_FLAVOR"

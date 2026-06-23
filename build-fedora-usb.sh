@@ -20,7 +20,7 @@ safe_token() {
 release="${FEDORA_RELEASE:-stable}"
 arch="${ARCH:-x86_64}"
 user_name="${FEDORA_USB_USER:-fedora}"
-hostname="${FEDORA_USB_HOSTNAME:-fedora-usb}"
+hostname="${FEDORA_USB_HOSTNAME:-ledit-fedora}"
 timezone="${FEDORA_USB_TIMEZONE:-UTC}"
 locale="${FEDORA_USB_LOCALE:-en_US.UTF-8}"
 console_keymap="${FEDORA_USB_CONSOLE_KEYMAP:-us}"
@@ -28,7 +28,7 @@ xkb_layout="${FEDORA_USB_XKB_LAYOUT:-us}"
 bootloader="${FEDORA_USB_BOOTLOADER:-grub}"
 boot_timeout="${FEDORA_USB_BOOT_TIMEOUT:-3}"
 image_size="${IMAGE_SIZE:-16G}"
-image_name="${IMAGE_NAME:-fedora-usb.img}"
+image_name="${IMAGE_NAME:-ledit-fedora.img}"
 output_path="${OUTPUT_PATH:-$image_name}"
 packages="${FEDORA_USB_PACKAGES:-}"
 groups="${FEDORA_USB_GROUPS:-core}"
@@ -88,7 +88,7 @@ if [[ "$(uname -s)" == "Darwin" && "${FEDORA_USB_BUILD_IN_DOCKER:-0}" != "1" ]];
   docker_env=(-e FEDORA_USB_BUILD_IN_DOCKER=1)
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   docker_name_args=()
-  docker_name="${FEDORA_USB_DOCKER_NAME:-${ALPINE_USB_DOCKER_NAME:-}}"
+  docker_name="${FEDORA_USB_DOCKER_NAME:-${LEDIT_USB_DOCKER_NAME:-}}"
   if [[ -n "$docker_name" ]]; then
     if [[ "$docker_name" == *[!A-Za-z0-9_.-]* ]]; then echo "Invalid Docker container name: $docker_name" >&2; exit 1; fi
     docker_name_args=(--name "$docker_name")

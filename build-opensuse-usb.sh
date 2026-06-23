@@ -2,7 +2,7 @@
 # Experimental openSUSE image builder foundation. Uses zypper --root when run on Linux with required privileges/tools.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="${IMAGE_NAME:-opensuse-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit-opensuse.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work/opensuse}"
@@ -67,7 +67,7 @@ NETWORK_BACKEND="$(lower "${OPENSUSE_USB_NETWORK:-networkmanager}")"
 USER_NAME="${OPENSUSE_USB_USER:-linux}"
 USER_PASSWORD="$(read_secret OPENSUSE_USB_PASSWORD_FILE OPENSUSE_USB_PASSWORD linux)"
 ROOT_PASSWORD="$(read_secret OPENSUSE_USB_ROOT_PASSWORD_FILE OPENSUSE_USB_ROOT_PASSWORD "$USER_PASSWORD")"
-HOSTNAME="${OPENSUSE_USB_HOSTNAME:-opensuse-usb}"
+HOSTNAME="${OPENSUSE_USB_HOSTNAME:-ledit-opensuse}"
 TIMEZONE="${OPENSUSE_USB_TIMEZONE:-UTC}"
 LOCALE="${OPENSUSE_USB_LOCALE:-en_US.UTF-8}"
 CONSOLE_KEYMAP="${OPENSUSE_USB_CONSOLE_KEYMAP:-us}"

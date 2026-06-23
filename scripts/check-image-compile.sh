@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m compileall -q alpine_usb
+python3 -m compileall -q ledit_core
 
 run_dry() {
   distro="$1"

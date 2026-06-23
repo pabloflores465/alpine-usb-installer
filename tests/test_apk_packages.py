@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from alpine_usb.apk_packages import index
+from ledit_core.apk_packages import index
 
 APKINDEX_TEXT = """P:firefox
 V:1.0-r0
@@ -74,7 +74,7 @@ def test_fetch_uses_disk_cache_until_ttl_expires(tmp_path, monkeypatch: pytest.M
         calls["count"] += 1
         return [{"name": "firefox", "description": "Browser", "version": "1", "repo": "main"}]
 
-    monkeypatch.setenv("ALPINE_USB_APK_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("LEDIT_USB_APK_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(index, "_download_apk_packages", download)
 
     first = index.fetch_official_apk_packages("latest-stable", "x86_64")
@@ -92,7 +92,7 @@ def test_fetch_falls_back_to_stale_cache_when_download_fails(tmp_path, monkeypat
         json.dumps({"version": index.CACHE_VERSION, "fetched_at": time.time() - 999999, "packages": cached})
     )
 
-    monkeypatch.setenv("ALPINE_USB_APK_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("LEDIT_USB_APK_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(index, "_download_apk_packages", lambda branch, arch: (_ for _ in ()).throw(OSError("offline")))
 
     assert index.fetch_official_apk_packages("latest-stable", "x86_64") == cached

@@ -2,7 +2,7 @@
 # Build a configurable, preinstalled Ubuntu USB image.
 set -euo pipefail
 
-IMAGE_NAME="${IMAGE_NAME:-ubuntu-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit-ubuntu.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 UBUNTU_RELEASE="${UBUNTU_RELEASE:-24.04}"

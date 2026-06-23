@@ -4,7 +4,7 @@
 set -eu
 
 ROOT_DIR=${ROOT_DIR:-.work/arch-root}
-DRY_RUN=${ALPINE_USB_DRY_RUN:-0}
+DRY_RUN=${LEDIT_USB_DRY_RUN:-0}
 PACKAGES_FILE=${ARCH_USB_PACKAGES_FILE:-.work/arch-packages.txt}
 CONFIG_FILE=${ARCH_USB_CONFIG_FILE:-.work/arch-config.env}
 
@@ -15,22 +15,22 @@ import os
 import shlex
 import sys
 
-from alpine_usb.build_profiles.arch import arch_packages_from_env
-from alpine_usb.apk_packages.index import validate_package_name
+from ledit_core.build_profiles.arch import arch_packages_from_env
+from ledit_core.apk_packages.index import validate_package_name
 
 packages_file, config_file = sys.argv[1:3]
 env = dict(os.environ)
-for key in ["ALPINE_USB_USER", "ALPINE_USB_HOSTNAME", "ALPINE_USB_TIMEZONE", "ALPINE_USB_LOCALE", "ALPINE_USB_CONSOLE_KEYMAP", "ALPINE_USB_XKB_LAYOUT"]:
+for key in ["LEDIT_USB_USER", "LEDIT_USB_HOSTNAME", "LEDIT_USB_TIMEZONE", "LEDIT_USB_LOCALE", "LEDIT_USB_CONSOLE_KEYMAP", "LEDIT_USB_XKB_LAYOUT"]:
     if not env.get(key):
         raise SystemExit(f"ERROR: {key} must not be empty")
-for pkg in env.get("ALPINE_USB_EXTRA_PACKAGES", "").split():
+for pkg in env.get("LEDIT_USB_EXTRA_PACKAGES", "").split():
     validate_package_name(pkg)
 packages = arch_packages_from_env(env)
 os.makedirs(os.path.dirname(packages_file) or ".", exist_ok=True)
 with open(packages_file, "w", encoding="utf-8") as fh:
     fh.write("\n".join(packages) + "\n")
 with open(config_file, "w", encoding="utf-8") as fh:
-    for key in sorted(k for k in env if k.startswith("ALPINE_USB_") or k.startswith("ARCH_USB_") or k == "ARCH"):
+    for key in sorted(k for k in env if k.startswith("LEDIT_USB_") or k.startswith("ARCH_USB_") or k == "ARCH"):
         fh.write(f"{key}={shlex.quote(env[key])}\n")
 print("Arch package set:")
 print(" ".join(packages))

@@ -2,8 +2,6 @@
 
 Build and flash configurable, preinstalled **Linux USB/external-drive images** from a Qt GUI, a full-screen TUI, or one unified CLI.
 
-LEDIT was formerly Alpine USB Installer. The legacy `./alpine-usb` launcher remains as a compatibility alias; new docs, assets, and binaries use `./ledit`.
-
 > License: GPL-2.0-only. See [`LICENSE`](LICENSE).
 
 ## Supported distributions
@@ -74,12 +72,6 @@ Default output directory:
 /tmp/ledit/
 ```
 
-Legacy alias:
-
-```sh
-./alpine-usb --help
-```
-
 ## CLI examples
 
 ```sh
@@ -103,7 +95,7 @@ Legacy alias:
 
 # List and flash devices
 ./ledit devices
-./ledit flash /tmp/ledit/alpine-usb.img /dev/sdX
+./ledit flash /tmp/ledit/ledit.img /dev/sdX
 ```
 
 Extra packages can be repeated or space-separated:

@@ -1,34 +1,26 @@
-# Generated images and large build/release artifacts
-*.img
-*.qcow2
-*.raw
-*.iso
-.work/
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Build outputs
 build/
 dist/
 standalone-release/
-Alpine USB Installer.spec
-alpine-usb.spec
+*.spec
 aports/
 
 # macOS
 .DS_Store
-._*
 
-# Temporary EFI build outputs
-efi-fallback/BOOTX64.EFI
-
-# Python
-__pycache__/
-*.pyc
-.ruff_cache/
-.pytest_cache/
-
-# Virtualenv
+# Runtime work dirs
+.work/
+.qtvenv/
 .venv/
 
-# Qt venv
-.qtvenv/
+# Generated EFI fallback binary
+/efi-fallback/BOOTX64.EFI
 
-# Pi agent local settings
+# Pi agent artifacts
 .pi/

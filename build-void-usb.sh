@@ -2,10 +2,10 @@
 # Build a configurable, preinstalled Void Linux USB image with xbps-install -r.
 set -euo pipefail
 
-IMAGE_NAME="${IMAGE_NAME:-void-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit-void.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
-VOID_REPOSITORY="${VOID_REPOSITORY:-${ALPINE_BRANCH:-current}}"
+VOID_REPOSITORY="${VOID_REPOSITORY:-current}"
 ARCH="${ARCH:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
@@ -39,10 +39,10 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${VOID_USB_BUILD_IN_DOCKER:-0}" != "1" ]; 
       output_base="$(basename "$OUTPUT_PATH")"
       printf '%s\n' "OUTPUT_PATH=/out/$output_base"
     fi
-    for name in ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE; do
+    for name in LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE LEDIT_USB_CONSOLE_KEYMAP LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE; do
       value="${!name-}"
       case "$name" in
-        ALPINE_USB_PASSWORD_FILE|ALPINE_USB_ROOT_PASSWORD_FILE)
+        LEDIT_USB_PASSWORD_FILE|LEDIT_USB_ROOT_PASSWORD_FILE)
           if [ -n "$value" ] && [ -f "$value" ]; then
             direct_name="${name%_FILE}"
             printf '%s=%s\n' "$direct_name" "$(cat "$value")"
@@ -158,18 +158,18 @@ cleanup_chroot_binds() { set +e; for fs in run sys proc dev; do mountpoint -q "$
 trap 'cleanup_chroot_binds; cleanup' EXIT
 cp "$SCRIPT_DIR/configure-void-usb.sh" "$MOUNT_DIR/root/configure-void-usb.sh"
 chmod +x "$MOUNT_DIR/root/configure-void-usb.sh"
-CONFIG_PACKAGES="$(ALPINE_USB_DRY_RUN=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh | awk '/^ packages:/ {sub(/^ packages:[[:space:]]*/, ""); print; exit}')"
+CONFIG_PACKAGES="$(LEDIT_USB_DRY_RUN=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh | awk '/^ packages:/ {sub(/^ packages:[[:space:]]*/, ""); print; exit}')"
 if [ -n "$CONFIG_PACKAGES" ]; then
   # shellcheck disable=SC2086
   void_local_install "$REPO_URL" "$ARCH" "$VOID_LOCALREPO" "$MOUNT_DIR" $CONFIG_PACKAGES
 fi
-ALPINE_USB_SKIP_PACKAGE_INSTALL=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh
+LEDIT_USB_SKIP_PACKAGE_INSTALL=1 chroot "$MOUNT_DIR" /root/configure-void-usb.sh
 xbps-reconfigure -r "$MOUNT_DIR" -fa
 ROOT_UUID="$(blkid -s UUID -o value "$ROOT_PART")"
 mkdir -p "$MOUNT_DIR/boot/grub"
 cat > "$MOUNT_DIR/boot/grub/grub.cfg" <<EOF
 set default=0
-set timeout=${ALPINE_USB_BOOT_TIMEOUT:-3}
+set timeout=${LEDIT_USB_BOOT_TIMEOUT:-3}
 menuentry 'Void Linux USB' {
     linux /boot/vmlinuz root=UUID=$ROOT_UUID ro rootwait
     initrd /boot/initramfs

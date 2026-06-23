@@ -2,7 +2,7 @@
 # Build a configurable, preinstalled Alpine Linux USB image.
 set -euo pipefail
 
-IMAGE_NAME="${IMAGE_NAME:-alpine-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ALPINE_BRANCH="${ALPINE_BRANCH:-latest-stable}"
@@ -14,22 +14,22 @@ MAKE_VM_IMAGE_SOURCE="$WORK_DIR/alpine-make-vm-image.uefi.source"
 MAKE_VM_IMAGE_COMMIT="dda77715d4dfe8704eb55f310dc1318920d5fd75"
 MAKE_VM_IMAGE_SHA256="860b2b9efb73869085ba0a9401555ff0eac29072d102ffd39884ddb90aedc2f4"
 MAKE_VM_IMAGE_URL="https://raw.githubusercontent.com/alpinelinux/alpine-make-vm-image/$MAKE_VM_IMAGE_COMMIT/alpine-make-vm-image"
-DOCKER_IMAGE="${ALPINE_USB_DOCKER_IMAGE:-alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601}"
-BUILDER_IMAGE="${ALPINE_USB_BUILDER_IMAGE:-alpine-usb-builder:3.22-amd64}"
-BUILDER_DOCKERFILE="${ALPINE_USB_BUILDER_DOCKERFILE:-$SCRIPT_DIR/scripts/Dockerfile.builder}"
+DOCKER_IMAGE="${LEDIT_USB_DOCKER_IMAGE:-alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601}"
+BUILDER_IMAGE="${LEDIT_USB_BUILDER_IMAGE:-ledit-linux-builder:3.22-amd64}"
+BUILDER_DOCKERFILE="${LEDIT_USB_BUILDER_DOCKERFILE:-$SCRIPT_DIR/scripts/Dockerfile.builder}"
 
-ALPINE_USB_KERNEL_FLAVOR="${ALPINE_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
-ALPINE_USB_BOOTLOADER="${ALPINE_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
-ALPINE_USB_ROOTFS="${ALPINE_USB_ROOTFS:-ext4}"
-ALPINE_USB_BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
-ALPINE_USB_INITFS_FEATURES="${ALPINE_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
-ALPINE_USB_USER="${ALPINE_USB_USER:-alpine}"
+LEDIT_USB_KERNEL_FLAVOR="${LEDIT_USB_KERNEL_FLAVOR:-${KERNEL_FLAVOR:-lts}}"
+LEDIT_USB_BOOTLOADER="${LEDIT_USB_BOOTLOADER:-${BOOTLOADER:-grub}}"
+LEDIT_USB_ROOTFS="${LEDIT_USB_ROOTFS:-ext4}"
+LEDIT_USB_BOOT_TIMEOUT="${LEDIT_USB_BOOT_TIMEOUT:-3}"
+LEDIT_USB_INITFS_FEATURES="${LEDIT_USB_INITFS_FEATURES:-ata base ext4 kms mmc nvme scsi usb virtio}"
+LEDIT_USB_USER="${LEDIT_USB_USER:-alpine}"
 
-ALPINE_USB_BOOTLOADER="$(printf '%s' "$ALPINE_USB_BOOTLOADER" | tr '[:upper:]' '[:lower:]')"
-[ "$ALPINE_USB_BOOTLOADER" = "systemdboot" ] && ALPINE_USB_BOOTLOADER="systemd-boot"
-case "$ALPINE_USB_BOOTLOADER" in grub|systemd-boot) ;; *) echo "Invalid bootloader: $ALPINE_USB_BOOTLOADER" >&2; exit 1 ;; esac
-case "$ALPINE_USB_KERNEL_FLAVOR" in lts|stable) ;; *) echo "Invalid kernel flavor: $ALPINE_USB_KERNEL_FLAVOR" >&2; exit 1 ;; esac
-case "$ALPINE_USB_ROOTFS" in ext4) ;; *) echo "Only ext4 rootfs is supported by this USB installer" >&2; exit 1 ;; esac
+LEDIT_USB_BOOTLOADER="$(printf '%s' "$LEDIT_USB_BOOTLOADER" | tr '[:upper:]' '[:lower:]')"
+[ "$LEDIT_USB_BOOTLOADER" = "systemdboot" ] && LEDIT_USB_BOOTLOADER="systemd-boot"
+case "$LEDIT_USB_BOOTLOADER" in grub|systemd-boot) ;; *) echo "Invalid bootloader: $LEDIT_USB_BOOTLOADER" >&2; exit 1 ;; esac
+case "$LEDIT_USB_KERNEL_FLAVOR" in lts|stable) ;; *) echo "Invalid kernel flavor: $LEDIT_USB_KERNEL_FLAVOR" >&2; exit 1 ;; esac
+case "$LEDIT_USB_ROOTFS" in ext4) ;; *) echo "Only ext4 rootfs is supported by this USB installer" >&2; exit 1 ;; esac
 if [[ "$ALPINE_BRANCH" != "latest-stable" && "$ALPINE_BRANCH" != "edge" && ! "$ALPINE_BRANCH" =~ ^v[0-9]+\.[0-9]+$ ]]; then
   echo "Invalid Alpine branch: $ALPINE_BRANCH" >&2
   exit 1
@@ -78,8 +78,8 @@ chmod 700 "$WORK_DIR" 2>/dev/null || true
 # macOS cannot run the Linux/NBD build natively. Run it in a privileged Docker
 # container. Prefer a cached builder image so repeated builds do not reinstall
 # the same build tools every time; fall back to the pinned Alpine base image if
-# the Dockerfile is unavailable or ALPINE_USB_SKIP_BUILDER_CACHE=1.
-if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
+# the Dockerfile is unavailable or LEDIT_USB_SKIP_BUILDER_CACHE=1.
+if [ "$(uname -s)" = "Darwin" ] && [ "${LEDIT_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
   if ! command -v docker >/dev/null 2>&1; then
     echo "Docker not found. Install Docker Desktop and try again." >&2
     exit 1
@@ -91,20 +91,20 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
 
   pass_env=(
     IMAGE_NAME OUTPUT_PATH IMAGE_SIZE ALPINE_BRANCH ARCH
-    ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME
-    ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE
-    ALPINE_USB_CONSOLE_KEYMAP ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL
-    ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER
-    ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER
-    ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR ALPINE_USB_ROOTFS
-    ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_INITFS_FEATURES ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE
-    ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE
+    LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME
+    LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE
+    LEDIT_USB_CONSOLE_KEYMAP LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL
+    LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER
+    LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER
+    LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR LEDIT_USB_ROOTFS
+    LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_INITFS_FEATURES LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE
+    LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE
   )
-  docker_env=(-e ALPINE_USB_BUILD_IN_DOCKER=1)
+  docker_env=(-e LEDIT_USB_BUILD_IN_DOCKER=1)
   docker_mounts=(-v "$SCRIPT_DIR:/work")
   docker_name_args=()
-  if [ -n "${ALPINE_USB_DOCKER_NAME:-}" ]; then
-    docker_name_args=(--name "$ALPINE_USB_DOCKER_NAME")
+  if [ -n "${LEDIT_USB_DOCKER_NAME:-}" ]; then
+    docker_name_args=(--name "$LEDIT_USB_DOCKER_NAME")
   fi
   for name in "${pass_env[@]}"; do
     value="${!name-}"
@@ -122,12 +122,12 @@ if [ "$(uname -s)" = "Darwin" ] && [ "${ALPINE_USB_BUILD_IN_DOCKER:-0}" != "1" ]
     docker_env+=( -e "$name=$value" )
   done
 
-  if [ "${ALPINE_USB_SKIP_BUILDER_CACHE:-0}" != "1" ] && [ -f "$BUILDER_DOCKERFILE" ]; then
-    if [ "${ALPINE_USB_REBUILD_BUILDER:-0}" = "1" ] || ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
-      echo "Building cached Alpine USB builder image ($BUILDER_IMAGE)..."
+  if [ "${LEDIT_USB_SKIP_BUILDER_CACHE:-0}" != "1" ] && [ -f "$BUILDER_DOCKERFILE" ]; then
+    if [ "${LEDIT_USB_REBUILD_BUILDER:-0}" = "1" ] || ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
+      echo "Building cached LEDIT builder image ($BUILDER_IMAGE)..."
       docker build --platform linux/amd64 -f "$BUILDER_DOCKERFILE" -t "$BUILDER_IMAGE" "$(dirname "$BUILDER_DOCKERFILE")"
     fi
-    echo "Starting Docker build container with cached Alpine USB build tools ($BUILDER_IMAGE)..."
+    echo "Starting Docker build container with cached LEDIT build tools ($BUILDER_IMAGE)..."
     exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged \
       "${docker_env[@]}" \
       "${docker_mounts[@]}" \
@@ -274,13 +274,13 @@ install_grub_removable_bootloader() {
   local esp_offset root_uuid grub_cfg modules_csv
 
   eval "$(read_image_meta "$image")"
-  modules_csv="$(printf '%s' "$ALPINE_USB_INITFS_FEATURES" | tr ' ' ',')"
+  modules_csv="$(printf '%s' "$LEDIT_USB_INITFS_FEATURES" | tr ' ' ',')"
 
   grub_cfg="$WORK_DIR/grub-usb.cfg"
   mkdir -p "$SCRIPT_DIR/efi-fallback"
   cat > "$grub_cfg" <<EOF
 set default=0
-set timeout=$ALPINE_USB_BOOT_TIMEOUT
+set timeout=$LEDIT_USB_BOOT_TIMEOUT
 set timeout_style=menu
 
 insmod part_gpt
@@ -288,16 +288,16 @@ insmod fat
 insmod gzio
 insmod linux
 insmod search_fs_file
-search --no-floppy --file --set=root /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR
+search --no-floppy --file --set=root /vmlinuz-$LEDIT_USB_KERNEL_FLAVOR
 
 menuentry 'Alpine Linux USB' {
-    linux /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$ALPINE_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0
-    initrd /initramfs-$ALPINE_USB_KERNEL_FLAVOR
+    linux /vmlinuz-$LEDIT_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$LEDIT_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0
+    initrd /initramfs-$LEDIT_USB_KERNEL_FLAVOR
 }
 
 menuentry 'Alpine Linux USB (safe graphics)' {
-    linux /vmlinuz-$ALPINE_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$ALPINE_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0 nomodeset
-    initrd /initramfs-$ALPINE_USB_KERNEL_FLAVOR
+    linux /vmlinuz-$LEDIT_USB_KERNEL_FLAVOR root=UUID=$root_uuid ro rootfstype=$LEDIT_USB_ROOTFS rootwait rootdelay=5 modules=$modules_csv console=tty0 nomodeset
+    initrd /initramfs-$LEDIT_USB_KERNEL_FLAVOR
 }
 EOF
 
@@ -369,17 +369,17 @@ cleanup_secret_configure() {
   [ -n "$SECRET_CONFIGURE_SCRIPT" ] && rm -f "$SECRET_CONFIGURE_SCRIPT"
 }
 trap cleanup_secret_configure EXIT INT TERM
-if [ -n "${ALPINE_USB_PASSWORD_FILE:-}" ] || [ -n "${ALPINE_USB_ROOT_PASSWORD_FILE:-}" ]; then
+if [ -n "${LEDIT_USB_PASSWORD_FILE:-}" ] || [ -n "${LEDIT_USB_ROOT_PASSWORD_FILE:-}" ]; then
   password_value=""
   root_password_value=""
-  [ -n "${ALPINE_USB_PASSWORD_FILE:-}" ] && password_value="$(cat "$ALPINE_USB_PASSWORD_FILE")"
-  [ -n "${ALPINE_USB_ROOT_PASSWORD_FILE:-}" ] && root_password_value="$(cat "$ALPINE_USB_ROOT_PASSWORD_FILE")"
+  [ -n "${LEDIT_USB_PASSWORD_FILE:-}" ] && password_value="$(cat "$LEDIT_USB_PASSWORD_FILE")"
+  [ -n "${LEDIT_USB_ROOT_PASSWORD_FILE:-}" ] && root_password_value="$(cat "$LEDIT_USB_ROOT_PASSWORD_FILE")"
   [ -n "$root_password_value" ] || root_password_value="$password_value"
-  SECRET_CONFIGURE_SCRIPT="$WORK_DIR/configure-alpine-usb-secure-$$.sh"
+  SECRET_CONFIGURE_SCRIPT="$WORK_DIR/configure-ledit-linux-secure-$$.sh"
   {
     printf '#!/bin/sh\n'
-    printf 'ALPINE_USB_PASSWORD=%s\n' "$(shell_quote "$password_value")"
-    printf 'ALPINE_USB_ROOT_PASSWORD=%s\n' "$(shell_quote "$root_password_value")"
+    printf 'LEDIT_USB_PASSWORD=%s\n' "$(shell_quote "$password_value")"
+    printf 'LEDIT_USB_ROOT_PASSWORD=%s\n' "$(shell_quote "$root_password_value")"
     cat "$SCRIPT_DIR/configure-alpine-usb.sh"
   } > "$SECRET_CONFIGURE_SCRIPT"
   chmod 700 "$SECRET_CONFIGURE_SCRIPT"
@@ -388,43 +388,43 @@ fi
 
 # raw image: easiest to dd to USB.
 sudo env \
-  ALPINE_USB_USER="$ALPINE_USB_USER" \
-  ALPINE_USB_HOSTNAME="${ALPINE_USB_HOSTNAME:-}" \
-  ALPINE_USB_TIMEZONE="${ALPINE_USB_TIMEZONE:-}" \
-  ALPINE_USB_LOCALE="${ALPINE_USB_LOCALE:-}" \
-  ALPINE_USB_LANGUAGE="${ALPINE_USB_LANGUAGE:-}" \
-  ALPINE_USB_CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-}" \
-  ALPINE_USB_XKB_LAYOUT="${ALPINE_USB_XKB_LAYOUT:-}" \
-  ALPINE_USB_XKB_VARIANT="${ALPINE_USB_XKB_VARIANT:-}" \
-  ALPINE_USB_XKB_MODEL="${ALPINE_USB_XKB_MODEL:-}" \
-  ALPINE_USB_DESKTOP="${ALPINE_USB_DESKTOP:-}" \
-  ALPINE_USB_TILING_WMS="${ALPINE_USB_TILING_WMS:-}" \
-  ALPINE_USB_DEFAULT_SESSION="${ALPINE_USB_DEFAULT_SESSION:-}" \
-  ALPINE_USB_DISPLAY_MANAGER="${ALPINE_USB_DISPLAY_MANAGER:-}" \
-  ALPINE_USB_NETWORK="${ALPINE_USB_NETWORK:-}" \
-  ALPINE_USB_WIFI="${ALPINE_USB_WIFI:-}" \
-  ALPINE_USB_BLUETOOTH="${ALPINE_USB_BLUETOOTH:-}" \
-  ALPINE_USB_AUDIO="${ALPINE_USB_AUDIO:-}" \
-  ALPINE_USB_BROWSER="${ALPINE_USB_BROWSER:-}" \
-  ALPINE_USB_FIRMWARE="${ALPINE_USB_FIRMWARE:-}" \
-  ALPINE_USB_LEGACY_X11_DRIVERS="${ALPINE_USB_LEGACY_X11_DRIVERS:-}" \
-  ALPINE_USB_PROFILE="${ALPINE_USB_PROFILE:-}" \
-  ALPINE_USB_BOOTLOADER="$ALPINE_USB_BOOTLOADER" \
-  ALPINE_USB_KERNEL_FLAVOR="$ALPINE_USB_KERNEL_FLAVOR" \
-  ALPINE_USB_ROOTFS="$ALPINE_USB_ROOTFS" \
-  ALPINE_USB_BOOT_TIMEOUT="$ALPINE_USB_BOOT_TIMEOUT" \
-  ALPINE_USB_INITFS_FEATURES="$ALPINE_USB_INITFS_FEATURES" \
-  ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE="${ALPINE_USB_SYSTEMD_BOOT_CONSOLE_MODE:-}" \
-  ALPINE_USB_AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-}" \
-  ALPINE_USB_EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}" \
+  LEDIT_USB_USER="$LEDIT_USB_USER" \
+  LEDIT_USB_HOSTNAME="${LEDIT_USB_HOSTNAME:-}" \
+  LEDIT_USB_TIMEZONE="${LEDIT_USB_TIMEZONE:-}" \
+  LEDIT_USB_LOCALE="${LEDIT_USB_LOCALE:-}" \
+  LEDIT_USB_LANGUAGE="${LEDIT_USB_LANGUAGE:-}" \
+  LEDIT_USB_CONSOLE_KEYMAP="${LEDIT_USB_CONSOLE_KEYMAP:-}" \
+  LEDIT_USB_XKB_LAYOUT="${LEDIT_USB_XKB_LAYOUT:-}" \
+  LEDIT_USB_XKB_VARIANT="${LEDIT_USB_XKB_VARIANT:-}" \
+  LEDIT_USB_XKB_MODEL="${LEDIT_USB_XKB_MODEL:-}" \
+  LEDIT_USB_DESKTOP="${LEDIT_USB_DESKTOP:-}" \
+  LEDIT_USB_TILING_WMS="${LEDIT_USB_TILING_WMS:-}" \
+  LEDIT_USB_DEFAULT_SESSION="${LEDIT_USB_DEFAULT_SESSION:-}" \
+  LEDIT_USB_DISPLAY_MANAGER="${LEDIT_USB_DISPLAY_MANAGER:-}" \
+  LEDIT_USB_NETWORK="${LEDIT_USB_NETWORK:-}" \
+  LEDIT_USB_WIFI="${LEDIT_USB_WIFI:-}" \
+  LEDIT_USB_BLUETOOTH="${LEDIT_USB_BLUETOOTH:-}" \
+  LEDIT_USB_AUDIO="${LEDIT_USB_AUDIO:-}" \
+  LEDIT_USB_BROWSER="${LEDIT_USB_BROWSER:-}" \
+  LEDIT_USB_FIRMWARE="${LEDIT_USB_FIRMWARE:-}" \
+  LEDIT_USB_LEGACY_X11_DRIVERS="${LEDIT_USB_LEGACY_X11_DRIVERS:-}" \
+  LEDIT_USB_PROFILE="${LEDIT_USB_PROFILE:-}" \
+  LEDIT_USB_BOOTLOADER="$LEDIT_USB_BOOTLOADER" \
+  LEDIT_USB_KERNEL_FLAVOR="$LEDIT_USB_KERNEL_FLAVOR" \
+  LEDIT_USB_ROOTFS="$LEDIT_USB_ROOTFS" \
+  LEDIT_USB_BOOT_TIMEOUT="$LEDIT_USB_BOOT_TIMEOUT" \
+  LEDIT_USB_INITFS_FEATURES="$LEDIT_USB_INITFS_FEATURES" \
+  LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE="${LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE:-}" \
+  LEDIT_USB_AUTO_RESIZE="${LEDIT_USB_AUTO_RESIZE:-}" \
+  LEDIT_USB_EXTRA_PACKAGES="${LEDIT_USB_EXTRA_PACKAGES:-}" \
   "$MAKE_VM_IMAGE" \
   --image-format raw \
   --image-size "$IMAGE_SIZE" \
   --arch "$ARCH" \
   --boot-mode UEFI \
-  --kernel-flavor "$ALPINE_USB_KERNEL_FLAVOR" \
-  --rootfs "$ALPINE_USB_ROOTFS" \
-  --initfs-features "$ALPINE_USB_INITFS_FEATURES" \
+  --kernel-flavor "$LEDIT_USB_KERNEL_FLAVOR" \
+  --rootfs "$LEDIT_USB_ROOTFS" \
+  --initfs-features "$LEDIT_USB_INITFS_FEATURES" \
   --repositories-file "$SCRIPT_DIR/repositories" \
   --script-chroot \
   "$BUILD_IMAGE_PATH" \
@@ -434,7 +434,7 @@ if [ -f "$BUILD_IMAGE_PATH" ]; then
   sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE_PATH" 2>/dev/null || true
 fi
 
-case "$ALPINE_USB_BOOTLOADER" in
+case "$LEDIT_USB_BOOTLOADER" in
   grub) install_grub_removable_bootloader "$BUILD_IMAGE_PATH" ;;
   systemd-boot) validate_systemd_bootloader "$BUILD_IMAGE_PATH" ;;
 esac
@@ -444,13 +444,13 @@ cat <<EOF
 DONE: $BUILD_IMAGE_PATH
 
 Image profile:
-  desktop: ${ALPINE_USB_DESKTOP:-xfce}
-  tiling WMs: ${ALPINE_USB_TILING_WMS:-none}
-  display manager: ${ALPINE_USB_DISPLAY_MANAGER:-auto}
-  bootloader: $ALPINE_USB_BOOTLOADER
-  kernel: linux-$ALPINE_USB_KERNEL_FLAVOR
-  auto-resize root on first boot: ${ALPINE_USB_AUTO_RESIZE:-1}
-  user: $ALPINE_USB_USER
+  desktop: ${LEDIT_USB_DESKTOP:-xfce}
+  tiling WMs: ${LEDIT_USB_TILING_WMS:-none}
+  display manager: ${LEDIT_USB_DISPLAY_MANAGER:-auto}
+  bootloader: $LEDIT_USB_BOOTLOADER
+  kernel: linux-$LEDIT_USB_KERNEL_FLAVOR
+  auto-resize root on first boot: ${LEDIT_USB_AUTO_RESIZE:-1}
+  user: $LEDIT_USB_USER
 
 Write to USB:
   lsblk

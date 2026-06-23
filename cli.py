@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 
-from alpine_usb.interfaces.cli import *  # noqa: F403
-from alpine_usb.interfaces.cli import TERMINAL_ENTRYPOINT
+from ledit_core.interfaces.cli import *  # noqa: F403
+from ledit_core.interfaces.cli import TERMINAL_ENTRYPOINT
 
 if __name__ == "__main__":
     print(

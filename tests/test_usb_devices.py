@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from alpine_usb.usb_devices import detection
+from ledit_core.usb_devices import detection
 
 
 def completed_plist(payload: dict) -> subprocess.CompletedProcess:

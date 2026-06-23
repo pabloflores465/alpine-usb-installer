@@ -39,7 +39,7 @@ scripts/build-macos-dmg.sh
   --hidden-import "cli" \
   --hidden-import "tui" \
   --hidden-import "apk_index" \
-  --collect-submodules "alpine_usb" \
+  --collect-submodules "ledit_core" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
   --add-data "build-arch-usb.sh:." \
@@ -86,11 +86,10 @@ out = root / "dist" / "release-assets"
 base = f"ledit-{version}-terminal-source"
 files = [
     "ledit",
-    "alpine-usb",
     "cli.py",
     "tui.py",
     "apk_index.py",
-    "alpine_usb",
+    "ledit_core",
     "README.md",
     "LICENSE",
     "requirements.txt",

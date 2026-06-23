@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from alpine_usb.interfaces import cli
+from ledit_core.interfaces import cli
 
 
 def namespace(**overrides) -> argparse.Namespace:
@@ -17,7 +17,7 @@ def namespace(**overrides) -> argparse.Namespace:
         "user": "alpine",
         "password": "secret",
         "root_password": None,
-        "hostname": "alpine-usb",
+        "hostname": "ledit-linux",
         "timezone": "UTC",
         "locale": "en_US.UTF-8",
         "language": "",
@@ -62,21 +62,21 @@ def test_env_from_build_args_maps_namespace_to_build_environment() -> None:
     env = cli.env_from_build_args(namespace())
 
     assert env["ALPINE_BRANCH"] == "latest-stable"
-    assert env["ALPINE_USB_ROOT_PASSWORD"] == "secret"
-    assert env["ALPINE_USB_TILING_WMS"] == "i3 sway openbox"
-    assert env["ALPINE_USB_BLUETOOTH"] == "0"
-    assert env["ALPINE_USB_LEGACY_X11_DRIVERS"] == "0"
-    assert env["ALPINE_USB_EXTRA_PACKAGES"] == "vim htop neovim"
+    assert env["LEDIT_USB_ROOT_PASSWORD"] == "secret"
+    assert env["LEDIT_USB_TILING_WMS"] == "i3 sway openbox"
+    assert env["LEDIT_USB_BLUETOOTH"] == "0"
+    assert env["LEDIT_USB_LEGACY_X11_DRIVERS"] == "0"
+    assert env["LEDIT_USB_EXTRA_PACKAGES"] == "vim htop neovim"
 
 
 def test_prepare_secret_env_moves_passwords_to_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "repo_root", lambda: tmp_path)
 
-    safe_env, files = cli.prepare_secret_env({"ALPINE_USB_PASSWORD": "pw", "ALPINE_USB_ROOT_PASSWORD": "rootpw"})
+    safe_env, files = cli.prepare_secret_env({"LEDIT_USB_PASSWORD": "pw", "LEDIT_USB_ROOT_PASSWORD": "rootpw"})
 
-    assert "ALPINE_USB_PASSWORD" not in safe_env
-    assert Path(safe_env["ALPINE_USB_PASSWORD_FILE"]).read_text() == "pw"
-    assert Path(safe_env["ALPINE_USB_ROOT_PASSWORD_FILE"]).read_text() == "rootpw"
+    assert "LEDIT_USB_PASSWORD" not in safe_env
+    assert Path(safe_env["LEDIT_USB_PASSWORD_FILE"]).read_text() == "pw"
+    assert Path(safe_env["LEDIT_USB_ROOT_PASSWORD_FILE"]).read_text() == "rootpw"
     assert len(files) == 2
 
 
@@ -86,7 +86,7 @@ def test_build_scripts_do_not_leak_spaced_env_into_docker_image() -> None:
 
     Earlier build-arch-usb.sh built ``docker_env`` as an unquoted string of
     ``-e NAME=value`` tokens and passed it to ``docker run``. When a value
-    contained spaces (ALPINE_USB_EXTRA_PACKAGES), word splitting pushed the
+    contained spaces (LEDIT_USB_EXTRA_PACKAGES), word splitting pushed the
     second package name into the image slot and docker tried to pull
     ``neovim:latest``. Every build script that calls ``docker run`` must use
     ``--env-file`` or a quoted ``"${docker_env[@]}"`` array so spaced values
@@ -115,7 +115,7 @@ def test_build_scripts_do_not_leak_spaced_env_into_docker_image() -> None:
 
 
 def test_build_arch_usb_passes_extra_packages_via_env_file() -> None:
-    """build-arch-usb.sh must pass ALPINE_USB_EXTRA_PACKAGES through --env-file
+    """build-arch-usb.sh must pass LEDIT_USB_EXTRA_PACKAGES through --env-file
     (not unquoted ``-e NAME=value``) so multi-word values survive intact."""
     repo = Path(__file__).resolve().parents[1]
     text = (repo / "build-arch-usb.sh").read_text()

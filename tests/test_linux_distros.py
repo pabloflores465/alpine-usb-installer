@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from alpine_usb.interfaces import cli
-from alpine_usb.linux_distros import DISTROS, distro_choices, get_distro
+from ledit_core.interfaces import cli
+from ledit_core.linux_distros import DISTROS, distro_choices, get_distro
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

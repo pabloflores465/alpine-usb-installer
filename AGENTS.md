@@ -3,8 +3,8 @@
 - Keep release notes as real Markdown with actual newlines.
 - Do not pass escaped `\n` sequences to `gh release create --notes` or `gh release edit --notes`; GitHub renders them literally.
 - For GitHub releases, write notes to a temporary `.md` file or use a heredoc, then pass `--notes-file <file>`.
-- Do not commit generated release artifacts such as `build/`, `dist/`, `standalone-release/`, or `Alpine USB Installer.spec`.
-- Architecture: keep Python code in screaming-architecture packages under `alpine_usb/`:
+- Do not commit generated release artifacts such as `build/`, `dist/`, `standalone-release/`, or `LEDIT Installer.spec`.
+- Architecture: keep Python code in screaming-architecture packages under `ledit_core/`:
   - `apk_packages/` for Alpine package index/search/cache rules.
   - `build_profiles/` for presets and build configuration defaults.
   - `usb_devices/` for target detection, safety checks, and device-path parsing.

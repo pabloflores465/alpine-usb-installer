@@ -24,7 +24,7 @@ LEDIT includes a real Gentoo provider and installed-image builder while preservi
 
 ## Docker/Linux build model
 
-On macOS, `build-gentoo-usb.sh` automatically re-enters itself in a privileged `linux/amd64` Docker container, matching the Alpine builder pattern. The first run builds a cached `gentoo-usb-builder:3.22-amd64` image from `scripts/Dockerfile.gentoo-builder`; later runs reuse it.
+On macOS, `build-gentoo-usb.sh` automatically re-enters itself in a privileged `linux/amd64` Docker container, matching the shared Linux builder pattern. The first run builds a cached `gentoo builder image` image from `scripts/Dockerfile.gentoo-builder`; later runs reuse it.
 
 Useful knobs:
 

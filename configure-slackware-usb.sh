@@ -12,32 +12,32 @@ safe_token() {
 }
 safe_optional_token() { [ -z "$2" ] || safe_token "$1" "$2"; }
 
-USER_NAME="${ALPINE_USB_USER:-slackware}"
-HOSTNAME="${ALPINE_USB_HOSTNAME:-slackware-usb}"
-TIMEZONE="${ALPINE_USB_TIMEZONE:-UTC}"
-LOCALE="${ALPINE_USB_LOCALE:-en_US.UTF-8}"
-CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-us}"
-XKB_LAYOUT="${ALPINE_USB_XKB_LAYOUT:-us}"
-XKB_VARIANT="${ALPINE_USB_XKB_VARIANT:-}"
-XKB_MODEL="${ALPINE_USB_XKB_MODEL:-pc105}"
-DESKTOP="$(lower "${ALPINE_USB_DESKTOP:-xfce}")"
-TILING_WMS="${ALPINE_USB_TILING_WMS:-}"
-DEFAULT_SESSION="$(lower "${ALPINE_USB_DEFAULT_SESSION:-auto}")"
-DISPLAY_MANAGER="$(lower "${ALPINE_USB_DISPLAY_MANAGER:-auto}")"
-NETWORK_BACKEND="$(lower "${ALPINE_USB_NETWORK:-networkmanager}")"
-WIFI="${ALPINE_USB_WIFI:-1}"
-BLUETOOTH="${ALPINE_USB_BLUETOOTH:-1}"
-AUDIO="$(lower "${ALPINE_USB_AUDIO:-pipewire}")"
-BROWSER="$(lower "${ALPINE_USB_BROWSER:-firefox}")"
-FIRMWARE="$(lower "${ALPINE_USB_FIRMWARE:-full}")"
-BOOTLOADER="$(lower "${ALPINE_USB_BOOTLOADER:-grub}")"
-KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-generic}")"
-BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
-AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-1}"
-EXTRA_PACKAGES="${ALPINE_USB_EXTRA_PACKAGES:-}"
+USER_NAME="${LEDIT_USB_USER:-slackware}"
+HOSTNAME="${LEDIT_USB_HOSTNAME:-ledit-slackware}"
+TIMEZONE="${LEDIT_USB_TIMEZONE:-UTC}"
+LOCALE="${LEDIT_USB_LOCALE:-en_US.UTF-8}"
+CONSOLE_KEYMAP="${LEDIT_USB_CONSOLE_KEYMAP:-us}"
+XKB_LAYOUT="${LEDIT_USB_XKB_LAYOUT:-us}"
+XKB_VARIANT="${LEDIT_USB_XKB_VARIANT:-}"
+XKB_MODEL="${LEDIT_USB_XKB_MODEL:-pc105}"
+DESKTOP="$(lower "${LEDIT_USB_DESKTOP:-xfce}")"
+TILING_WMS="${LEDIT_USB_TILING_WMS:-}"
+DEFAULT_SESSION="$(lower "${LEDIT_USB_DEFAULT_SESSION:-auto}")"
+DISPLAY_MANAGER="$(lower "${LEDIT_USB_DISPLAY_MANAGER:-auto}")"
+NETWORK_BACKEND="$(lower "${LEDIT_USB_NETWORK:-networkmanager}")"
+WIFI="${LEDIT_USB_WIFI:-1}"
+BLUETOOTH="${LEDIT_USB_BLUETOOTH:-1}"
+AUDIO="$(lower "${LEDIT_USB_AUDIO:-pipewire}")"
+BROWSER="$(lower "${LEDIT_USB_BROWSER:-firefox}")"
+FIRMWARE="$(lower "${LEDIT_USB_FIRMWARE:-full}")"
+BOOTLOADER="$(lower "${LEDIT_USB_BOOTLOADER:-grub}")"
+KERNEL_FLAVOR="$(lower "${LEDIT_USB_KERNEL_FLAVOR:-generic}")"
+BOOT_TIMEOUT="${LEDIT_USB_BOOT_TIMEOUT:-3}"
+AUTO_RESIZE="${LEDIT_USB_AUTO_RESIZE:-1}"
+EXTRA_PACKAGES="${LEDIT_USB_EXTRA_PACKAGES:-}"
 RELEASE="${SLACKWARE_RELEASE:-stable}"
 ARCH="${ARCH:-x86_64}"
-DRY_RUN="${ALPINE_USB_DRY_RUN:-0}"
+DRY_RUN="${LEDIT_USB_DRY_RUN:-0}"
 
 case "$USER_NAME" in [a-z_]*) ;; *) die "Username must start with a lowercase letter or underscore" ;; esac
 case "$USER_NAME" in *[!a-z0-9_-]*) die "Username may contain only lowercase letters, numbers, underscore and dash" ;; esac
@@ -69,23 +69,23 @@ fi
 
 python3 - <<'PY'
 import os
-from alpine_usb.slackware_packages.index import release_path
-from alpine_usb.slackware_packages.selection import slackware_package_set
+from ledit_core.slackware_packages.index import release_path
+from ledit_core.slackware_packages.selection import slackware_package_set
 
 config = {
-    "desktop": os.environ.get("ALPINE_USB_DESKTOP", "xfce"),
-    "display_manager": os.environ.get("ALPINE_USB_DISPLAY_MANAGER", "auto"),
-    "default_session": os.environ.get("ALPINE_USB_DEFAULT_SESSION", "auto"),
-    "wms": os.environ.get("ALPINE_USB_TILING_WMS", ""),
-    "network": os.environ.get("ALPINE_USB_NETWORK", "networkmanager"),
-    "wifi": os.environ.get("ALPINE_USB_WIFI", "1"),
-    "bluetooth": os.environ.get("ALPINE_USB_BLUETOOTH", "1"),
-    "audio": os.environ.get("ALPINE_USB_AUDIO", "pipewire"),
-    "browser": os.environ.get("ALPINE_USB_BROWSER", "firefox"),
-    "firmware": os.environ.get("ALPINE_USB_FIRMWARE", "full"),
-    "kernel": os.environ.get("ALPINE_USB_KERNEL_FLAVOR", "generic"),
-    "auto_resize": os.environ.get("ALPINE_USB_AUTO_RESIZE", "1"),
-    "extra_packages": os.environ.get("ALPINE_USB_EXTRA_PACKAGES", ""),
+    "desktop": os.environ.get("LEDIT_USB_DESKTOP", "xfce"),
+    "display_manager": os.environ.get("LEDIT_USB_DISPLAY_MANAGER", "auto"),
+    "default_session": os.environ.get("LEDIT_USB_DEFAULT_SESSION", "auto"),
+    "wms": os.environ.get("LEDIT_USB_TILING_WMS", ""),
+    "network": os.environ.get("LEDIT_USB_NETWORK", "networkmanager"),
+    "wifi": os.environ.get("LEDIT_USB_WIFI", "1"),
+    "bluetooth": os.environ.get("LEDIT_USB_BLUETOOTH", "1"),
+    "audio": os.environ.get("LEDIT_USB_AUDIO", "pipewire"),
+    "browser": os.environ.get("LEDIT_USB_BROWSER", "firefox"),
+    "firmware": os.environ.get("LEDIT_USB_FIRMWARE", "full"),
+    "kernel": os.environ.get("LEDIT_USB_KERNEL_FLAVOR", "generic"),
+    "auto_resize": os.environ.get("LEDIT_USB_AUTO_RESIZE", "1"),
+    "extra_packages": os.environ.get("LEDIT_USB_EXTRA_PACKAGES", ""),
 }
 release = os.environ.get("SLACKWARE_RELEASE", "stable")
 arch = os.environ.get("ARCH", "x86_64")

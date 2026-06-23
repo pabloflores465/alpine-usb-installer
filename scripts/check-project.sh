@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m py_compile ledit alpine-usb gui.py cli.py tui.py apk_index.py $(find alpine_usb -name '*.py' -type f | sort)
+python3 -m py_compile ledit gui.py cli.py tui.py apk_index.py $(find ledit_core -name '*.py' -type f | sort)
 ruff check .
 ruff format --check .
 pytest
@@ -18,7 +18,6 @@ bash -n \
   scripts/validate-config-matrix.sh
 
 ./ledit --help >/dev/null
-./alpine-usb --help >/dev/null
 ./ledit distros >/dev/null
 ./ledit tui --self-test >/dev/null
 ./ledit build --dry-run --password testpass --profile minimal -y >/tmp/ledit-check-minimal.out

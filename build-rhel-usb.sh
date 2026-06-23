@@ -5,7 +5,7 @@ set -eu
 die() { echo "ERROR: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "Required tool not found: $1"; }
 
-IMAGE_NAME="${IMAGE_NAME:-rhel-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit-rhel.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-$IMAGE_NAME}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 RELEASE="${RHEL_USB_RELEASE:-9}"

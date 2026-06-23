@@ -34,16 +34,16 @@ release_path() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="${IMAGE_NAME:-slackware-usb.img}"
+IMAGE_NAME="${IMAGE_NAME:-ledit-slackware.img}"
 OUTPUT_PATH="${OUTPUT_PATH:-}"
 IMAGE_SIZE="${IMAGE_SIZE:-16G}"
 ARCH_VALUE="${ARCH:-x86_64}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.work}"
 PKG_CACHE_DIR="${SLACKWARE_PKG_CACHE_DIR:-$WORK_DIR/slackware-pkgs}"
 BUILD_DIR="${SLACKWARE_BUILD_DIR:-/var/tmp/slackware-usb-build-$$}"
-ALPINE_BASE_IMAGE="alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601"
-DOCKER_IMAGE="${SLACKWARE_USB_DOCKER_IMAGE:-$ALPINE_BASE_IMAGE}"
-BOOTLOADER="$(lower "${ALPINE_USB_BOOTLOADER:-grub}")"
+BUILDER_BASE_IMAGE="alpine:3.22@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601"
+DOCKER_IMAGE="${SLACKWARE_USB_DOCKER_IMAGE:-$BUILDER_BASE_IMAGE}"
+BOOTLOADER="$(lower "${LEDIT_USB_BOOTLOADER:-grub}")"
 [ "$BOOTLOADER" = "systemdboot" ] && BOOTLOADER="systemd-boot"
 
 case "$ARCH_VALUE" in x86_64|amd64) ;; *) fail "Slackware installed image builder currently supports x86_64/amd64 only (got: $ARCH_VALUE)" ;; esac
@@ -64,13 +64,13 @@ if { [ "$(uname -s)" = "Darwin" ] || is_enabled "${SLACKWARE_USB_FORCE_DOCKER:-0
   if ! docker info >/dev/null 2>&1; then fail "Docker is not running. Start Docker Desktop and try again."; fi
   pass_env=(
     IMAGE_NAME OUTPUT_PATH IMAGE_SIZE ARCH
-    ALPINE_USB_USER ALPINE_USB_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_HOSTNAME
-    ALPINE_USB_TIMEZONE ALPINE_USB_LOCALE ALPINE_USB_LANGUAGE ALPINE_USB_CONSOLE_KEYMAP
-    ALPINE_USB_XKB_LAYOUT ALPINE_USB_XKB_VARIANT ALPINE_USB_XKB_MODEL
-    ALPINE_USB_DESKTOP ALPINE_USB_TILING_WMS ALPINE_USB_DEFAULT_SESSION ALPINE_USB_DISPLAY_MANAGER
-    ALPINE_USB_NETWORK ALPINE_USB_WIFI ALPINE_USB_BLUETOOTH ALPINE_USB_AUDIO ALPINE_USB_BROWSER
-    ALPINE_USB_FIRMWARE ALPINE_USB_LEGACY_X11_DRIVERS ALPINE_USB_BOOTLOADER ALPINE_USB_KERNEL_FLAVOR
-    ALPINE_USB_BOOT_TIMEOUT ALPINE_USB_AUTO_RESIZE ALPINE_USB_EXTRA_PACKAGES ALPINE_USB_PROFILE
+    LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME
+    LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE LEDIT_USB_CONSOLE_KEYMAP
+    LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL
+    LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER
+    LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER
+    LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR
+    LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE
     SLACKWARE_RELEASE SLACKWARE_MIRROR_BASE_URL SLACKWARE_PKG_CACHE_DIR SLACKWARE_BUILD_DIR
   )
   docker_env=(-e SLACKWARE_USB_BUILD_IN_DOCKER=1)
@@ -114,27 +114,27 @@ OUTPUT=${OUTPUT_PATH:-$SCRIPT_DIR/$IMAGE_NAME}
 RELEASE=${SLACKWARE_RELEASE:-stable}
 TREE=$(release_path "$RELEASE")
 MIRROR=${SLACKWARE_MIRROR_BASE_URL:-https://mirrors.slackware.com/slackware/$TREE}
-HOSTNAME_VAL="${ALPINE_USB_HOSTNAME:-slackware-usb}"
-USER_NAME="${ALPINE_USB_USER:-slackware}"
-USER_PASSWORD="$(read_secret ALPINE_USB_PASSWORD_FILE ALPINE_USB_PASSWORD slackware)"
-ROOT_PASSWORD="$(read_secret ALPINE_USB_ROOT_PASSWORD_FILE ALPINE_USB_ROOT_PASSWORD "$USER_PASSWORD")"
-TIMEZONE="${ALPINE_USB_TIMEZONE:-UTC}"
-LOCALE="${ALPINE_USB_LOCALE:-en_US.UTF-8}"
-CONSOLE_KEYMAP="${ALPINE_USB_CONSOLE_KEYMAP:-us}"
-BOOT_TIMEOUT="${ALPINE_USB_BOOT_TIMEOUT:-3}"
-KERNEL_FLAVOR="$(lower "${ALPINE_USB_KERNEL_FLAVOR:-generic}")"
-DESKTOP="$(lower "${ALPINE_USB_DESKTOP:-xfce}")"
-DISPLAY_MANAGER="$(lower "${ALPINE_USB_DISPLAY_MANAGER:-auto}")"
-NETWORK_BACKEND="$(lower "${ALPINE_USB_NETWORK:-networkmanager}")"
-TILING_WMS="${ALPINE_USB_TILING_WMS:-}"
-FIRMWARE="$(lower "${ALPINE_USB_FIRMWARE:-full}")"
-AUTO_RESIZE="${ALPINE_USB_AUTO_RESIZE:-1}"
+HOSTNAME_VAL="${LEDIT_USB_HOSTNAME:-ledit-slackware}"
+USER_NAME="${LEDIT_USB_USER:-slackware}"
+USER_PASSWORD="$(read_secret LEDIT_USB_PASSWORD_FILE LEDIT_USB_PASSWORD slackware)"
+ROOT_PASSWORD="$(read_secret LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD "$USER_PASSWORD")"
+TIMEZONE="${LEDIT_USB_TIMEZONE:-UTC}"
+LOCALE="${LEDIT_USB_LOCALE:-en_US.UTF-8}"
+CONSOLE_KEYMAP="${LEDIT_USB_CONSOLE_KEYMAP:-us}"
+BOOT_TIMEOUT="${LEDIT_USB_BOOT_TIMEOUT:-3}"
+KERNEL_FLAVOR="$(lower "${LEDIT_USB_KERNEL_FLAVOR:-generic}")"
+DESKTOP="$(lower "${LEDIT_USB_DESKTOP:-xfce}")"
+DISPLAY_MANAGER="$(lower "${LEDIT_USB_DISPLAY_MANAGER:-auto}")"
+NETWORK_BACKEND="$(lower "${LEDIT_USB_NETWORK:-networkmanager}")"
+TILING_WMS="${LEDIT_USB_TILING_WMS:-}"
+FIRMWARE="$(lower "${LEDIT_USB_FIRMWARE:-full}")"
+AUTO_RESIZE="${LEDIT_USB_AUTO_RESIZE:-1}"
 
 mkdir -p "$WORK_DIR" "$PKG_CACHE_DIR" "$(dirname "$OUTPUT")"
 chmod 700 "$WORK_DIR" 2>/dev/null || true
 
 log "Validating Slackware build plan"
-ALPINE_USB_DRY_RUN=1 "$SCRIPT_DIR/configure-slackware-usb.sh" >/dev/null
+LEDIT_USB_DRY_RUN=1 "$SCRIPT_DIR/configure-slackware-usb.sh" >/dev/null
 
 # --- Determine which package series to install (authentic Slackware method) ---
 SERIES="a ap l"
@@ -278,7 +278,7 @@ while IFS= read -r pkg; do
   cache=$(download_pkg "$path") || { log "extra download failed, skip: $pkg"; continue; }
   installpkg --root "$ROOTFS" "$cache" >/dev/null 2>&1 || log "extra install failed, skip: $pkg"
 done <<EXTRA
-$( { ALPINE_USB_DRY_RUN=1 "$SCRIPT_DIR/configure-slackware-usb.sh" | sed -n '/^Packages:/,$p' | sed '1d'; } | tr -d ' ' )
+$( { LEDIT_USB_DRY_RUN=1 "$SCRIPT_DIR/configure-slackware-usb.sh" | sed -n '/^Packages:/,$p' | sed '1d'; } | tr -d ' ' )
 EXTRA
 
 # Mount the kernel APIs once and rebuild the loader cache before any chroot
@@ -322,7 +322,7 @@ fi
 # --- Slackware BSD-init service enablement ---
 log "Enabling Slackware services"
 [ "$NETWORK_BACKEND" = "networkmanager" ] && [ -f "$ROOTFS/etc/rc.d/rc.networkmanager" ] && chmod 0755 "$ROOTFS/etc/rc.d/rc.networkmanager" 2>/dev/null || true
-if is_enabled "${ALPINE_USB_BLUETOOTH:-1}" && [ -f "$ROOTFS/etc/rc.d/rc.bluetooth" ]; then
+if is_enabled "${LEDIT_USB_BLUETOOTH:-1}" && [ -f "$ROOTFS/etc/rc.d/rc.bluetooth" ]; then
   chmod 0755 "$ROOTFS/etc/rc.d/rc.bluetooth" 2>/dev/null || true
 fi
 # Default runlevel: 4 (graphical) if a display manager is present, else 3 (multi-user).

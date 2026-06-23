@@ -4,7 +4,7 @@ import struct
 import zlib
 from pathlib import Path
 
-from alpine_usb.images.validation import ESP_TYPE_GUID, LINUX_TYPE_GUID, SECTOR_SIZE, validate_usb_image
+from ledit_core.images.validation import ESP_TYPE_GUID, LINUX_TYPE_GUID, SECTOR_SIZE, validate_usb_image
 
 
 def write_valid_image(path: Path, truncate_to: int | None = None) -> None:

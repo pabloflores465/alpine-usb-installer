@@ -5,7 +5,7 @@ from textwrap import dedent
 
 import pytest
 
-from alpine_usb.build_profiles.config_files import (
+from ledit_core.build_profiles.config_files import (
     ConfigFileError,
     load_config_file,
     parse_config,

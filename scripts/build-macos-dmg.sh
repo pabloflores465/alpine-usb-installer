@@ -39,7 +39,7 @@ mkdir -p "$STAGE_DIR"
   --noconfirm \
   --windowed \
   --name "$APP_NAME" \
-  --collect-submodules "alpine_usb" \
+  --collect-submodules "ledit_core" \
   --add-data "build-alpine-usb.sh:." \
   --add-data "configure-alpine-usb.sh:." \
   --add-data "build-arch-usb.sh:." \
