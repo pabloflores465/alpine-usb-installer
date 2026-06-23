@@ -25,6 +25,22 @@ def validate_branch(branch: str) -> str:
     return branch
 
 
+def official_repository_urls(branch: str) -> tuple[str, ...]:
+    branch = validate_branch(branch)
+    return tuple(f"{APK_MIRROR}/{branch}/{repo}" for repo in APK_SEARCH_REPOS)
+
+
+def render_repositories_file(branch: str) -> str:
+    return "\n".join(official_repository_urls(branch)) + "\n"
+
+
+def write_repositories_file(path: str | Path, branch: str) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_repositories_file(branch), encoding="utf-8")
+    return target
+
+
 def validate_package_name(package: str) -> str:
     if not PACKAGE_RE.match(package):
         raise ValueError(f"Invalid package name: {package!r}")
