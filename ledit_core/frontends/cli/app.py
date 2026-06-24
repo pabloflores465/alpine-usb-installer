@@ -1,28 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import getpass
 import os
-import platform
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from ledit_core.application.services import BuildImageService, DoctorService, FlashImageService, ListDevicesService
 from ledit_core.build_profiles.presets import apply_profile_defaults
 from ledit_core.image_builds import environments as build_environments
 from ledit_core.image_builds import runtime as build_runtime
 from ledit_core.image_builds import secrets as build_secrets
 from ledit_core.image_builds.dry_runs import run_config_dry_run as run_config_dry_run_use_case
-from ledit_core.images.validation import validate_usb_image
 from ledit_core.linux_distros import DISTROS, DistroProvider, distro_choices, get_distro
 from ledit_core.nixos.build import env_to_config as nixos_env_to_config
-from ledit_core.nixos.build import run_nixos_build, run_nixos_dry_run
 from ledit_core.nixos.build import summary_rows as nixos_summary_rows
 from ledit_core.package_search import DistroPackageSearchService, PackageSearchRequest
-from ledit_core.usb_devices.detection import device_safety_report, list_devices, selected_device
 
 APP_TITLE = "LEDIT"
 APP_DESCRIPTION = "Linux External Drive Installer Tool"
@@ -199,6 +194,10 @@ def run_config_dry_run(env: dict[str, str]) -> int:
     return run_config_dry_run_use_case(env, repo_root())
 
 
+def _print_build_log(line: str) -> None:
+    print(line, flush=True)
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     if args.ask_password:
         args.password = getpass.getpass("User password: ")
@@ -207,30 +206,23 @@ def cmd_build(args: argparse.Namespace) -> int:
     if not args.password:
         err("User password is required. Use --ask-password or --password.")
         return 2
+    service = BuildImageService(runtime_root=repo_root(), default_output_dir=DEFAULT_OUTPUT_DIR)
     try:
-        env = env_from_build_args(args)
+        plan = service.plan_from_namespace(args)
     except ValueError as exc:
         err(str(exc))
         return 2
-    provider = get_distro(env.get("LINUX_USB_DISTRO", "alpine"))
-    output = Path(args.output).expanduser().resolve()
+    provider = plan.provider
+    output = plan.output_path
     if provider.id == "nixos":
-        config = nixos_env_to_config(env)
+        config = nixos_env_to_config(plan.env)
         print_panel("NixOS build profile", nixos_summary_rows(config, output))
-        if args.dry_run:
-            return run_nixos_dry_run(config)
-        if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
-            warn("Cancelled.")
-            return 1
-        if not confirm("Build this NixOS USB image now?", args.yes):
-            warn("Cancelled.")
-            return 1
-        return run_nixos_build(config, output)
+    else:
+        print_build_summary(plan.env, output)
 
-    print_build_summary(env, output)
     if args.dry_run:
         info(f"Dry-run only: validating generated {provider.label} configuration and package list.")
-        return run_config_dry_run(env)
+        return service.run_dry_run(plan)
 
     if output.exists() and not confirm(f"Overwrite existing image {output}?", args.yes):
         warn("Cancelled.")
@@ -239,40 +231,14 @@ def cmd_build(args: argparse.Namespace) -> int:
         warn("Cancelled.")
         return 1
 
-    script = provider.build_script_path(repo_root())
-    if script is None:
-        err(f"No build adapter configured for {provider.label}")
-        return 1
-    build_env = os.environ.copy()
-    safe_env, secret_files = prepare_secret_env(env)
-    build_env.update(safe_env)
-    build_env["OUTPUT_PATH"] = str(output)
-    build_name = env["IMAGE_NAME"]
-    built_path = repo_root() / build_name
-    try:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        if built_path.exists():
-            built_path.unlink()
-        if output.exists():
-            output.unlink()
-        script.chmod(0o755)
-        info("Starting build. This can take a while…")
-        sys.stdout.flush()
-        proc = subprocess.Popen([str(script)], cwd=repo_root(), env=build_env)
-        code = proc.wait()
-        if code != 0:
-            err(f"Build failed with exit code {code}")
-            return code
-        if not output.exists():
-            err(f"Build finished but expected image was not found: {output}")
-            return 1
-        ok(f"Image ready: {output}")
-        return 0
-    finally:
-        cleanup_secret_files(secret_files)
-        if built_path.exists() and built_path != output:
-            with contextlib.suppress(OSError):
-                built_path.unlink()
+    info("Starting build. This can take a while…")
+    sys.stdout.flush()
+    result = service.execute(plan, log=_print_build_log)
+    if result.ok:
+        ok(result.message)
+        return result.code
+    err(result.message)
+    return result.code or 1
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -320,7 +286,7 @@ def cmd_distros(_args: argparse.Namespace) -> int:
 
 
 def cmd_devices(_args: argparse.Namespace) -> int:
-    devices = list_devices()
+    devices = ListDevicesService().list()
     if not devices:
         warn("No removable USB-like devices detected. You can still pass a device manually to flash.")
         return 1
@@ -329,80 +295,41 @@ def cmd_devices(_args: argparse.Namespace) -> int:
 
 
 def cmd_flash(args: argparse.Namespace) -> int:
-    image = Path(args.image).expanduser().resolve()
-    dev = selected_device(args.device)
-    if not image.exists():
-        err(f"Image not found: {image}")
-        return 1
-    if not dev:
-        err("Invalid target device.")
-        return 1
-    image_check = validate_usb_image(image)
-    if not image_check.ok:
-        err(image_check.reason or "Image failed validation.")
-        return 1
-    ok_safe, dev, device_rows, reason = device_safety_report(dev)
-    if not ok_safe:
-        err(reason or "Unsafe target device.")
+    service = FlashImageService()
+    try:
+        plan = service.plan(args.image, args.device)
+    except ValueError as exc:
+        err(str(exc))
         return 1
 
     print_panel(
         "Flash USB",
-        [("Image", str(image)), ("Image size", f"{image.stat().st_size / 1_000_000_000:.1f} GB"), *device_rows],
+        [
+            ("Image", str(plan.image)),
+            ("Image size", f"{plan.image_size_bytes / 1_000_000_000:.1f} GB"),
+            *plan.device_rows,
+        ],
     )
     if not args.yes:
         warn("This permanently erases the selected USB device.")
-        typed = input(f"Type {c(f'ERASE {dev}', C.red)} to continue: ").strip()
-        if typed != f"ERASE {dev}":
+        typed = input(f"Type {c(f'ERASE {plan.device}', C.red)} to continue: ").strip()
+        if typed != f"ERASE {plan.device}":
             warn("Cancelled.")
             return 1
 
-    sysname = platform.system()
-    if sysname == "Darwin":
-        raw = dev.replace("/dev/disk", "/dev/rdisk")
-        cmd = ["sudo", "dd", f"if={image}", f"of={raw}", "bs=16m", "status=progress"]
-        subprocess.run(["diskutil", "unmountDisk", dev])
-        code = subprocess.call(cmd)
-        subprocess.run(["sync"])
-        subprocess.run(["diskutil", "eject", dev])
-        return code
-    if sysname == "Linux":
-        cmd = ["dd", f"if={image}", f"of={dev}", "bs=16M", "iflag=fullblock", "status=progress", "conv=fsync"]
-        if os.geteuid() != 0:
-            cmd.insert(0, shutil.which("pkexec") or "sudo")
-        return subprocess.call(cmd)
-    err("Windows flashing is not implemented. Use Rufus/balenaEtcher with the generated image.")
-    return 1
+    try:
+        return service.execute(plan)
+    except RuntimeError as exc:
+        err(str(exc))
+        return 1
 
 
 def cmd_doctor(_args: argparse.Namespace) -> int:
-    sysname = platform.system()
-    checks = []
-    if sysname == "Darwin":
-        checks.append(("docker", shutil.which("docker") is not None))
-        if shutil.which("docker"):
-            checks.append(
-                (
-                    "docker running",
-                    run(["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0,
-                )
-            )
-        checks.append(("diskutil", shutil.which("diskutil") is not None))
-    elif sysname == "Linux":
-        for name in ["sudo", "python3", "mmd", "mcopy", "mdir", "grub-mkstandalone", "dd", "lsblk"]:
-            checks.append((name, shutil.which(name) is not None))
-        for optional in ["debootstrap", "pacstrap", "dnf", "zypper", "xbps-install", "nix"]:
-            checks.append((f"optional {optional}", shutil.which(optional) is not None))
-    else:
-        checks.append(("unsupported OS for flashing", False))
-
-    failed = False
-    rows = []
-    for name, good in checks:
-        rows.append((name, c("OK", C.green) if good else c("missing", C.red)))
-        failed = failed or (not good and not name.startswith("optional "))
+    service = DoctorService()
+    checks = service.checks()
+    rows = [(check.name, c("OK", C.green) if check.ok else c("missing", C.red)) for check in checks]
     print_panel("Host checks", rows)
-    return 1 if failed else 0
+    return 1 if service.failed(checks) else 0
 
 
 def cmd_tui(args: argparse.Namespace) -> int:

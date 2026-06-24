@@ -8,7 +8,14 @@ import subprocess
 import time
 from pathlib import Path
 
-from ledit_core.apk_packages.index import PACKAGE_RE, validate_package_name
+PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
+
+
+def validate_package_name(package: str) -> str:
+    if not PACKAGE_RE.match(package):
+        raise ValueError(f"Invalid package name: {package!r}")
+    return package
+
 
 UBUNTU_RELEASE_ALIASES = {
     "24.04": "noble",

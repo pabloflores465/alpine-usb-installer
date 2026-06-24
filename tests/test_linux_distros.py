@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from ledit_core.apt_packages import index as apt_index
 from ledit_core.interfaces import cli
-from ledit_core.linux_distros import DISTROS, distro_choices, get_distro
+from ledit_core.linux_distros import DISTROS, distro_choices, get_distro, registry
+from ledit_core.linux_distros import providers as providers_facade
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,6 +72,12 @@ def test_registry_contains_all_workspace_distros() -> None:
         "ubuntu",
         "void",
     }
+
+
+def test_provider_facade_uses_modular_registry() -> None:
+    assert providers_facade.DISTROS is registry.DISTROS
+    assert get_distro("ubuntu").validate_package_func.__module__ == "ledit_core.deb_packages.index"
+    assert apt_index.validate_package_name.__module__ == "ledit_core.apt_packages.index"
 
 
 @pytest.mark.parametrize("distro", sorted(DISTROS))

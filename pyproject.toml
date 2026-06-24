@@ -38,3 +38,14 @@ ignore = [
 "ledit_core/frontends/gui/app.py" = ["E402", "E701", "E702", "SIM105"]
 "ledit_core/frontends/tui/app.py" = ["E701", "E702"]
 "tests/*" = ["S101"]
+
+[tool.coverage.run]
+branch = true
+source = ["ledit_core"]
+omit = [
+  "ledit_core/frontends/gui/app.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

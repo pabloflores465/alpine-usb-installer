@@ -7,8 +7,7 @@ import re
 import sys
 from types import SimpleNamespace
 
-import ledit_core.frontends.cli.app as cli
-from ledit_core.frontends.cli.app import env_from_build_args
+from ledit_core.application.services import BuildImageService, DoctorService, FlashImageService, ListDevicesService
 from ledit_core.frontends.tui.state import (
     CHOICES,
     DEFAULT_CONFIG,
@@ -16,6 +15,7 @@ from ledit_core.frontends.tui.state import (
     DEFAULT_OUTPUT_DIR,
     WM_CHOICES,
 )
+from ledit_core.image_builds.environments import build_summary_rows, env_from_build_args
 from ledit_core.linux_distros import get_distro
 from ledit_core.package_search import DistroPackageSearchService, PackageSearchRequest
 
@@ -499,10 +499,10 @@ class TuiApp:
                     self.config["output"] = value
             elif choice == 3:
                 if self.validate_build_config():
-                    self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=True, yes=True)))
+                    self.suspend(lambda: self.run_build_command(dry_run=True))
             elif choice == 4:
                 if self.validate_build_config() and self.confirm_curses("Build the image now? This can take a while."):
-                    self.suspend(lambda: cli.cmd_build(self.namespace(dry_run=False, yes=True)))
+                    self.suspend(lambda: self.run_build_command(dry_run=False))
             else:
                 self.message(
                     "Build profile",
@@ -560,11 +560,11 @@ class TuiApp:
                     continue
                 if self.confirm_curses("Flash selected image and ERASE the target USB?"):
                     ns = SimpleNamespace(image=self.config["output"], device=self.config["device"], yes=True)
-                    self.suspend(lambda ns=ns: cli.cmd_flash(ns))
+                    self.suspend(lambda ns=ns: self.run_flash_command(ns.image, ns.device))
 
     def device_list_screen(self):
         self.draw_wait("USB devices", "Scanning removable USB devices…")
-        devices = cli.list_devices()
+        devices = ListDevicesService().list()
         self.last_devices = devices
         if not devices:
             self.message(
@@ -577,8 +577,60 @@ class TuiApp:
             self.config["device"] = devices[choice][0]
             self.status = f"Selected USB target: {self.config['device']}"
 
+    def print_plain_panel(self, title: str, rows: list[tuple[str, str] | str]) -> None:
+        print(f"\n{title}")
+        print("-" * len(title))
+        for row in rows:
+            if isinstance(row, tuple):
+                print(f"{row[0]:<24} {row[1]}")
+            else:
+                print(row)
+
+    def run_build_command(self, dry_run: bool) -> int:
+        service = BuildImageService()
+        try:
+            plan = service.plan_from_namespace(self.namespace(dry_run=dry_run, yes=True))
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        self.print_plain_panel("Build profile", [("Output", str(plan.output_path)), *build_summary_rows(plan.env)])
+        if dry_run:
+            print(f"Dry-run only: validating generated {plan.provider.label} configuration and package list.")
+            return service.run_dry_run(plan)
+        print("Starting build. This can take a while…", flush=True)
+        result = service.execute(plan, log=lambda line: print(line, flush=True))
+        stream = sys.stdout if result.ok else sys.stderr
+        print(result.message, file=stream, flush=True)
+        return result.code or (0 if result.ok else 1)
+
+    def run_flash_command(self, image: str, device: str) -> int:
+        service = FlashImageService()
+        try:
+            plan = service.plan(image, device)
+            self.print_plain_panel(
+                "Flash USB",
+                [
+                    ("Image", str(plan.image)),
+                    ("Image size", f"{plan.image_size_bytes / 1_000_000_000:.1f} GB"),
+                    *plan.device_rows,
+                ],
+            )
+            return service.execute(plan)
+        except (RuntimeError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
     def doctor(self):
-        self.suspend(lambda: cli.cmd_doctor(SimpleNamespace()))
+        self.suspend(self.run_doctor_command)
+
+    def run_doctor_command(self) -> int:
+        service = DoctorService()
+        checks = service.checks()
+        self.print_plain_panel(
+            "Host checks",
+            [(check.name, "OK" if check.ok else "missing") for check in checks],
+        )
+        return 1 if service.failed(checks) else 0
 
     def main_menu(self):
         while True:

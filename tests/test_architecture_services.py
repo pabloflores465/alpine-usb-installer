@@ -60,6 +60,14 @@ def test_cli_env_wrapper_delegates_to_image_build_environment() -> None:
     assert cli.env_from_build_args(namespace()) == build_environments.env_from_build_args(namespace())
 
 
+def test_tui_frontend_does_not_depend_on_cli_frontend() -> None:
+    tui_source = (Path(__file__).resolve().parents[1] / "ledit_core" / "frontends" / "tui" / "app.py").read_text()
+
+    assert "frontends.cli" not in tui_source
+    assert "cli.cmd_" not in tui_source
+    assert "import cli" not in tui_source
+
+
 def test_distro_provider_model_is_domain_boundary() -> None:
     assert isinstance(get_distro("alpine"), DistroProvider)
 
