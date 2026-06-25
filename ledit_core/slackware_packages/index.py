@@ -9,7 +9,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-SLACKWARE_MIRROR = "https://mirrors.slackware.com/slackware"
+from ledit_core.backend.mirrors import SLACKWARE_MIRROR
+
 SLACKWARE_RELEASES = ("stable", "current", "15.0")
 SLACKWARE_ARCHES = ("x86_64",)
 SLACKWARE_SERIES = ("a", "ap", "d", "e", "f", "k", "kde", "l", "n", "t", "tcl", "x", "xap", "xfce", "y")

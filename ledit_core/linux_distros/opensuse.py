@@ -11,6 +11,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from ledit_core.backend.mirrors import OPENSUSE_TUMBLEWEED_OSS_URL, opensuse_oss_repo_url
+
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
 RELEASE_RE = re.compile(r"^(tumbleweed|leap-15\.6|leap-16\.0)$")
 OPENSUSE_RELEASES = ("tumbleweed", "leap-15.6", "leap-16.0")
@@ -35,9 +37,9 @@ def validate_package_name(package: str) -> str:
 def repo_base_url(release: str) -> str:
     release = validate_opensuse_release(release)
     if release == "tumbleweed":
-        return "https://download.opensuse.org/tumbleweed/repo/oss"
+        return OPENSUSE_TUMBLEWEED_OSS_URL
     version = release.removeprefix("leap-")
-    return f"https://download.opensuse.org/distribution/leap/{version}/repo/oss"
+    return opensuse_oss_repo_url(version)
 
 
 def cache_dir() -> Path:

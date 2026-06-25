@@ -11,7 +11,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-APK_MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
+from ledit_core.backend.mirrors import ALPINE_MIRROR
+
+APK_MIRROR = ALPINE_MIRROR
 APK_SEARCH_REPOS = ("main", "community")
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
 BRANCH_RE = re.compile(r"^(latest-stable|edge|v[0-9]+\.[0-9]+)$")

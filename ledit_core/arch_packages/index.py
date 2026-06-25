@@ -10,7 +10,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-ARCH_PACKAGE_SEARCH_URL = "https://archlinux.org/packages/search/json/"
+from ledit_core.backend.mirrors import ARCH_PACKAGE_SEARCH_URL
+
 ARCH_SEARCH_REPOS = ("core", "extra", "multilib")
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.@-]*$")
 CACHE_VERSION = 1

@@ -10,10 +10,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-VOID_REPOSITORIES = {
-    "current": "https://repo-default.voidlinux.org/current",
-    "glibc": "https://repo-default.voidlinux.org/current",
-}
+from ledit_core.backend.mirrors import VOID_REPOSITORIES
+
 VOID_ARCHES = ("x86_64",)
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
 CACHE_VERSION = 1
