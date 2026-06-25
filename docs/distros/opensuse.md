@@ -30,8 +30,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-opensuse-usb.sh` |
-| Configure backend | `backend/scripts/configure-opensuse-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-opensuse-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-opensuse-usb.sh` |
 | Branch environment variable | `OPENSUSE_RELEASE` |
 | Distro environment prefix | `OPENSUSE_USB` |
 | Shared profile prefix | `LEDIT_USB` |

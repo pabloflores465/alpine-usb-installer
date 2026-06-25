@@ -430,7 +430,7 @@ The README intentionally avoids a long repository tree. For navigation, use the 
 - frontends live under `ledit_core/frontends/`,
 - distro providers live under `ledit_core/linux_distros/`,
 - image build orchestration lives under `ledit_core/image_builds/`,
-- shell build adapters live under `backend/scripts/`,
+- shell build adapters live under `ledit_core/backend/scripts/`,
 - distro docs live under `docs/distros/`.
 
 ## License

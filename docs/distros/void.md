@@ -29,8 +29,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-void-usb.sh` |
-| Configure backend | `backend/scripts/configure-void-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-void-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-void-usb.sh` |
 | Branch variable | `VOID_REPOSITORY` |
 | Main prefix | `VOID_USB` |
 | Shared prefix | `LEDIT_USB` |

@@ -4,10 +4,10 @@ The openSUSE backend is selectable with `--distro opensuse` in the CLI and appea
 
 Implemented:
 
-- dry-run validation through `backend/scripts/configure-opensuse-usb.sh`
+- dry-run validation through `ledit_core/backend/scripts/configure-opensuse-usb.sh`
 - package mapping for desktops, display managers, WMs, NetworkManager, Wi-Fi, Bluetooth, audio, browser, firmware, bootloader, auto-resize, and extras
 - package search/cache from official openSUSE OSS repository metadata
-- experimental Linux-only `backend/scripts/build-opensuse-usb.sh` foundation using `zypper --root`
+- experimental Linux-only `ledit_core/backend/scripts/build-opensuse-usb.sh` foundation using `zypper --root`
 
 Known gap:
 

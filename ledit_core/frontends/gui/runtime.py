@@ -26,9 +26,9 @@ def prepare_frozen_runtime(bundle_dir: Path) -> Path:
             *BUILD_SCRIPT_RESOURCES,
             "README.md",
             "LICENSE",
-            "efi-fallback",
-            "backend/docker/Dockerfile.builder",
-            "backend/docker/Dockerfile.gentoo-builder",
+            "ledit_core/backend/efi-fallback",
+            "ledit_core/backend/docker/Dockerfile.builder",
+            "ledit_core/backend/docker/Dockerfile.gentoo-builder",
         ),
         secure_dir=secure_runtime_dir,
     )

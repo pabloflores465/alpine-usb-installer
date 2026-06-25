@@ -21,7 +21,7 @@
   - Keep imports sorted by Ruff; no unused imports, unsafe package names, broad generated artifacts, or dead compatibility code.
   - Prefer small pure functions in domain packages and unit-test them. UI files may have limited per-file ignores only for bootstrapping/native UI constraints.
   - Do not add new lint ignores without explaining the reason in `pyproject.toml` or `AGENTS.md`.
-- Tests: add/maintain pytest tests under `tests/` for every pure/domain function and regression-prone adapter behavior.
+- Tests: add/maintain pytest tests under `ledit_core/tests/` for every pure/domain function and regression-prone adapter behavior.
 - Build/check command for compile + lint + tests + smoke-run:
   - `scripts/check-project.sh`
 - Before pushing, run at least:

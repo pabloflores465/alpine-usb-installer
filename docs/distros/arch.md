@@ -29,8 +29,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-arch-usb.sh` |
-| Configure backend | `backend/scripts/configure-arch-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-arch-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-arch-usb.sh` |
 | Branch environment variable | `ARCH_USB_BRANCH` |
 | Distro environment prefix | `ARCH_USB` |
 | Shared profile prefix | `LEDIT_USB` |

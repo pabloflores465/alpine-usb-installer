@@ -30,8 +30,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-slackware-usb.sh` |
-| Configure backend | `backend/scripts/configure-slackware-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-slackware-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-slackware-usb.sh` |
 | Branch environment variable | `SLACKWARE_RELEASE` |
 | Distro environment prefix | `SLACKWARE_USB` |
 | Shared profile prefix | `LEDIT_USB` |

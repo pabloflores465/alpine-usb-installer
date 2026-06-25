@@ -33,8 +33,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-debian-usb.sh` |
-| Configure backend | `backend/scripts/configure-debian-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-debian-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-debian-usb.sh` |
 | Branch environment variable | `DEBIAN_RELEASE` |
 | Distro environment prefix | `DEBIAN_USB` |
 | Shared profile prefix | `LEDIT_USB` |

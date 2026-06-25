@@ -29,8 +29,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-gentoo-usb.sh` |
-| Configure backend | `backend/scripts/configure-gentoo-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-gentoo-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-gentoo-usb.sh` |
 | Branch environment variable | `GENTOO_STAGE3_BRANCH` |
 | Distro environment prefix | `GENTOO_USB` |
 | Shared profile prefix | `LEDIT_USB` |
@@ -39,7 +39,7 @@ LEDIT first normalizes options into environment variables. The Gentoo backend co
 
 ## Host requirements
 
-Docker Desktop on macOS using the Gentoo builder image from `backend/docker/Dockerfile.gentoo-builder`. Native Linux requires chroot-capable tooling, a stage3 tarball path, Portage, initramfs/kernel tooling, GRUB, and partition/filesystem tools.
+Docker Desktop on macOS using the Gentoo builder image from `ledit_core/backend/docker/Dockerfile.gentoo-builder`. Native Linux requires chroot-capable tooling, a stage3 tarball path, Portage, initramfs/kernel tooling, GRUB, and partition/filesystem tools.
 
 ## Quick commands
 

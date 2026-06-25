@@ -31,8 +31,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-alpine-usb.sh` |
-| Configure backend | `backend/scripts/configure-alpine-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-alpine-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-alpine-usb.sh` |
 | APK repository metadata | `ledit_core/apk_packages/index.py` |
 | Generated repositories file | `.work/repositories` |
 | Branch environment variable | `ALPINE_BRANCH` |
@@ -41,7 +41,7 @@ Defaults:
 
 LEDIT first normalizes CLI/GUI/TUI options into environment variables. The backend then consumes those variables to build and configure the image. Passwords are converted to temporary `*_PASSWORD_FILE` and `*_ROOT_PASSWORD_FILE` values before shell scripts run, so plain password values do not need to be passed as command-line arguments.
 
-The official Alpine repository URLs are owned by `ledit_core/apk_packages/index.py`. During a build, `backend/scripts/build-alpine-usb.sh` renders those URLs into `.work/repositories` because `alpine-make-vm-image` requires a physical `--repositories-file`. The root of the repository should not contain a committed `repositories` file.
+The official Alpine repository URLs are owned by `ledit_core/apk_packages/index.py`. During a build, `ledit_core/backend/scripts/build-alpine-usb.sh` renders those URLs into `.work/repositories` because `alpine-make-vm-image` requires a physical `--repositories-file`. The root of the repository should not contain a committed `repositories` file.
 
 ## Host requirements
 

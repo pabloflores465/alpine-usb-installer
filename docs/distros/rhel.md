@@ -29,8 +29,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-rhel-usb.sh` |
-| Configure backend | `backend/scripts/configure-rhel-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-rhel-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-rhel-usb.sh` |
 | Branch environment variable | `RHEL_USB_RELEASE` |
 | Distro environment prefix | `RHEL_USB` |
 | Shared profile prefix | `LEDIT_USB` |

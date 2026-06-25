@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Build a bootable Arch Linux USB disk image with pacstrap. Requires Linux root
+# privileges and arch-install-scripts. macOS users should run this in an Arch
+# builder VM/container with loop device support.
+set -eu
+
+IMAGE_NAME=${IMAGE_NAME:-ledit-arch.img}
+OUTPUT_PATH=${OUTPUT_PATH:-$IMAGE_NAME}
+IMAGE_SIZE=${IMAGE_SIZE:-16G}
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+WORK_DIR=${WORK_DIR:-.work/arch-build}
+ROOT_DIR=$WORK_DIR/root
+MNT_DIR=$WORK_DIR/mnt
+PACKAGES_FILE=$WORK_DIR/packages.txt
+CONFIG_FILE=$WORK_DIR/config.env
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing required tool: $1" >&2; exit 1; }; }
+
+if [ "$(uname -s)" = "Darwin" ] && [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then
+  need docker
+  docker info >/dev/null 2>&1 || { echo "ERROR: Docker is not running. Start Docker Desktop and try again." >&2; exit 1; }
+  mkdir -p "$PROJECT_ROOT/.work"
+  docker_env_file="$PROJECT_ROOT/.work/arch-docker-env-$$"
+  {
+    printf '%s\n' \
+      "ARCH_USB_BUILD_IN_DOCKER=1" \
+      "IMAGE_NAME=$IMAGE_NAME" \
+      "IMAGE_SIZE=$IMAGE_SIZE"
+    if [ -n "$OUTPUT_PATH" ]; then
+      mkdir -p "$(dirname "$OUTPUT_PATH")"
+      output_dir=$(CDPATH= cd -- "$(dirname "$OUTPUT_PATH")" && pwd)
+      output_base=$(basename "$OUTPUT_PATH")
+      printf '%s\n' "OUTPUT_PATH=/out/$output_base"
+    fi
+    for name in LEDIT_USB_USER LEDIT_USB_PASSWORD_FILE LEDIT_USB_ROOT_PASSWORD_FILE LEDIT_USB_HOSTNAME LEDIT_USB_TIMEZONE LEDIT_USB_LOCALE LEDIT_USB_LANGUAGE LEDIT_USB_CONSOLE_KEYMAP LEDIT_USB_XKB_LAYOUT LEDIT_USB_XKB_VARIANT LEDIT_USB_XKB_MODEL LEDIT_USB_DESKTOP LEDIT_USB_TILING_WMS LEDIT_USB_DEFAULT_SESSION LEDIT_USB_DISPLAY_MANAGER LEDIT_USB_NETWORK LEDIT_USB_WIFI LEDIT_USB_BLUETOOTH LEDIT_USB_AUDIO LEDIT_USB_BROWSER LEDIT_USB_FIRMWARE LEDIT_USB_LEGACY_X11_DRIVERS LEDIT_USB_BOOTLOADER LEDIT_USB_KERNEL_FLAVOR LEDIT_USB_BOOT_TIMEOUT LEDIT_USB_SYSTEMD_BOOT_CONSOLE_MODE LEDIT_USB_AUTO_RESIZE LEDIT_USB_EXTRA_PACKAGES LEDIT_USB_PROFILE ARCH_USB_BRANCH; do
+      eval "value=\${$name:-}"
+      case "$name:$value" in
+        *_FILE:$PROJECT_ROOT/*) value="/work/${value#"$PROJECT_ROOT"/}" ;;
+      esac
+      printf '%s=%s\n' "$name" "$value"
+    done
+  } > "$docker_env_file"
+  docker_mounts=(-v "$PROJECT_ROOT:/work")
+  if [ -n "$OUTPUT_PATH" ]; then
+    docker_mounts+=(-v "$output_dir:/out")
+  fi
+  docker_name_args=()
+  if [ -n "${ARCH_USB_DOCKER_NAME:-}" ]; then
+    case "$ARCH_USB_DOCKER_NAME" in *[!A-Za-z0-9_.-]*|"") echo "ERROR: invalid Docker container name: $ARCH_USB_DOCKER_NAME" >&2; exit 1 ;; esac
+    docker_name_args=(--name "$ARCH_USB_DOCKER_NAME")
+  fi
+  exec docker run --rm "${docker_name_args[@]}" --platform linux/amd64 --privileged --security-opt seccomp=unconfined --env-file "$docker_env_file" "${docker_mounts[@]}" -w /work archlinux:latest bash -ceu '
+    grep -qxF DisableSandbox /etc/pacman.conf || printf "\nDisableSandbox\n" >> /etc/pacman.conf
+    cat >/etc/pacman.d/mirrorlist <<EOF_MIRRORS
+Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch
+Server = https://mirrors.kernel.org/archlinux/\$repo/os/\$arch
+Server = https://mirror.rackspace.com/archlinux/\$repo/os/\$arch
+EOF_MIRRORS
+    pacman -Sy --noconfirm --needed python arch-install-scripts dosfstools e2fsprogs util-linux grub efibootmgr sudo systemd multipath-tools >/dev/null
+    chmod +x ledit_core/backend/scripts/build-arch-usb.sh ledit_core/backend/scripts/configure-arch-usb.sh
+    exec ledit_core/backend/scripts/build-arch-usb.sh
+  '
+fi
+
+for tool in python3 pacstrap arch-chroot sfdisk losetup mkfs.fat mkfs.ext4 mount umount; do need "$tool"; done
+[ "$(id -u)" = 0 ] || { echo "ERROR: Arch build requires root for loop mounts and pacstrap" >&2; exit 1; }
+if [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" = "1" ]; then
+  [ -e /dev/loop-control ] || mknod /dev/loop-control c 10 237 || true
+  for i in $(seq 0 15); do [ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i" || true; done
+fi
+
+mkdir -p "$WORK_DIR" "$ROOT_DIR" "$MNT_DIR"
+ARCH_USB_PACKAGES_FILE=$PACKAGES_FILE ARCH_USB_CONFIG_FILE=$CONFIG_FILE ROOT_DIR=$ROOT_DIR "$SCRIPT_DIR/configure-arch-usb.sh"
+
+rm -f "$OUTPUT_PATH"
+truncate -s "$IMAGE_SIZE" "$OUTPUT_PATH"
+loop=$(losetup --find --show --partscan "$OUTPUT_PATH")
+MAPPED_WITH_KPARTX=0
+cleanup() {
+  set +e
+  for mp in "$MNT_DIR/run" "$MNT_DIR/sys" "$MNT_DIR/proc" "$MNT_DIR/dev" "$MNT_DIR/boot" "$MNT_DIR"; do
+    mountpoint -q "$mp" && umount -R "$mp" >/dev/null 2>&1
+  done
+  [ "$MAPPED_WITH_KPARTX" = 1 ] && kpartx -d "$loop" >/dev/null 2>&1 || true
+  losetup -d "$loop" 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+sfdisk "$loop" <<'EOF'
+label: gpt
+,512M,U
+,,L
+EOF
+if [ "${ARCH_USB_BUILD_IN_DOCKER:-0}" != "1" ]; then partprobe "$loop" || true; fi
+sleep 1
+boot_part="${loop}p1"
+root_part="${loop}p2"
+if [ ! -b "$boot_part" ] || [ ! -b "$root_part" ]; then
+  kpartx -avs "$loop" >/dev/null
+  MAPPED_WITH_KPARTX=1
+  boot_part="/dev/mapper/$(basename "$loop")p1"
+  root_part="/dev/mapper/$(basename "$loop")p2"
+fi
+mkfs.fat -F32 "$boot_part"
+mkfs.ext4 -F "$root_part"
+mount "$root_part" "$MNT_DIR"
+mkdir -p "$MNT_DIR/boot"
+mount "$boot_part" "$MNT_DIR/boot"
+
+pacstrap -K "$MNT_DIR" $(tr '\n' ' ' < "$PACKAGES_FILE")
+genfstab -U "$MNT_DIR" >> "$MNT_DIR/etc/fstab"
+cp "$CONFIG_FILE" "$MNT_DIR/root/arch-usb-config.env"
+mkdir -p "$MNT_DIR/dev" "$MNT_DIR/proc" "$MNT_DIR/sys" "$MNT_DIR/run"
+mount --rbind /dev "$MNT_DIR/dev"
+mount -t proc proc "$MNT_DIR/proc"
+mount --rbind /sys "$MNT_DIR/sys" || true
+mount --rbind /run "$MNT_DIR/run" || true
+
+chroot "$MNT_DIR" /bin/bash -eu <<'CHROOT'
+source /root/arch-usb-config.env || true
+ln -sf "/usr/share/zoneinfo/${LEDIT_USB_TIMEZONE:-UTC}" /etc/localtime || true
+hwclock --systohc || true
+echo "${LEDIT_USB_HOSTNAME:-ledit-arch}" > /etc/hostname
+sed -i "s/^#\(${LEDIT_USB_LOCALE:-en_US.UTF-8} UTF-8\)/\1/" /etc/locale.gen || true
+locale-gen || true
+echo "LANG=${LEDIT_USB_LOCALE:-en_US.UTF-8}" > /etc/locale.conf
+echo "KEYMAP=${LEDIT_USB_CONSOLE_KEYMAP:-us}" > /etc/vconsole.conf
+useradd -m -G wheel -s /bin/bash "${LEDIT_USB_USER:-arch}" || true
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel
+chmod 0440 /etc/sudoers.d/10-wheel
+systemctl enable NetworkManager 2>/dev/null || true
+case "${LEDIT_USB_DISPLAY_MANAGER:-auto}" in
+  lightdm|sddm|gdm|lxdm) systemctl enable "${LEDIT_USB_DISPLAY_MANAGER}" 2>/dev/null || true ;;
+esac
+if [ "${LEDIT_USB_BOOTLOADER:-grub}" = grub ]; then
+  grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=ARCHUSB --removable
+  grub-mkconfig -o /boot/grub/grub.cfg
+else
+  bootctl install --esp-path=/boot || true
+fi
+CHROOT
+
+cleanup
+trap - EXIT INT TERM
+printf 'Arch image ready: %s\n' "$OUTPUT_PATH"

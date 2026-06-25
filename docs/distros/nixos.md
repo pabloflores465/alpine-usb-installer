@@ -36,7 +36,7 @@ Defaults:
 | Distro environment prefix | `NIXOS_USB` |
 | Shared profile prefix | `LEDIT_USB` |
 
-NixOS does not use `backend/scripts/build-*.sh`. LEDIT converts the selected profile into Nix configuration, validates/render it during dry-run, and then builds using the NixOS image path.
+NixOS does not use `ledit_core/backend/scripts/build-*.sh`. LEDIT converts the selected profile into Nix configuration, validates/render it during dry-run, and then builds using the NixOS image path.
 
 ## Host requirements
 

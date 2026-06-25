@@ -27,8 +27,8 @@ Defaults:
 
 | Role | Path |
 | --- | --- |
-| Build backend | `backend/scripts/build-ubuntu-usb.sh` |
-| Configure backend | `backend/scripts/configure-ubuntu-usb.sh` |
+| Build backend | `ledit_core/backend/scripts/build-ubuntu-usb.sh` |
+| Configure backend | `ledit_core/backend/scripts/configure-ubuntu-usb.sh` |
 | Branch variable | `UBUNTU_RELEASE` |
 | Main prefix | `UBUNTU_USB` |
 | Shared prefix | `LEDIT_USB` |
